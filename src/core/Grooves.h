@@ -44,6 +44,8 @@ int  find(const QString& style, const QString& name);   // -1 when there's none
 // The groove as clip notes (length bars × 4). humanVel / humanTime 0 .. 1 add a little life
 // (±15 % of the velocity, ±1/64 of a beat at most); the same seed gives the same notes.
 QVector<Note> notes(const Groove& g, double humanVel = 0, double humanTime = 0, unsigned seed = 1);
+QByteArray midi(const Groove& g, double humanVel = 0, double humanTime = 0); // SMF type 0, GM channel 10, tempo + meter
+bool exportMidi(const QString& path, const Groove& g, double humanVel = 0, double humanTime = 0, QString* error = nullptr);
 QString       describe(const Groove& g);   // "2 bars · swing · 128 BPM" for the panel
 
 // Drag and drop: the groove's index as text.

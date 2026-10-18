@@ -1804,6 +1804,7 @@ int main(int argc, char** argv) {
         for (const Device& d : dp.tracks[0].devices) {
             DevicePanel panel(&dp, &dt, 0, d, nullptr, {});
             devui::DeviceBody* body = panel.body();
+            if (auto* editor = body->createEditor(body)) editor->hide(); // expanded controls are created on demand
             QSet<QString> targets;
             for (QWidget* w : body->findChildren<QWidget*>()) targets.insert(w->property("mapTarget").toString());
             for (int i = 0; i < body->count(); ++i)
@@ -6506,8 +6507,8 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < std::min(k0.l.size(), k4.l.size()); ++i) kitDiff = std::max(kitDiff, std::fabs(k0.l[i] - k4.l[i]));
         CHECK(kitDiff > 0.05f, "M19 Drum Studio: the kits sound different");
         // the per-drum knobs: Decay lengthens the tail, Tune raises the pitch (the sweep lands higher), Level is a gain
-        const DevRun shortKick = hit(36, 0), longKick = hit(36, 0, [](std::vector<float>& p) { p[ds::param(ds::Kick, ds::Decay)] = 1.0f; });
-        CHECK(rmsOf(longKick.l, 24000, 40000) > rmsOf(shortKick.l, 24000, 40000) * 3, "M19 Drum Studio: a drum's Decay lengthens its tail");
+        const DevRun shortKick = hit(36, 0, [](std::vector<float>& p) { p[ds::param(ds::Kick, ds::Decay)] = 0.0f; }), longKick = hit(36, 0, [](std::vector<float>& p) { p[ds::param(ds::Kick, ds::Decay)] = 1.0f; });
+        CHECK(rmsOf(longKick.l, 24000, 40000) > rmsOf(shortKick.l, 24000, 40000) * 3, "M19 Drum Studio: Decay damps or sustains the recorded tail");
         const DevRun quiet = hit(38, 0, [](std::vector<float>& p) { p[ds::param(ds::Snare, ds::Level)] = 0.0f; });
         CHECK(quiet.peak < hit(38, 0).peak * 0.2f, "M19 Drum Studio: a drum's Level turns it down");
         // the mics: Room adds a tail, Width spreads the overheads, Overheads add a bright copy
@@ -6549,7 +6550,7 @@ int main(int argc, char** argv) {
             if (!okG && bad < 0) bad = gi;
             shaped &= okG;
         }
-        CHECK((lib.size() >= 60 && grooves::styles().size() == 14 && shaped), qPrintable(QString("M19 grooves: %1 grooves in 14 styles, each a bar or two of drum notes (bad: %2)").arg(lib.size()).arg(bad < 0 ? "none" : lib[size_t(bad)].name)));
+        CHECK((lib.size() >= 60 && grooves::styles().size() >= 19 && shaped), qPrintable(QString("M19 grooves: %1 grooves in at least 19 styles, each a bar or two of drum notes (bad: %2)").arg(lib.size()).arg(bad < 0 ? "none" : lib[size_t(bad)].name)));
         const int swingRide = grooves::find("Jazz", "Swing Ride"), rock = grooves::find("Rock", "Basic Eighths");
         const QVector<Note> swung = grooves::notes(lib[size_t(swingRide)]);
         double offEighth = -1;
@@ -6593,7 +6594,7 @@ int main(int argc, char** argv) {
             int missing = 0;
             for (int i = 0; i < panel.body()->count(); ++i) if (!targets.contains(panel.body()->target(i))) ++missing;
             CHECK((pages.size() == 3 && panel.body()->count() == ds::kParams && missing == 0 && panel.body()->minimumSizeHint().height() <= devui::kBodyHeight + 4 && panel.body()->findChildren<devui::Display*>().size() >= 2),
-                  "M19 Drum Studio panel: Kit, Mics and Grooves pages, a control for all 50 knobs, the kit and mic views, and it fits the device height");
+                  "M19 Drum Studio panel: Kit, Mics and Grooves pages, a control for all 66 parameters, the kit and mic views, and it fits the device height");
             for (QPushButton* b : pages) if (b->text() == "Grooves") b->click();
             QApplication::processEvents();
             QToolButton* toClip = panel.body()->findChild<QToolButton*>("grooveToClip");

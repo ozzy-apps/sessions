@@ -136,7 +136,7 @@ protected:
             for (int k = 0; k < 8; ++k) if (m_param == mo::macro(k)) label = QString("%1 %2").arg(k + 1).arg(osmium::kMacroNames[k]);
         p.drawText(QRect(0, 0, width(), 14), Qt::AlignCenter, label);
         const double base = m_body->pos(m_param), radius = m_d / 2.0 - 5;
-        arc(p, 0, 1, radius - 5, theme::osmiumBorder, 3);
+        arc(p, 0, 1, radius - 5, theme::devGridStrong, 3);
         arc(p, 0, base, radius - 5, theme::textSoft, 3);
         const ModRoute r = activeRoute();
         if (r.source >= 0) {
@@ -146,15 +146,15 @@ protected:
             p.setPen(Qt::NoPen); p.setBrush(theme::osmiumGreen); p.drawEllipse(point(end, radius), 3, 3);
             p.setPen(QPen(theme::withAlpha(theme::osmiumGreen, 90), 1));
             p.drawLine(point(base, radius - 2), point(base, radius + 3));
-        } else { arc(p, 0, 1, radius, theme::withAlpha(theme::osmiumBorder, 90), 1); }
-        p.setPen(QPen(hasFocus() ? theme::osmiumGreen : theme::osmiumBorder, 1));
-        p.setBrush(theme::osmiumInset); p.drawEllipse(center(), std::max(4.0, radius - 6), std::max(4.0, radius - 6));
+        } else { arc(p, 0, 1, radius, theme::withAlpha(theme::devGridStrong, 90), 1); }
+        p.setPen(QPen(hasFocus() ? theme::osmiumGreen : theme::devGridStrong, 1));
+        p.setBrush(theme::devDisplay); p.drawEllipse(center(), std::max(4.0, radius - 6), std::max(4.0, radius - 6));
         p.setPen(QPen(theme::textBright, 2, Qt::SolidLine, Qt::RoundCap));
         p.drawLine(point(base, 2), point(base, std::max(4.0, radius - 8)));
         p.setPen(theme::text); p.setFont(pxFont(this, 10));
         p.drawText(QRectF(0, m_d + 12, width(), 14), Qt::AlignCenter, m_body->text(m_param));
         const QRectF slot(4, height() - 16, width() - 8, 14);
-        p.setBrush(r.source >= 0 ? theme::withAlpha(theme::osmiumGreen, 20) : theme::osmiumInset);
+        p.setBrush(r.source >= 0 ? theme::withAlpha(theme::osmiumGreen, 20) : theme::devDisplay);
         p.setPen(Qt::NoPen); p.drawRoundedRect(slot, 5, 5);
         p.setPen(r.source >= 0 ? theme::osmiumGreen : theme::textFaint); p.setFont(pxFont(this, 9));
         p.drawText(slot, Qt::AlignCenter, r.source < 0 ? "+" : QString("%1 %2%3").arg(mo::sourceName(r.source))
@@ -256,15 +256,15 @@ public:
 protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(Qt::NoPen); p.setBrush(theme::osmiumInset); p.drawRoundedRect(QRectF(rect()), 10, 10);
+        p.setPen(Qt::NoPen); p.setBrush(theme::devDisplay); p.drawRoundedRect(QRectF(rect()), 2, 2);
         p.setFont(pxFont(this, 10)); draw(p, QRectF(rect()).adjusted(14, 12, -14, -16));
     }
     void grid(QPainter& p, const QRectF& r, int columns = 16) {
         for (int i = 0; i <= columns; ++i) {
-            p.setPen(QPen(theme::withAlpha(theme::osmiumBorder, i % 4 == 0 ? 170 : 70), 1));
+            p.setPen(QPen(theme::withAlpha(theme::devGridStrong, i % 4 == 0 ? 170 : 70), 1));
             const double x = r.left() + r.width() * i / columns; p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
         }
-        p.setPen(QPen(theme::withAlpha(theme::osmiumBorder, 110), 1));
+        p.setPen(QPen(theme::withAlpha(theme::devGridStrong, 110), 1));
         for (int i = 0; i <= 4; ++i) { const double y = r.top() + r.height() * i / 4; p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y)); }
     }
     QRectF graph() const { return QRectF(rect()).adjusted(14, 12, -14, -16); }
@@ -287,7 +287,7 @@ protected:
         const auto pos = m_body->pos(mo::oparam(m_osc, mo::Position));
         const auto intensity = m_body->pos(mo::oparam(m_osc, mo::Intensity));
         const int mode = m_body->pick(mo::oparam(m_osc, mo::Mode));
-        p.setPen(QPen(theme::osmiumBorder, 1)); p.drawLine(QPointF(r.left(), r.center().y()), QPointF(r.right(), r.center().y()));
+        p.setPen(QPen(theme::devGridStrong, 1)); p.drawLine(QPointF(r.left(), r.center().y()), QPointF(r.right(), r.center().y()));
         QPainterPath path;
         for (int x = 0; x <= int(r.width()); ++x) {
             const float phase = audio::monolithWarpPhase(mode, float(x / r.width()) * 0.99999f, float(intensity));
@@ -391,10 +391,10 @@ protected:
         for (int k = 0; k < 4; ++k) p.drawText(QRectF(n[k].x(), r.bottom() + 3, n[k + 1].x() - n[k].x(), 12), Qt::AlignCenter, labels[k]);
         for (int s = 0; s < 3; ++s) {
             const auto mid = segmentPoint(s, 0.5);
-            p.setPen(QPen(theme::osmiumEnv, 1)); p.setBrush(theme::osmiumInset);
+            p.setPen(QPen(theme::osmiumEnv, 1)); p.setBrush(theme::devDisplay);
             QPolygonF diamond; diamond << mid + QPointF(0, -4) << mid + QPointF(4, 0) << mid + QPointF(0, 4) << mid + QPointF(-4, 0); p.drawPolygon(diamond);
         }
-        for (int k = 1; k <= 3; ++k) { p.setPen(QPen(theme::osmiumEnv, 2)); p.setBrush(theme::osmiumInset); p.drawEllipse(n[k], 4, 4); }
+        for (int k = 1; k <= 3; ++k) { p.setPen(QPen(theme::osmiumEnv, 2)); p.setBrush(theme::devDisplay); p.drawEllipse(n[k], 4, 4); }
         const double level = m_body->scope(m_env);
         const int stage = int(m_body->scope(4 + m_env));
         if (stage > 0 && level > 0) {
@@ -502,10 +502,10 @@ protected:
         curve(painter, r, path, theme::osmiumCurve);
         for (int i = 0; i + 1 < p.size(); ++i) {
             const auto mid = midpoint(p, i);
-            painter.setPen(QPen(theme::withAlpha(theme::osmiumCurve, i == m_segment ? 255 : 120), 1)); painter.setBrush(theme::osmiumInset);
+            painter.setPen(QPen(theme::withAlpha(theme::osmiumCurve, i == m_segment ? 255 : 120), 1)); painter.setBrush(theme::devDisplay);
             QPolygonF diamond; diamond << mid + QPointF(0, -4) << mid + QPointF(4, 0) << mid + QPointF(0, 4) << mid + QPointF(-4, 0); painter.drawPolygon(diamond);
         }
-        for (int i = 0; i < p.size(); ++i) { painter.setBrush(i == m_selected ? theme::osmiumCurve : theme::osmiumInset); painter.setPen(QPen(theme::osmiumCurve, 2)); painter.drawEllipse(at(p[i]), i == m_selected ? 5 : 4, i == m_selected ? 5 : 4); }
+        for (int i = 0; i < p.size(); ++i) { painter.setBrush(i == m_selected ? theme::osmiumCurve : theme::devDisplay); painter.setPen(QPen(theme::osmiumCurve, 2)); painter.drawEllipse(at(p[i]), i == m_selected ? 5 : 4, i == m_selected ? 5 : 4); }
         const double phase = m_body->scope(14 + m_curve);
         if (phase > 0) { painter.setPen(QPen(theme::withAlpha(theme::textBright, 150), 1)); const double x = r.left() + phase * r.width(); painter.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom())); }
         painter.setPen(theme::textFaint); painter.setFont(pxFont(this, 9));
@@ -622,7 +622,7 @@ protected:
         const double w = r.width() / 16;
         for (int i = 0; i < 16; ++i) {
             const double y = (m_body->pos(mo::step(m_step, i)) * 2 - 1) * r.height() * 0.5;
-            p.fillRect(QRectF(r.left() + i * w + 2, y > 0 ? r.center().y() - y : r.center().y(), w - 4, std::max(1.0, std::abs(y))), i < count ? theme::osmiumGreen : theme::osmiumBorder);
+            p.fillRect(QRectF(r.left() + i * w + 2, y > 0 ? r.center().y() - y : r.center().y(), w - 4, std::max(1.0, std::abs(y))), i < count ? theme::osmiumGreen : theme::devGridStrong);
         }
     }
     void mousePressEvent(QMouseEvent* e) override { if (e->button() == Qt::LeftButton) { m_gesture = true; m_body->ctx().project->beginEdit("Draw Steps"); mouseMoveEvent(e); } }
@@ -644,7 +644,7 @@ protected:
         const int param = m_param(); const auto route = routeFor(m_body, m_source(), param); const double base = m_body->pos(param);
         const double a = std::clamp(base + route.amount, 0.0, 1.0), b = mo::sourceBipolar(m_source()) ? std::clamp(base - route.amount, 0.0, 1.0) : base;
         const double lo = std::min(a, b), hi = std::max(a, b), y = r.top() + 6;
-        p.setPen(QPen(theme::osmiumBorder, 5, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
+        p.setPen(QPen(theme::devGridStrong, 5, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
         p.setPen(QPen(theme::osmiumGreen, 5, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(r.left() + r.width() * lo, y), QPointF(r.left() + r.width() * hi, y));
         p.setPen(QPen(theme::textBright, 2)); p.drawLine(QPointF(r.left() + base * r.width(), y - 6), QPointF(r.left() + base * r.width(), y + 6));
         p.setFont(pxFont(this, 10)); p.setPen(theme::textSoft);
@@ -657,8 +657,8 @@ private: std::function<int()> m_source, m_param;
 class OsmiumEditor : public DeviceBody {
 public:
     OsmiumEditor(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
-        setObjectName("osmiumEditor"); setFixedSize(1180, 806);
-        auto* root = new QVBoxLayout(this); root->setContentsMargins(16, 14, 16, 12); root->setSpacing(10);
+        setObjectName("osmiumEditor"); setMinimumSize(1060, 500); setMaximumHeight(QWIDGETSIZE_MAX);
+        auto* root = new QVBoxLayout(this); root->setContentsMargins(8, 6, 8, 6); root->setSpacing(5);
         auto* header = hbox(12);
         auto* title = new QLabel("OSMIUM", this); title->setObjectName("osmiumTitle"); header->addWidget(title);
         header->addSpacing(22);
@@ -686,7 +686,7 @@ public:
         auto* top = hbox(8);
         for (int o = 0; o < 3; ++o) top->addWidget(oscillator(o), 4);
         for (int f = 0; f < 2; ++f) top->addWidget(filter(f), 3);
-        root->addLayout(top);
+        auto* soundPage = new QWidget(this); soundPage->setLayout(top);
 
         auto* sources = hbox(4);
         const std::vector<int> order{mo::SrcEnv1, mo::SrcEnv2, mo::SrcEnv3, mo::SrcEnv4, mo::SrcLfo1, mo::SrcLfo2, mo::SrcLfo3, mo::SrcLfo4,
@@ -705,8 +705,8 @@ public:
         auto* workspace = hbox(10);
         auto* panel = card(); auto* pane = new QVBoxLayout(panel); pane->setContentsMargins(12, 10, 12, 10); pane->setSpacing(6);
         auto* nav = hbox(6); m_sourceTitle = new QLabel(this); nav->addWidget(m_sourceTitle); nav->addStretch();
-        for (int i = 0; i < 3; ++i) {
-            auto* b = button(QStringList{"Modulators", "Voice & mixer", "Effects"}[i], "Open this editing page.", [this, i] { setPage(i); });
+        for (int i = 0; i < 4; ++i) {
+            auto* b = button(QStringList{"Sound", "Modulators", "Voice && mixer", "Effects"}[i], "Open this editing page.", [this, i] { setPage(i); });
             b->setCheckable(true); nav->addWidget(b); m_pagesButtons.push_back(b);
         }
         pane->addLayout(nav);
@@ -719,6 +719,7 @@ public:
         auto* perfTitle = new QLabel("Performance source", m_performance); perfTitle->setAlignment(Qt::AlignCenter); perf->addWidget(perfTitle);
         auto* assign = button("Assign to selected parameter", "Connect the selected source to the destination shown in the range panel.", [this] { setRoute(this, m_source, m_focus, 0.25); });
         perf->addWidget(assign, 0, Qt::AlignCenter); perf->addStretch(); m_modulators->addWidget(m_performance);
+        m_pages->addWidget(soundPage);
         m_pages->addWidget(m_modulators);
         m_pages->addWidget(voice()); m_pages->addWidget(effects());
         pane->addWidget(m_pages); workspace->addWidget(panel, 1);
@@ -749,13 +750,13 @@ public:
         }
         macros->addStretch(); macros->addWidget(dial(mo::Volume, "Output", 38)); root->addWidget(macroPanel);
         applyStyle(); connect(theme::notifier(), &theme::Notifier::changed, this, [this] { applyStyle(); });
-        selectSource(mo::SrcEnv2); refresh();
+        selectSource(mo::SrcEnv2, false); setPage(0); refresh();
         connect(c.project, &Project::restored, this, [this] { m_ctx.track = ctx().project->indexOfTrack(ctx().trackId); refresh(); });
         auto* timer = new QTimer(this); timer->setInterval(33);
         connect(timer, &QTimer::timeout, this, [this] {
             if (!isVisible()) return;
             m_ctx.track = ctx().project->indexOfTrack(ctx().trackId);
-            if (!device()) { window()->close(); return; }
+            if (!device()) { hide(); return; }
             if (ctx().transport) follow(ctx().transport->beat());
             refresh();
         }); timer->start();
@@ -785,7 +786,7 @@ public:
             auto it = m_sourcePages.find(s);
             m_modulators->setCurrentWidget(it == m_sourcePages.end() ? m_performance : it->second);
             m_sourceTitle->setText(QString("%1%2").arg(mo::sourceName(s), s == mo::SrcEnv1 ? " · AMP" : ""));
-            if (revealPage) setPage(0);
+            if (revealPage) setPage(1);
         }
         refresh();
     }
@@ -967,18 +968,18 @@ private:
     void applyStyle() {
         setStyleSheet(QString(
             "QWidget#osmiumEditor{background:%1;color:%5;}"
-            "QFrame#osmiumCard{background:%2;border:1px solid %4;border-radius:14px;}"
+            "QFrame#osmiumCard{background:%2;border:1px solid %4;border-radius:2px;}"
             "QLabel{background:transparent;color:%5;font-size:10px;border:0;}"
-            "QLabel#osmiumTitle{font-size:24px;font-weight:700;color:%6;letter-spacing:5px;}"
+            "QLabel#osmiumTitle{font-size:13px;font-weight:700;color:%5;}"
             "QLabel#osmiumCaption{font-size:9px;font-weight:600;color:%7;letter-spacing:1px;}"
-            "QPushButton{background:%3;border:1px solid %4;border-radius:8px;color:%5;padding:3px 8px;font-size:10px;}"
+            "QPushButton{background:%3;border:1px solid %4;border-radius:2px;color:%5;padding:3px 8px;font-size:10px;}"
             "QPushButton:hover{border-color:%6;} QPushButton:checked{background:%6;color:%8;border-color:%6;}"
-            "QComboBox{background:%3;color:%5;border:1px solid %4;border-radius:7px;min-height:24px;padding:0 20px 0 7px;font-size:10px;}"
+            "QComboBox{background:%3;color:%5;border:1px solid %4;border-radius:2px;min-height:24px;padding:0 20px 0 7px;font-size:10px;}"
             "QComboBox::drop-down{width:16px;border:0;} QComboBox::down-arrow{image:none;}"
             "QComboBox QAbstractItemView{background:%2;color:%5;selection-background-color:%4;}"
             "QScrollArea{background:transparent;border:0;} QScrollArea>QWidget>QWidget{background:transparent;}"
-        ).arg(theme::osmiumBg.name(), theme::osmiumSurface.name(), theme::osmiumInset.name(), theme::osmiumBorder.name(),
-              theme::text.name(), theme::osmiumGreen.name(), theme::textFaint.name(), (theme::osmiumGreen.lightnessF() > 0.55 ? theme::ink : theme::inkLight).name()));
+        ).arg(theme::panel.name(), theme::devCell.name(), theme::devDisplay.name(), theme::devSeparator.name(),
+              theme::text.name(), theme::accent.name(), theme::textFaint.name(), theme::devButtonOnText.name()));
         if (m_modulators) selectSource(m_source, false);
     }
     int m_source = mo::SrcEnv2, m_focus = mo::fparam(0, mo::FCutoff);
@@ -990,44 +991,17 @@ private:
     DragValue* m_amount = nullptr; QVBoxLayout* m_routes = nullptr; QString m_routesSignature;
 };
 
-// Rack panels are rebuilt on undo, track selection and theme changes. A floating editor
-// follows the device's stable identity and survives those panel rebuilds.
-QHash<QString, QPointer<QDialog>>& windows() { static QHash<QString, QPointer<QDialog>> w; return w; }
 class OsmiumBody : public DeviceBody {
 public:
     OsmiumBody(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
         setFixedWidth(502);
-        // A native tool window leaves the Session grid available while shaping a sound.
-        m_key = QString::number(quintptr(c.project)) + ':' + QString::number(c.deviceId);
-        m_dialog = windows().value(m_key);
-        if (!m_dialog) {
-            m_dialog = new QDialog(this, Qt::Window); m_dialog->setObjectName("osmiumWindow"); m_dialog->setWindowTitle("Osmium");
-            auto* dialogLayout = new QVBoxLayout(m_dialog); dialogLayout->setContentsMargins(0, 0, 0, 0);
-            auto* scroll = new QScrollArea(m_dialog); scroll->setWidgetResizable(false); scroll->setFrameShape(QFrame::NoFrame);
-            scroll->setWidget(new OsmiumEditor(c, scroll)); dialogLayout->addWidget(scroll);
-            m_dialog->resize(1184, 810); m_dialog->setMinimumSize(700, 480);
-            windows().insert(m_key, m_dialog);
-            QDialog* dialog = m_dialog;
-            connect(c.project, &QObject::destroyed, dialog, [dialog] { delete dialog; });
-            connect(dialog, &QObject::destroyed, [key = m_key] { windows().remove(key); });
-            auto* undo = new QShortcut(QKeySequence::Undo, dialog);
-            connect(undo, &QShortcut::activated, c.project, [project = c.project] { if (!project->editing()) project->undoStack()->undo(); });
-            auto* redo = new QShortcut(QKeySequence::Redo, dialog);
-            redo->setKeys({QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y)});
-            connect(redo, &QShortcut::activated, c.project, [project = c.project] { if (!project->editing()) project->undoStack()->redo(); });
-        } else {
-            const bool visible = m_dialog->isVisible(); const auto geometry = m_dialog->geometry();
-            m_dialog->setParent(this, Qt::Window); m_dialog->setGeometry(geometry); if (visible) m_dialog->show();
-        }
         auto* root = rootRow(this, 10); auto* left = vbox(6);
-        auto* title = new QLabel("OSMIUM", this); title->setStyleSheet(QString("color:%1;font-size:19px;font-weight:700;letter-spacing:3px;").arg(theme::osmiumGreen.name())); left->addWidget(title);
+        auto* title = new QLabel("OSMIUM", this); title->setStyleSheet(QString("color:%1;font-size:13px;font-weight:700;").arg(theme::text.name())); left->addWidget(title);
         left->addWidget(new WavePlot(this, 0, 58));
-        auto* open = new QPushButton("Open Editor", this); open->setObjectName("osmiumOpenEditor"); open->setFixedHeight(28);
-        InfoView::attach(open, "Open Osmium", "Open the visual instrument editor: green modulation ranges on the knobs, bendable envelopes, LFOs, curves, steppers, macros and effects.");
-        connect(open, &QPushButton::clicked, this, [this] {
-            if (const auto* screen = QApplication::primaryScreen()) { const auto available = screen->availableGeometry(); m_dialog->resize(std::min(1184, available.width() - 48), std::min(840, available.height() - 64)); }
-            m_dialog->show(); m_dialog->raise(); m_dialog->activateWindow();
-        }); left->addWidget(open); left->addStretch(); root->addLayout(left, 1);
+        auto* open = new QPushButton("Expand", this); open->setObjectName("osmiumOpenEditor"); open->setFixedHeight(28);
+        InfoView::attach(open, "Open Osmium", "Expand the instrument inside the device pane: green modulation ranges on the knobs, bendable envelopes, LFOs, curves, steppers, macros and effects.");
+        connect(open, &QPushButton::clicked, this, [this] { emit editorRequested(); });
+        left->addWidget(open); left->addStretch(); root->addLayout(left, 1);
         auto* controls = hbox(2);
         for (const int p : std::vector<int>{mo::oparam(0, mo::Position), mo::fparam(0, mo::FCutoff), mo::FDrive, mo::Volume}) {
             auto* k = new RangeKnob(this, p, p == mo::FDrive ? "Drive" : p == mo::Volume ? "Output" : p == mo::fparam(0, mo::FCutoff) ? "Cutoff" : "Position", 44,
@@ -1036,12 +1010,7 @@ public:
         root->addLayout(controls);
         refresh();
     }
-    ~OsmiumBody() override {
-        if (!m_dialog || m_dialog->parentWidget() != this) return;
-        const bool visible = m_dialog->isVisible(); const auto geometry = m_dialog->geometry();
-        m_dialog->setParent(nullptr, Qt::Window); m_dialog->setGeometry(geometry); if (visible) m_dialog->show();
-    }
-private: QPointer<QDialog> m_dialog; QString m_key;
+    DeviceBody* createEditor(QWidget* parent) override { return new OsmiumEditor(ctx(), parent); }
 };
 
 } // namespace

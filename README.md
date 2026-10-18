@@ -13,14 +13,14 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ## Osmium
 
-Load **Instruments → Osmium**, then click **Open Editor**. Monolith is still available with its original panel and sound engine behavior.
+Load **Instruments → Osmium**, then click **Expand**. Monolith is still available with its original panel and sound engine behavior.
 
 - Select an envelope, LFO, curve or stepper, then click a knob's **+** slot, or drag the source onto it. Drag the **green outer ring** to set the range; drag the knob's centre to set its base. Shift makes fine adjustments. The range panel shows both ends in the parameter's units and accepts an exact signed percentage.
 - Shape the four envelopes with timing/level nodes and separate attack, decay and release bend diamonds. Loop repeats attack and decay while held.
 - Edit the two phrase curves with nodes, bend diamonds, Curve / Smooth / Hold segments, freehand drawing, snap, editable shapes, invert/reverse and copy/paste. Double-click to add a point; Delete removes a selected interior point. Alt bypasses snap.
 - Four LFOs, two 16-step sequencers, eight macros, dual filters, unison, sub/noise/modulation oscillators, drive and effects share the same modulation system. **Voice & mixer** and **Effects** expose the remaining controls. Editing their modulation rings keeps the selected page open.
 - **40 Drum & Bass presets** (0.29): eight each of pads, leads/plucks, subs, reeses and wobbles, alongside the original starting patches. Type into the patch selector to search, or search **Osmium** under **Browser → Sounds**. Every preset has shaped envelopes, saved modulation/curves and eight performance macros: **Tone, Warp, Drive, Width, Space, Echo, Body, Air**. Names and modifications survive set/preset saving; loading a new sound is one undo step. See the [preset guide](docs/osmium-dnb-presets.md).
-- The floating editor stays open across undo and track/panel changes. Ctrl+Z / Ctrl+Shift+Z work in the editor; **Audition C2** plays through the track.
+- The editor expands inside Sessions’ device pane (0.30), with **Sound**, **Modulators**, **Voice & mixer** and **Effects** pages. Drag the divider for more space; **Device chain ▾** collapses it. Undo and panel rebuilds preserve the editor. Switching tracks hides it; returning restores it. **Audition C2** plays through the track.
 
 ![Osmium curve editor](docs/screenshots/osmium/osmium-curve.png)
 
@@ -28,6 +28,7 @@ Focused checks and reproducible editor captures:
 
 ```sh
 QT_QPA_PLATFORM=offscreen ./build/sessions_osmium docs/screenshots/osmium
+QT_QPA_PLATFORM=offscreen ./build/sessions_drum_studio /tmp/drum-studio # audits kits/grooves; exports MIDI/native clips, audio and captures
 ./build/sessions_osmium_bank /tmp/osmium-dnb   # renders/audits the bank; exports presets, audition WAV, guide and levels
 ```
 
@@ -142,7 +143,9 @@ Drag an instrument, a Sound, a MIDI effect or a preset from the browser onto any
 - **Instruments:** Drum Rack, **Drum Studio** (below), Analog Synth, FM Synth (4 operators, 7 algorithms), Wavetable Synth, Sampler, Organ (drawbars, percussion, vibrato / chorus, rotary), Bass (slides between overlapping notes, accents hard-played ones), Electric (piano with tremolo), **Monolith** (below), and three drum kits.
 - **Audio effects:** EQ, Compressor, Saturator, Auto Filter, Delay, Reverb, Chorus, Phaser / Flanger, Utility, Auto Pan, Redux, Gate, Limiter, Macros, Audio Effect Rack. Everything for the guitar (the Tuner, the Guitar Amp, NAM, the pedals, the **Cabinet** and the rigs) is under **Guitar** only (0.21).
 
-**Drum Studio** (new in 0.19, Browser → Drums): an acoustic kit played like a real one, in the spirit of Superior Drummer. Six kits (Studio Rock, Vintage, Tight Pop, Metal, Jazz, Big Room), every drum synthesized with its own **Level**, **Pan**, **Tune**, **Decay** and **Tone** (click a drum in the kit view to select it and hear it; it lights when hit), **Wires** for the snare and **Beater** for the kick. The **Mics** page mixes the recording: the close mics, the **Overheads** (a bright stereo pair, **Width** spreads them), the **Room** pair with **Room Size**, **Bleed** between the mics, and the **Velocity** curve. The **Grooves** page is a library of drum patterns in fourteen styles (Rock, Pop, Funk, Hip Hop, House, Drum & Bass, Metal, Jazz, Reggae, Latin, Blues, Punk, R&B, Fills): drag one onto a Session slot or an Arrangement lane (a MIDI track takes it; anywhere else makes a new track with a Drum Studio), or double-click it (or press **To Clip**) for a clip in the track's next free slot; **Humanize** gives the hits a little life. It plays the General MIDI drum notes (kick C1, snare D1, side stick C#1, hats F#1 / G#1 / A#1, toms, crashes, ride and its bell), so the drum kits' clips and the grooves play on any of them.
+**Drum Studio** (0.30, Browser → Drums): three recorded acoustic kits by Glen MacArthur / AVL Drumkits, **285 samples**, five velocity layers per articulation, and six kit recipes. Click **Expand** for its integrated **Kit**, **Mixer** and **Grooves** pages. Select a drum, audition center/rim/side-stick/hat/cymbal articulations, and adjust Level, Pan, Tune, Decay and Tone. The mixer adds individual **Mute / Solo**, faders and modeled overhead/room ambience. Natural tails overlap; closed/pedal hats choke open hats. The **92 grooves in 19 categories** cover DnB, techno, rock, metal, reggae, jazz, funk, house, hip hop, breakbeat, disco, Afrobeat, dubstep and more. Filter/search, loop **Preview** at the set tempo, drag to a slot or lane, use **To Clip**, or **Export MIDI…**. Velocity/timing humanization is applied to previews, clips and exports. [Kit, groove and sample credits guide](docs/drum-studio.md).
+
+![Drum Studio](docs/screenshots/drum-studio/drum-studio-grooves.png)
 
 **Monolith** (new in 0.13): the big synth, built for meaty, growling basses in the spirit of Massive. Three wavetable oscillators (eight tables; Sub, Growl, Metallic and Digital are made for bass), each with **Bend**, **Formant** or **Sync** warping under an Intensity knob, a modulation oscillator (phase and ring modulation), noise and feedback go into two filters (LP 12 / LP 24 / HP / BP / Notch / Comb / **Scream**, in parallel or in series, mixed), then an insert drive (Tanh, Soft, Hard, Fold, Bits). Four envelopes, two LFOs (synced or free), two 16-step sequencers and four macros can turn **any knob**: drag a source chip from the **Mod** page onto a knob (or right-click the knob → Modulate by), then set how much in the routes list; a modulated knob shows its value in cyan. Poly, Mono or Legato with glide, up to four unison voices spread in stereo. The panel has six pages (Osc, Filter, Env, LFO, Mod, Voice) chosen on its left. Every knob — the steps of the sequencers included — can also be automated, put in clip envelopes and MIDI-mapped like any other. Ready-made in Browser → Sounds: **Growl Bass**, **Wobble Sub**, **Reese Monolith**, **Neuro Step**, **Formant Talk**, **808 Sub**, **Sync Bass** (Macro 1 is the main move on each).
 

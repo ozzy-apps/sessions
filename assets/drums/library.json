@@ -1,0 +1,422 @@
+{
+  "name": "Sessions Acoustic Collection",
+  "banks": [
+    {
+      "id": "pearl",
+      "name": "Black Pearl",
+      "notes": {
+        "36": [
+          "pearl/36-Pearl-22-Kick-1.wav",
+          "pearl/36-Pearl-22-Kick-2.wav",
+          "pearl/36-Pearl-22-Kick-3.wav",
+          "pearl/36-Pearl-22-Kick-4.wav",
+          "pearl/36-Pearl-22-Kick-5.wav"
+        ],
+        "37": [
+          "pearl/37-Pearl-14-SideStick-1.wav",
+          "pearl/37-Pearl-14-SideStick-2.wav",
+          "pearl/37-Pearl-14-SideStick-3.wav",
+          "pearl/37-Pearl-14-SideStick-4.wav",
+          "pearl/37-Pearl-14-SideStick-5.wav"
+        ],
+        "38": [
+          "pearl/38-Pearl-14-Snare-1.wav",
+          "pearl/38-Pearl-14-Snare-2.wav",
+          "pearl/38-Pearl-14-Snare-3.wav",
+          "pearl/38-Pearl-14-Snare-4.wav",
+          "pearl/38-Pearl-14-Snare-5.wav"
+        ],
+        "39": [
+          "pearl/39-HandClap-1.wav",
+          "pearl/39-HandClap-2.wav",
+          "pearl/39-HandClap-3.wav",
+          "pearl/39-HandClap-4.wav",
+          "pearl/39-HandClap-5.wav"
+        ],
+        "40": [
+          "pearl/40-Pearl-14-SnareEdge-1.wav",
+          "pearl/40-Pearl-14-SnareEdge-2.wav",
+          "pearl/40-Pearl-14-SnareEdge-3.wav",
+          "pearl/40-Pearl-14-SnareEdge-4.wav",
+          "pearl/40-Pearl-14-SnareEdge-5.wav"
+        ],
+        "41": [
+          "pearl/41-Pearl-16-FloorTom-1.wav",
+          "pearl/41-Pearl-16-FloorTom-2.wav",
+          "pearl/41-Pearl-16-FloorTom-3.wav",
+          "pearl/41-Pearl-16-FloorTom-4.wav",
+          "pearl/41-Pearl-16-FloorTom-5.wav"
+        ],
+        "43": [
+          "pearl/43-Pearl-16-FloorTomEdge-1.wav",
+          "pearl/43-Pearl-16-FloorTomEdge-2.wav",
+          "pearl/43-Pearl-16-FloorTomEdge-3.wav",
+          "pearl/43-Pearl-16-FloorTomEdge-4.wav",
+          "pearl/43-Pearl-16-FloorTomEdge-5.wav"
+        ],
+        "42": [
+          "pearl/42-Sabian-13-HatClosed-1.wav",
+          "pearl/42-Sabian-13-HatClosed-2.wav",
+          "pearl/42-Sabian-13-HatClosed-3.wav",
+          "pearl/42-Sabian-13-HatClosed-4.wav",
+          "pearl/42-Sabian-13-HatClosed-5.wav"
+        ],
+        "44": [
+          "pearl/44-Sabian-13-HatPedal-1.wav",
+          "pearl/44-Sabian-13-HatPedal-2.wav",
+          "pearl/44-Sabian-13-HatPedal-3.wav",
+          "pearl/44-Sabian-13-HatPedal-4.wav",
+          "pearl/44-Sabian-13-HatPedal-5.wav"
+        ],
+        "45": [
+          "pearl/45-Pearl-12-Tom-1.wav",
+          "pearl/45-Pearl-12-Tom-2.wav",
+          "pearl/45-Pearl-12-Tom-3.wav",
+          "pearl/45-Pearl-12-Tom-4.wav",
+          "pearl/45-Pearl-12-Tom-5.wav"
+        ],
+        "46": [
+          "pearl/46-Sabian-13-HatSemi-1.wav",
+          "pearl/46-Sabian-13-HatSemi-2.wav",
+          "pearl/46-Sabian-13-HatSemi-3.wav",
+          "pearl/46-Sabian-13-HatSemi-4.wav",
+          "pearl/46-Sabian-13-HatSemi-5.wav"
+        ],
+        "47": [
+          "pearl/47-Pearl-12-TomEdge-1.wav",
+          "pearl/47-Pearl-12-TomEdge-2.wav",
+          "pearl/47-Pearl-12-TomEdge-3.wav",
+          "pearl/47-Pearl-12-TomEdge-4.wav",
+          "pearl/47-Pearl-12-TomEdge-5.wav"
+        ],
+        "49": [
+          "pearl/49-SabianAA-16-Crash-1.wav",
+          "pearl/49-SabianAA-16-Crash-2.wav",
+          "pearl/49-SabianAA-16-Crash-3.wav",
+          "pearl/49-SabianAA-16-Crash-4.wav",
+          "pearl/49-SabianAA-16-Crash-5.wav"
+        ],
+        "51": [
+          "pearl/51-SabianAAX-20-Ride-1.wav",
+          "pearl/51-SabianAAX-20-Ride-2.wav",
+          "pearl/51-SabianAAX-20-Ride-3.wav",
+          "pearl/51-SabianAAX-20-Ride-4.wav",
+          "pearl/51-SabianAAX-20-Ride-5.wav"
+        ],
+        "52": [
+          "pearl/62-Wuhan-18-ChinaCrash-1.wav",
+          "pearl/62-Wuhan-18-ChinaCrash-2.wav",
+          "pearl/62-Wuhan-18-ChinaCrash-3.wav",
+          "pearl/62-Wuhan-18-ChinaCrash-4.wav",
+          "pearl/62-Wuhan-18-ChinaCrash-5.wav"
+        ],
+        "53": [
+          "pearl/53-SabianAAX-20-RideBell-1.wav",
+          "pearl/53-SabianAAX-20-RideBell-2.wav",
+          "pearl/53-SabianAAX-20-RideBell-3.wav",
+          "pearl/53-SabianAAX-20-RideBell-4.wav",
+          "pearl/53-SabianAAX-20-RideBell-5.wav"
+        ],
+        "55": [
+          "pearl/55-Zildjian-10-Splash-1.wav",
+          "pearl/55-Zildjian-10-Splash-2.wav",
+          "pearl/55-Zildjian-10-Splash-3.wav",
+          "pearl/55-Zildjian-10-Splash-4.wav",
+          "pearl/55-Zildjian-10-Splash-5.wav"
+        ],
+        "57": [
+          "pearl/57-SabianAAX-17-Crash-1.wav",
+          "pearl/57-SabianAAX-17-Crash-2.wav",
+          "pearl/57-SabianAAX-17-Crash-3.wav",
+          "pearl/57-SabianAAX-17-Crash-4.wav",
+          "pearl/57-SabianAAX-17-Crash-5.wav"
+        ],
+        "59": [
+          "pearl/59-SabianAAX-20-RideShank-1.wav",
+          "pearl/59-SabianAAX-20-RideShank-2.wav",
+          "pearl/59-SabianAAX-20-RideShank-3.wav",
+          "pearl/59-SabianAAX-20-RideShank-4.wav",
+          "pearl/59-SabianAAX-20-RideShank-5.wav"
+        ]
+      }
+    },
+    {
+      "id": "zeppelin",
+      "name": "Red Zeppelin",
+      "notes": {
+        "36": [
+          "zeppelin/36-Ludwig-26-Kick-1.wav",
+          "zeppelin/36-Ludwig-26-Kick-2.wav",
+          "zeppelin/36-Ludwig-26-Kick-3.wav",
+          "zeppelin/36-Ludwig-26-Kick-4.wav",
+          "zeppelin/36-Ludwig-26-Kick-5.wav"
+        ],
+        "37": [
+          "zeppelin/37-Ludwig-14-SideStick-1.wav",
+          "zeppelin/37-Ludwig-14-SideStick-2.wav",
+          "zeppelin/37-Ludwig-14-SideStick-3.wav",
+          "zeppelin/37-Ludwig-14-SideStick-4.wav",
+          "zeppelin/37-Ludwig-14-SideStick-5.wav"
+        ],
+        "38": [
+          "zeppelin/38-Ludwig-14-Snare-1.wav",
+          "zeppelin/38-Ludwig-14-Snare-2.wav",
+          "zeppelin/38-Ludwig-14-Snare-3.wav",
+          "zeppelin/38-Ludwig-14-Snare-4.wav",
+          "zeppelin/38-Ludwig-14-Snare-5.wav"
+        ],
+        "39": [
+          "zeppelin/39-HandClap-1.wav",
+          "zeppelin/39-HandClap-2.wav",
+          "zeppelin/39-HandClap-3.wav",
+          "zeppelin/39-HandClap-4.wav",
+          "zeppelin/39-HandClap-5.wav"
+        ],
+        "40": [
+          "zeppelin/40-Ludwig-14-SnareEdge-1.wav",
+          "zeppelin/40-Ludwig-14-SnareEdge-2.wav",
+          "zeppelin/40-Ludwig-14-SnareEdge-3.wav",
+          "zeppelin/40-Ludwig-14-SnareEdge-4.wav",
+          "zeppelin/40-Ludwig-14-SnareEdge-5.wav"
+        ],
+        "41": [
+          "zeppelin/41-Ludwig-16-FloorTom-1.wav",
+          "zeppelin/41-Ludwig-16-FloorTom-2.wav",
+          "zeppelin/41-Ludwig-16-FloorTom-3.wav",
+          "zeppelin/41-Ludwig-16-FloorTom-4.wav",
+          "zeppelin/41-Ludwig-16-FloorTom-5.wav"
+        ],
+        "43": [
+          "zeppelin/43-Ludwig-16-FloorTomEdge-1.wav",
+          "zeppelin/43-Ludwig-16-FloorTomEdge-2.wav",
+          "zeppelin/43-Ludwig-16-FloorTomEdge-3.wav",
+          "zeppelin/43-Ludwig-16-FloorTomEdge-4.wav",
+          "zeppelin/43-Ludwig-16-FloorTomEdge-5.wav"
+        ],
+        "42": [
+          "zeppelin/42-Sabian-13-HatClosed-1.wav",
+          "zeppelin/42-Sabian-13-HatClosed-2.wav",
+          "zeppelin/42-Sabian-13-HatClosed-3.wav",
+          "zeppelin/42-Sabian-13-HatClosed-4.wav",
+          "zeppelin/42-Sabian-13-HatClosed-5.wav"
+        ],
+        "44": [
+          "zeppelin/44-Sabian-13-HatPedal-1.wav",
+          "zeppelin/44-Sabian-13-HatPedal-2.wav",
+          "zeppelin/44-Sabian-13-HatPedal-3.wav",
+          "zeppelin/44-Sabian-13-HatPedal-4.wav",
+          "zeppelin/44-Sabian-13-HatPedal-5.wav"
+        ],
+        "45": [
+          "zeppelin/45-Ludwig-14-Tom-1.wav",
+          "zeppelin/45-Ludwig-14-Tom-2.wav",
+          "zeppelin/45-Ludwig-14-Tom-3.wav",
+          "zeppelin/45-Ludwig-14-Tom-4.wav",
+          "zeppelin/45-Ludwig-14-Tom-5.wav"
+        ],
+        "46": [
+          "zeppelin/46-Sabian-13-HatSemi-1.wav",
+          "zeppelin/46-Sabian-13-HatSemi-2.wav",
+          "zeppelin/46-Sabian-13-HatSemi-3.wav",
+          "zeppelin/46-Sabian-13-HatSemi-4.wav",
+          "zeppelin/46-Sabian-13-HatSemi-5.wav"
+        ],
+        "47": [
+          "zeppelin/47-Ludwig-14-TomEdge-1.wav",
+          "zeppelin/47-Ludwig-14-TomEdge-2.wav",
+          "zeppelin/47-Ludwig-14-TomEdge-3.wav",
+          "zeppelin/47-Ludwig-14-TomEdge-4.wav",
+          "zeppelin/47-Ludwig-14-TomEdge-5.wav"
+        ],
+        "49": [
+          "zeppelin/49-Zildjian-20-Crash-1.wav",
+          "zeppelin/49-Zildjian-20-Crash-2.wav",
+          "zeppelin/49-Zildjian-20-Crash-3.wav",
+          "zeppelin/49-Zildjian-20-Crash-4.wav",
+          "zeppelin/49-Zildjian-20-Crash-5.wav"
+        ],
+        "51": [
+          "zeppelin/51-Zildjian-24-Ride-1.wav",
+          "zeppelin/51-Zildjian-24-Ride-2.wav",
+          "zeppelin/51-Zildjian-24-Ride-3.wav",
+          "zeppelin/51-Zildjian-24-Ride-4.wav",
+          "zeppelin/51-Zildjian-24-Ride-5.wav"
+        ],
+        "52": [
+          "zeppelin/62-Wuhan-18-ChinaCrash-1.wav",
+          "zeppelin/62-Wuhan-18-ChinaCrash-2.wav",
+          "zeppelin/62-Wuhan-18-ChinaCrash-3.wav",
+          "zeppelin/62-Wuhan-18-ChinaCrash-4.wav",
+          "zeppelin/62-Wuhan-18-ChinaCrash-5.wav"
+        ],
+        "53": [
+          "zeppelin/53-Zildjian-24-RideBell-1.wav",
+          "zeppelin/53-Zildjian-24-RideBell-2.wav",
+          "zeppelin/53-Zildjian-24-RideBell-3.wav",
+          "zeppelin/53-Zildjian-24-RideBell-4.wav",
+          "zeppelin/53-Zildjian-24-RideBell-5.wav"
+        ],
+        "55": [
+          "zeppelin/55-Zildjian-10-Splash-1.wav",
+          "zeppelin/55-Zildjian-10-Splash-2.wav",
+          "zeppelin/55-Zildjian-10-Splash-3.wav",
+          "zeppelin/55-Zildjian-10-Splash-4.wav",
+          "zeppelin/55-Zildjian-10-Splash-5.wav"
+        ],
+        "57": [
+          "zeppelin/57-Zildjian-17-Crash-1.wav",
+          "zeppelin/57-Zildjian-17-Crash-2.wav",
+          "zeppelin/57-Zildjian-17-Crash-3.wav",
+          "zeppelin/57-Zildjian-17-Crash-4.wav",
+          "zeppelin/57-Zildjian-17-Crash-5.wav"
+        ],
+        "59": [
+          "zeppelin/59-Zildjian-24-RideShank-1.wav",
+          "zeppelin/59-Zildjian-24-RideShank-2.wav",
+          "zeppelin/59-Zildjian-24-RideShank-3.wav",
+          "zeppelin/59-Zildjian-24-RideShank-4.wav",
+          "zeppelin/59-Zildjian-24-RideShank-5.wav"
+        ]
+      }
+    },
+    {
+      "id": "bop",
+      "name": "Blonde Bop",
+      "notes": {
+        "36": [
+          "bop/36-TAMA-18-Kick-1.wav",
+          "bop/36-TAMA-18-Kick-2.wav",
+          "bop/36-TAMA-18-Kick-3.wav",
+          "bop/36-TAMA-18-Kick-4.wav",
+          "bop/36-TAMA-18-Kick-5.wav"
+        ],
+        "37": [
+          "bop/37-TAMA-13-SideStick-1.wav",
+          "bop/37-TAMA-13-SideStick-2.wav",
+          "bop/37-TAMA-13-SideStick-3.wav",
+          "bop/37-TAMA-13-SideStick-4.wav",
+          "bop/37-TAMA-13-SideStick-5.wav"
+        ],
+        "38": [
+          "bop/38-TAMA-13-Snare-1.wav",
+          "bop/38-TAMA-13-Snare-2.wav",
+          "bop/38-TAMA-13-Snare-3.wav",
+          "bop/38-TAMA-13-Snare-4.wav",
+          "bop/38-TAMA-13-Snare-5.wav"
+        ],
+        "39": [
+          "bop/39-HandClap-1.wav",
+          "bop/39-HandClap-2.wav",
+          "bop/39-HandClap-3.wav",
+          "bop/39-HandClap-4.wav",
+          "bop/39-HandClap-5.wav"
+        ],
+        "40": [
+          "bop/40-TAMA-13-SnareEdge-1.wav",
+          "bop/40-TAMA-13-SnareEdge-2.wav",
+          "bop/40-TAMA-13-SnareEdge-3.wav",
+          "bop/40-TAMA-13-SnareEdge-4.wav",
+          "bop/40-TAMA-13-SnareEdge-5.wav"
+        ],
+        "41": [
+          "bop/41-TAMA-14-FloorTom-1.wav",
+          "bop/41-TAMA-14-FloorTom-2.wav",
+          "bop/41-TAMA-14-FloorTom-3.wav",
+          "bop/41-TAMA-14-FloorTom-4.wav",
+          "bop/41-TAMA-14-FloorTom-5.wav"
+        ],
+        "43": [
+          "bop/43-TAMA-14-FloorTomEdge-1.wav",
+          "bop/43-TAMA-14-FloorTomEdge-2.wav",
+          "bop/43-TAMA-14-FloorTomEdge-3.wav",
+          "bop/43-TAMA-14-FloorTomEdge-4.wav",
+          "bop/43-TAMA-14-FloorTomEdge-5.wav"
+        ],
+        "42": [
+          "bop/42-Zildjian-13-HatClosed-1.wav",
+          "bop/42-Zildjian-13-HatClosed-2.wav",
+          "bop/42-Zildjian-13-HatClosed-3.wav",
+          "bop/42-Zildjian-13-HatClosed-4.wav",
+          "bop/42-Zildjian-13-HatClosed-5.wav"
+        ],
+        "44": [
+          "bop/44-Zildjian-13-HatPedal-1.wav",
+          "bop/44-Zildjian-13-HatPedal-2.wav",
+          "bop/44-Zildjian-13-HatPedal-3.wav",
+          "bop/44-Zildjian-13-HatPedal-4.wav",
+          "bop/44-Zildjian-13-HatPedal-5.wav"
+        ],
+        "45": [
+          "bop/45-TAMA-10-Tom-1.wav",
+          "bop/45-TAMA-10-Tom-2.wav",
+          "bop/45-TAMA-10-Tom-3.wav",
+          "bop/45-TAMA-10-Tom-4.wav",
+          "bop/45-TAMA-10-Tom-5.wav"
+        ],
+        "46": [
+          "bop/46-Zildjian-13-HatSemi-1.wav",
+          "bop/46-Zildjian-13-HatSemi-2.wav",
+          "bop/46-Zildjian-13-HatSemi-3.wav",
+          "bop/46-Zildjian-13-HatSemi-4.wav",
+          "bop/46-Zildjian-13-HatSemi-5.wav"
+        ],
+        "47": [
+          "bop/47-TAMA-10-TomEdge-1.wav",
+          "bop/47-TAMA-10-TomEdge-2.wav",
+          "bop/47-TAMA-10-TomEdge-3.wav",
+          "bop/47-TAMA-10-TomEdge-4.wav",
+          "bop/47-TAMA-10-TomEdge-5.wav"
+        ],
+        "49": [
+          "bop/49-Paiste2002-16-Crash-1.wav",
+          "bop/49-Paiste2002-16-Crash-2.wav",
+          "bop/49-Paiste2002-16-Crash-3.wav",
+          "bop/49-Paiste2002-16-Crash-4.wav",
+          "bop/49-Paiste2002-16-Crash-5.wav"
+        ],
+        "51": [
+          "bop/51-SabianAAX-20-RideTip-1.wav",
+          "bop/51-SabianAAX-20-RideTip-2.wav",
+          "bop/51-SabianAAX-20-RideTip-3.wav",
+          "bop/51-SabianAAX-20-RideTip-4.wav",
+          "bop/51-SabianAAX-20-RideTip-5.wav"
+        ],
+        "52": [
+          "bop/60-Wuhan-18-ChinaCrash-1.wav",
+          "bop/60-Wuhan-18-ChinaCrash-2.wav",
+          "bop/60-Wuhan-18-ChinaCrash-3.wav",
+          "bop/60-Wuhan-18-ChinaCrash-4.wav",
+          "bop/60-Wuhan-18-ChinaCrash-5.wav"
+        ],
+        "53": [
+          "bop/53-SabianAAX-20-RideBell-1.wav",
+          "bop/53-SabianAAX-20-RideBell-2.wav",
+          "bop/53-SabianAAX-20-RideBell-3.wav",
+          "bop/53-SabianAAX-20-RideBell-4.wav",
+          "bop/53-SabianAAX-20-RideBell-5.wav"
+        ],
+        "55": [
+          "bop/55-Zildjian-10-Splash-1.wav",
+          "bop/55-Zildjian-10-Splash-2.wav",
+          "bop/55-Zildjian-10-Splash-3.wav",
+          "bop/55-Zildjian-10-Splash-4.wav",
+          "bop/55-Zildjian-10-Splash-5.wav"
+        ],
+        "57": [
+          "bop/57-SabianAAX-17-Crash2-1.wav",
+          "bop/57-SabianAAX-17-Crash2-2.wav",
+          "bop/57-SabianAAX-17-Crash2-3.wav",
+          "bop/57-SabianAAX-17-Crash2-4.wav",
+          "bop/57-SabianAAX-17-Crash2-5.wav"
+        ],
+        "59": [
+          "bop/59-SabianAAX-20-RideShank-1.wav",
+          "bop/59-SabianAAX-20-RideShank-2.wav",
+          "bop/59-SabianAAX-20-RideShank-3.wav",
+          "bop/59-SabianAAX-20-RideShank-4.wav",
+          "bop/59-SabianAAX-20-RideShank-5.wav"
+        ]
+      }
+    }
+  ]
+}

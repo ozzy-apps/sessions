@@ -82,10 +82,12 @@ std::vector<ParamSpec> drumStudioParams() {
     if (names.empty())
         for (int d = 0; d < kDrums; ++d)
             for (const char* knob : {" Level", " Pan", " Tune", " Decay", " Tone"}) names.push_back(std::string(drumName(d)) + knob);
+    static std::vector<std::string> switches;
+    if (switches.empty()) for (const char* kind : {" Mute", " Solo"}) for (int d = 0; d < kDrums; ++d) switches.push_back(std::string(drumName(d)) + kind);
     std::vector<ParamSpec> p = {
         pick("Kit", {kitName(0), kitName(1), kitName(2), kitName(3), kitName(4), kitName(5)}, 0),
-        volume(), lin("Overheads", -60, 6, nl(-6, -60, 6), U::Db), lin("Room", -60, 6, nl(-18, -60, 6), U::Db), pct("Room Size", 0.45),
-        pct("Bleed", 0.25), pct("Width", 0.8), pct("Velocity", 0.6), pct("Wires", 0.6), pct("Beater", 0.5)};
+        volume(), lin("Overheads", -60, 6, nl(-15, -60, 6), U::Db), lin("Room", -60, 6, nl(-22, -60, 6), U::Db), pct("Room Size", 0.45),
+        pct("Bleed", 0.1), pct("Width", 0.8), pct("Velocity", 0.6), pct("Wires", 0.6), pct("Beater", 0.5)};
     for (int d = 0; d < kDrums; ++d) {
         const auto name = [&](int knob) { return names[size_t(d * kPerDrum + knob)].c_str(); };
         p.push_back(lin(name(0), -24, 6, nl(0, -24, 6), U::Db));
@@ -94,6 +96,7 @@ std::vector<ParamSpec> drumStudioParams() {
         p.push_back(expo(name(3), 0.25, 4, 0.5, U::Times));
         p.push_back(pct(name(4), 0.5));
     }
+    for (const auto& name : switches) p.push_back(onOff(name.c_str(), false));
     return p;
 }
 
@@ -425,7 +428,7 @@ std::vector<DeviceSpec> build() {
         {"Acoustic Kit", T::DrumAcoustic, K::Instrument, drumParams(0.4, 0.6, 0.45),
          "A drier, more natural kit: shorter kick, noisier snare and hats."},
         {"Drum Studio", T::DrumStudio, K::Instrument, drumStudioParams(),
-         "An acoustic drum kit, played like a real one: six kits, each drum with its own level, pan, tuning, decay and tone, overhead and room mics, "
+         "Three recorded acoustic kits with five velocity layers, six kit recipes, per-drum level, pan, tuning, decay, tone, mute and solo, modeled overhead/room ambience, "
          "and a library of grooves in every style to drag into your clips. Plays the General MIDI drum notes (kick C1, snare D1, hats F#1 / A#1, toms, cymbals)."},
         {"Analog Synth", T::AnalogSynth, K::Instrument, {
             expo("Cutoff", 40, 16000, 0.4, U::Hz), pct("Reso", 0.3), lin("Filter Env", 0, 6, 0.5, U::Octaves),

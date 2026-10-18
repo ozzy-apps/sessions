@@ -194,6 +194,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_deviceView = new DeviceView(m_project, m_transport, m_detailStack);
     m_detailStack->addWidget(m_clipView);
     m_detailStack->addWidget(m_deviceView);
+    connect(m_deviceView, &DeviceView::editorExpansionChanged, this, [this] { if (!clipViewShown()) fitDetailPane(false); });
     dl->addWidget(m_detailStack, 1);
     bl->addWidget(detail, 1);
     vsplit->addWidget(bottom);
@@ -1513,7 +1514,13 @@ int MainWindow::devicePaneHeight() const {
 void MainWindow::fitDetailPane(bool clip) {
     if (!m_bottom || !m_vsplit) return;
     QSplitterHandle* handle = m_vsplit->handle(1);
-    if (clip) {
+    if (m_deviceView->editorExpanded() && !clip) {
+        m_bottom->setMinimumHeight(300); m_bottom->setMaximumHeight(QWIDGETSIZE_MAX);
+        if (handle) { handle->setEnabled(true); handle->setCursor(Qt::SplitVCursor); }
+        const auto sizes = m_vsplit->sizes(); const int total = sizes.value(0) + sizes.value(1);
+        const int desired = std::clamp(total - 210, 300, 610);
+        m_vsplit->setSizes({std::max(100, total - desired), desired});
+    } else if (clip) {
         m_bottom->setMinimumHeight(160);
         m_bottom->setMaximumHeight(QWIDGETSIZE_MAX);
         if (handle) { handle->setEnabled(true); handle->setCursor(Qt::SplitVCursor); }

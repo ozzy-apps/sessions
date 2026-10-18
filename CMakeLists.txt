@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.29.0 LANGUAGES CXX)
+project(Sessions VERSION 0.30.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -38,6 +38,7 @@ set(SESSIONS_SOURCES
     src/audio/Instruments.cpp
     src/audio/Monolith.cpp
     src/audio/DrumStudio.cpp
+    src/audio/DrumSamples.cpp
     src/audio/Effects.cpp
     src/audio/Wavetables.cpp
     src/audio/Guitar.cpp
@@ -86,6 +87,7 @@ set(SESSIONS_SOURCES
 
 add_library(sessions_core STATIC ${SESSIONS_SOURCES})
 target_include_directories(sessions_core PUBLIC src)
+target_compile_definitions(sessions_core PRIVATE SESSIONS_DRUM_SOURCE_DIR="${CMAKE_SOURCE_DIR}/assets/drums")
 target_link_libraries(sessions_core PUBLIC Qt6::Widgets Qt6::Svg Threads::Threads ${CMAKE_DL_LIBS})   # dl: libsndfile at run time
 if(PULSE_FOUND)
     target_compile_definitions(sessions_core PRIVATE SESSIONS_HAVE_PULSE)
@@ -115,12 +117,17 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     target_link_libraries(sessions_osmium PRIVATE sessions_core Qt6::Test)
     add_test(NAME osmium COMMAND sessions_osmium)
     set_tests_properties(osmium PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(sessions_drum_studio tests/drum_studio.cpp)
+    target_link_libraries(sessions_drum_studio PRIVATE sessions_core Qt6::Test)
+    add_test(NAME drum_studio COMMAND sessions_drum_studio)
+    set_tests_properties(drum_studio PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(sessions_osmium_bank tests/osmium_bank.cpp)
     target_link_libraries(sessions_osmium_bank PRIVATE sessions_core)
     add_test(NAME osmium_bank COMMAND sessions_osmium_bank)
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin)
+install(DIRECTORY assets/drums/ DESTINATION share/sessions/drums)
 install(FILES assets/sessions.desktop DESTINATION share/applications)
 # .sessions files: the MIME type (the desktop entry opens it with %f), with the app icon as its icon.
 install(FILES assets/sessions-mime.xml DESTINATION share/mime/packages RENAME sessions.xml)
@@ -140,6 +147,7 @@ option(SESSIONS_BUILD_DEB "Package a .deb into dist/ on every build" ON)
 set(SESSIONS_DEB_MAINTAINER "Sessions <sessions@localhost>" CACHE STRING "Maintainer field of the .deb")
 find_program(DPKG_DEB dpkg-deb)
 if(SESSIONS_BUILD_DEB AND DPKG_DEB)
+    file(GLOB_RECURSE drum_assets CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/drums/*")
     set(deb_stamp "${CMAKE_BINARY_DIR}/deb.stamp")
     add_custom_command(
         OUTPUT "${deb_stamp}"
@@ -150,7 +158,7 @@ if(SESSIONS_BUILD_DEB AND DPKG_DEB)
             -DMAINTAINER=${SESSIONS_DEB_MAINTAINER}
             -DSTAMP=${deb_stamp}
             -P ${CMAKE_SOURCE_DIR}/cmake/MakeDeb.cmake
-        DEPENDS sessions
+        DEPENDS sessions ${drum_assets}
                 ${CMAKE_SOURCE_DIR}/cmake/MakeDeb.cmake
                 ${CMAKE_SOURCE_DIR}/assets/sessions.desktop
                 ${CMAKE_SOURCE_DIR}/assets/sessions-mime.xml

@@ -138,6 +138,7 @@ public:
     void     watch(QWidget* w);   // repainted on every refresh (displays)
     void     animate(class Display* d);   // ticked while shown (meters, LFOs)
 
+    virtual DeviceBody* createEditor(QWidget*) { return nullptr; }
     virtual void refresh();
     virtual void tick();          // ~30 Hz while shown: meters and animation
     virtual bool modulated(int /*i*/) const { return false; }   // the device's own modulation turns this knob (Monolith): its value shows in cyan
@@ -152,6 +153,9 @@ public:
     void    clearMacro(int k);
     void    setMacroRange(int row, int which, double x);    // which: 0 Min, 1 Max
     QHBoxLayout* macroMapRow(QWidget* parent, const MacroMap& m, int row, int labelWidth);
+
+signals:
+    void editorRequested();
 
 protected:
     DeviceContext m_ctx;

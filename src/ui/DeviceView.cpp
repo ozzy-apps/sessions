@@ -195,6 +195,7 @@ DevicePanel::DevicePanel(Project* project, Transport* transport, int track, cons
         ctx.project = project; ctx.transport = transport; ctx.track = track; ctx.trackId = trackId; ctx.deviceId = id; ctx.type = m_type;
         m_body = devui::createBody(ctx, this);
         m_body->setEnabled(true);
+        connect(m_body, &devui::DeviceBody::editorRequested, this, [this] { if (auto* v = view()) v->expandDevice(m_id); });
         lay->addWidget(m_body);
         setFixedSize(m_body->width() + 2, devui::kBodyHeight + 22);
         m_body->installEventFilter(this);   // a body that changes width (the Monolith's drawers) takes the panel with it
@@ -386,6 +387,14 @@ DeviceView::DeviceView(Project* project, Transport* transport, QWidget* parent)
     setFocusPolicy(Qt::ClickFocus);
     auto* lay = new QVBoxLayout(this);
     lay->setContentsMargins(0, 0, 0, 0);
+    m_editorHost = new QWidget(this); m_editorHost->setObjectName("expandedDeviceHost");
+    auto* editorLayout = new QVBoxLayout(m_editorHost); editorLayout->setContentsMargins(4, 2, 4, 4); editorLayout->setSpacing(2);
+    auto* editorBar = new QHBoxLayout; m_editorTitle = new QLabel(m_editorHost); editorBar->addWidget(m_editorTitle, 1);
+    auto* collapse = new QToolButton(m_editorHost); collapse->setObjectName("collapseDeviceEditor"); collapse->setText("Device chain ▾");
+    collapse->setToolTip("Collapse the editor and return to the device chain"); editorBar->addWidget(collapse);
+    connect(collapse, &QToolButton::clicked, this, &DeviceView::collapseEditor); editorLayout->addLayout(editorBar);
+    m_editorScroll = new QScrollArea(m_editorHost); m_editorScroll->setWidgetResizable(true); m_editorScroll->setFrameShape(QFrame::NoFrame);
+    editorLayout->addWidget(m_editorScroll, 1); m_editorHost->hide(); lay->addWidget(m_editorHost, 1);
     m_scroll = new QScrollArea(this);
     m_scroll->setWidgetResizable(true);
     m_scroll->setFrameShape(QFrame::NoFrame);
@@ -428,6 +437,32 @@ DeviceView::DeviceView(Project* project, Transport* transport, QWidget* parent)
     rebuild();
 }
 
+void DeviceView::expandDevice(int id) {
+    if (!m_editor || m_editorId != id || m_editorTrackId != m_trackId) {
+        devui::DeviceBody* body = nullptr;
+        for (auto* panel : panels()) if (panel->deviceId() == id) body = panel->body();
+        if (!body) return;
+        auto* editor = body->createEditor(m_editorScroll); if (!editor) return;
+        if (auto* old = m_editorScroll->takeWidget()) old->deleteLater();
+        m_editor = editor; m_editorId = id; m_editorTrackId = m_trackId;
+        m_editorScroll->setWidget(editor);
+    }
+    m_editorExpanded = true; syncEditor();
+}
+void DeviceView::collapseEditor() { m_editorExpanded = false; syncEditor(); }
+void DeviceView::syncEditor() {
+    const int track = m_project->indexOfTrack(m_editorTrackId);
+    const Device* device = track >= 0 ? devui::findDevice(m_project, track, m_editorId) : nullptr;
+    if (m_editor && !device) {
+        auto* old = m_editorScroll->takeWidget(); m_editor = nullptr; m_editorId = 0; m_editorExpanded = false;
+        if (old) old->deleteLater();
+    }
+    const bool shown = m_editor && device && m_editorExpanded && m_trackId == m_editorTrackId;
+    m_editorHost->setVisible(shown); m_scroll->setVisible(!shown);
+    if (shown) { m_editorTitle->setText(device->name); m_editor->refresh(); }
+    if (m_editorShown != shown) { m_editorShown = shown; emit editorExpansionChanged(); }
+}
+
 QList<QPair<int, QWidget*>> DeviceView::blockWidgets() const {
     QList<QPair<int, QWidget*>> out;
     for (int i = 0; i < m_chain->count(); ++i) {
@@ -456,6 +491,7 @@ void DeviceView::followAutomation() {
 void DeviceView::tickPanels() {
     if (!isVisible()) return;
     for (DevicePanel* p : panels()) if (p->body()) p->body()->tick();
+    if (m_editorShown && m_editor) { m_editor->follow(m_transport->beat()); m_editor->tick(); }
 }
 
 void DeviceView::rebuild() {
@@ -470,7 +506,7 @@ void DeviceView::rebuild() {
     m_host->setMinimumSize(0, 0);
     const Track* t = m_project->trackAt(m_project->selectedTrack);
     if (!t || t->id != m_trackId) { m_selected.clear(); m_trackId = t ? t->id : 0; }   // a selection belongs to its track
-    if (!t) return;
+    if (!t) { syncEditor(); return; }
     auto onSample = [this](const QString& path, int id) { emit sampleDropped(path, id); };
     for (int i = 0; i < t->devices.size(); i = deviceBlockEnd(t->devices, i)) {   // a rack and its chains are one block
         const Device& d = t->devices[i];
@@ -494,6 +530,7 @@ void DeviceView::rebuild() {
     m_chain->activate();
     m_host->setMinimumSize(m_chain->minimumSize());
     showSelection();
+    syncEditor();
 }
 
 // ---- selection ------------------------------------------------------------

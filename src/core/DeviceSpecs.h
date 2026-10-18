@@ -206,7 +206,7 @@ enum Param { Ir, Mix, Gain, LowCut, HighCut, kParams };
 bool holdsIr(DeviceType type);
 
 // Drum Studio (0.19): an acoustic drum kit played like a real one, in the spirit of Superior Drummer:
-// six kits (synthesized: kick, snare, hi-hat, three toms, ride, crash), each drum with its own
+// three recorded AVL kits / six recipes (kick, snare, hi-hat, three toms, ride, crash), each drum with its own
 // Level / Pan / Tune / Decay / Tone, mic channels (the close mics are the drums themselves,
 // Overheads a bright stereo pair, Room a reverb pair with Room Size, Bleed what the close mics
 // pick up of the others), and a groove library (core/Grooves.h) in its panel. GM drum notes:
@@ -219,7 +219,10 @@ enum Drum     { Kick, Snare, HiHat, Tom1, Tom2, Tom3, Ride, Crash, kDrums };
 enum DrumKnob { Level, Pan, Tune, Decay, Tone, kPerDrum };
 constexpr int kKits = 6;
 constexpr int param(int drum, int knob) { return kGlobals + drum * kPerDrum + knob; }
-constexpr int kParams = kGlobals + kDrums * kPerDrum;   // 50
+constexpr int kBaseParams = kGlobals + kDrums * kPerDrum; // original 50 indices preserved
+constexpr int mute(int drum) { return kBaseParams + drum; }
+constexpr int solo(int drum) { return kBaseParams + kDrums + drum; }
+constexpr int kParams = kBaseParams + kDrums * 2; // 66
 const char* drumName(int drum);     // "Kick", "Snare", "Hi-Hat", "Tom 1", "Tom 2", "Floor Tom", "Ride", "Crash"
 const char* kitName(int kit);       // "Studio Rock", "Vintage", "Tight Pop", "Metal", "Jazz", "Big Room"
 int  drumFor(int pitch);            // which Drum a note plays (-1: none)

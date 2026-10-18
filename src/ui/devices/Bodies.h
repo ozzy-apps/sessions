@@ -13,6 +13,7 @@ DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createMidiBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createRackBody(const DeviceContext& ctx, QWidget* parent);   // Instrument / Audio Effect Rack
 DeviceBody* createGuitarBody(const DeviceContext& ctx, QWidget* parent);  // Tuner, Guitar Amp, pedals
+DeviceBody* createDrumStudioEditor(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createDrumStudioBody(const DeviceContext& ctx, QWidget* parent);   // DrumStudioBody.cpp
 DeviceBody* createOsmiumBody(const DeviceContext& ctx, QWidget* parent);
 

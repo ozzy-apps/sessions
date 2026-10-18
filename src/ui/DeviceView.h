@@ -26,6 +26,7 @@
 class QHBoxLayout;
 class QScrollArea;
 class QLabel;
+class QVBoxLayout;
 
 namespace sessions {
 
@@ -91,6 +92,10 @@ class DeviceView : public QWidget {
 public:
     DeviceView(Project* project, Transport* transport, QWidget* parent = nullptr);
     void rebuild();
+    void expandDevice(int id);
+    void collapseEditor();
+    bool editorExpanded() const { return m_editorShown; }
+    devui::DeviceBody* expandedEditor() const { return m_editor; }
     QList<DevicePanel*> panels() const;   // every device panel shown, racks' chains included
     QList<QPair<int, QWidget*>> blockWidgets() const;   // the chain's blocks in order: (device id, its panel; a rack's whole frame)
 
@@ -116,6 +121,7 @@ public:
     Project::DevicePlace placeAt(const QPoint& pos, QRect* line = nullptr) const;
 
 signals:
+    void editorExpansionChanged();
     void sampleDropped(const QString& path, int deviceId);   // deviceId -1: the track's Sampler, or a new one
 
 protected:
@@ -126,6 +132,7 @@ protected:
     void mousePressEvent(QMouseEvent*) override;   // on the empty space: nothing selected
 
 private:
+    void syncEditor();
     void followAutomation();
     void tickPanels();
     void showSelection();
@@ -134,6 +141,12 @@ private:
 
     Project*     m_project;
     Transport*   m_transport;
+    QWidget* m_editorHost = nullptr;
+    QScrollArea* m_editorScroll = nullptr;
+    QLabel* m_editorTitle = nullptr;
+    devui::DeviceBody* m_editor = nullptr;
+    int m_editorId = 0, m_editorTrackId = 0;
+    bool m_editorExpanded = false, m_editorShown = false;
     QScrollArea* m_scroll;
     QWidget*     m_host;
     QHBoxLayout* m_chain;

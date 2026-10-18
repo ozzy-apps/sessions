@@ -1,5 +1,17 @@
 # Sessions 0.23 — things to try by hand
 
+## 0.30 · Recorded Drum Studio and embedded instruments
+
+1. Browser → Drums → Drum Studio → **Expand**. The editor opens inside the bottom device pane; drag its divider. **Device chain ▾** returns to the compact rack. Check both instruments at a smaller window size and in Dark / Light / custom themes.
+2. Try all six kit recipes. Studio Rock / Tight Pop use Black Pearl recordings; Vintage / Metal / Big Room use Red Zeppelin; Jazz uses Blonde Bop. Play ghost notes and accents: both the timbre and volume change. Try fast snare and double-kick patterns; tails overlap without repeated notes cutting each other off.
+3. Click each drum. Audition snare Center / Rimshot / Side stick / Clap, hats Closed / Pedal / Open, ride Bow / Bell / Shank, crashes / splash / china. Close a ringing open hat. Adjust Tune, Decay and Tone; Tune keeps its meaning while Decay changes damping/sustain.
+4. Mixer: drag each fader, Pan, Mute / Solo; undo and redo. Check that channels also leave the ambience buses when muted. Try overheads, room, size, bleed and width. These are modeled ambience controls.
+5. Grooves: select DnB, Techno, Rock, Metal, Reggae and other categories. Search a name; clear the search. Preview loops at the set tempo without starting transport or making a clip. Leaving Grooves, collapsing or changing tracks stops preview.
+6. Adjust Velocity / Timing humanization. Drag a groove onto a Session slot or Arrangement lane; **To Clip** and double-click insert an editable clip in the next empty slot. Undo removes it. Verify the loop length and ghost notes in the piano roll.
+7. **Export MIDI…** produces a .mid with GM channel 10, tempo, 4/4 and exact loop end. Open it in another MIDI editor. The downloadable bank also includes .sessionsclip versions for Sessions’ User Library.
+8. Osmium → Expand: Sound / Modulators / Voice & mixer / Effects and all macros/range controls remain accessible. Voice & mixer stays selected while editing Detune or its range. Undo, preset loads and theme changes preserve the embedded editor; deleting the device closes only the editor.
+9. Install the fresh .deb and audition the kits away from the source checkout. No external sound library, network access or sampler plugin is required. Listen on monitors/headphones at your normal audio buffer and adjust kit levels to taste.
+
 ## Osmium DnB bank and editor pages (0.29)
 
 1. Open Osmium's patch selector, type part of a name (for example `seismic`) → the matching sound is offered. There are 40 new sounds: eight each of Pad, Lead, Sub, Reese and Wobble; the original starting patches remain.
@@ -18,7 +30,7 @@ The automated tests can't plug in a keyboard, sing into a microphone or tell whe
 
 ## Osmium (0.27)
 
-1. Load Instruments → Osmium onto a MIDI track and click Open Editor → a floating synth opens; the rack remains compact. Play a keyboard or press Audition C2 → sound comes through the track.
+1. Load Instruments → Osmium onto a MIDI track and click Expand → a floating synth opens; the rack remains compact. Play a keyboard or press Audition C2 → sound comes through the track.
 2. Env 2 initially controls Filter 1 Cutoff. Drag Cutoff's green ring → the range changes and its base stays put. Drag the centre → the base changes. Shift → fine movement. Inspect the reachable Hz values on the right.
 3. Select LFO 1 and click Cutoff's + / source slot → both sources control the same parameter. Drag its range below zero → modulation reverses. Double-click the range amount and type -42.5 → the amount reads -42.5%.
 4. Drag Curve 1 onto Position → Curve 1 becomes selected and its ring appears. Use Remove, undo and redo → the assignment and its signed amount return.
@@ -26,7 +38,7 @@ The automated tests can't plug in a keyboard, sing into a microphone or tell whe
 6. Curve 1: add nodes with double-click, move them, drag the segment diamonds, choose Smooth / Hold, change snap and hold Alt. Try Draw with a fast diagonal sweep → no skipped grid positions. Each drag undoes in one step.
 7. Try the curve shapes, Invert, Reverse, Copy and Paste into Curve 2. Save the instrument as a preset and save/reopen the set → nodes, bends, segment modes, timing and routes persist.
 8. Try the four LFOs, both steppers, eight macros and performance sources under More sources. Change Voice & mixer and Effects; move a knob from a mapped MIDI controller → the display follows.
-9. Change track, undo a knob gesture, and change theme while the editor is open → it stays open. Re-select Osmium → Open Editor reuses the same window. Delete the instrument → its editor closes.
+9. Change track, undo a knob gesture, and change theme while the editor is open → its state is retained. Re-select Osmium → Expand reuses its embedded editor. Delete the instrument → its editor closes.
 10. At a smaller window size, scroll to the controls. Check Dark and Light themes; verify Monolith still uses its original drawers and existing sets sound the same.
 
 ## 1. MIDI keyboard and controller (0.5)

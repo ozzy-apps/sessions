@@ -2,6 +2,8 @@
 #include "ArrangementOps.h"
 #include "DeviceSpecs.h"
 #include <QMimeData>
+#include <QSaveFile>
+#include <QtEndian>
 #include <algorithm>
 #include <cmath>
 
@@ -143,6 +145,63 @@ const std::vector<Groove>& library() {
          "K|x.......x.x.....x.....x.x.......\nS|....X.......X.o.....X.......X...\nH|x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.\nR|...........................b....", 82},
         {"R&B", "Two Step", 1, 0.56, false,
          "K|x..x.....x.x....\nS|....X.......X...\nH|x.x.x.x.xox.x.xo", 94},
+        // ------------------------------------------------------------ Techno / breaks
+        {"Techno", "Warehouse", 2, .5, false,
+         "K|X...x...x...x...X...x...x...x...\nP|....x.......x.......x.......x...\nH|..O...O...O...O...O...O...O...O.", 134},
+        {"Techno", "Rolling Sixteenths", 1, .5, false,
+         "K|X...x...x...x...\nS|....x.......x...\nH|xoxoxoxoxoxoxoxO", 138},
+        {"Techno", "Dub Techno", 2, .55, false,
+         "K|X...x...x...x...X...x...x...x...\nS|....r.......r.......r.......r...\nH|..x...x...x...O...x...x...x...x.", 122},
+        {"Techno", "Broken", 2, .5, false,
+         "K|x.....x...x..x..x.....x.x..x....\nS|....X.......X.......X.......X...\nH|x.xox.xox.xox.xox.xox.xox.xox.xO", 140},
+        {"Techno", "Industrial", 1, .5, false,
+         "K|X...X...X...X...\nS|....X.......X...\nH|..O...O...O...O.\n3|...o...o...o...o", 145},
+        {"Techno", "Hardgroove", 2, .53, false,
+         "K|X...x...x...x...X...x...x...x...\nS|....x.......x.......x.......x...\nH|xoxOxoOoxoxOxoOoxoxOxoOoxoxOxoOo\n2|...o......o........o......o.....", 142},
+        {"Drum & Bass", "Rolling Ghosts", 2, .5, false,
+         "K|X.........x.....X.........x..x..\nS|....X..o.o..X.o.....X..o.o..X..o\nH|xoxoxoxoxoxoxoxOxoxoxoxoxoxoxoxO", 174},
+        {"Drum & Bass", "Neuro Half Time", 2, .5, false,
+         "K|X.....x........xX.....x...x.....\nS|........X...............X....o..\nH|x.o.x.o.x.o.x.oOx.o.x.o.x.o.x.o.", 172},
+        {"Drum & Bass", "Jungle Chops", 2, .5, false,
+         "K|X......x..x.....X.........x.x...\nS|....X.o...o.X..o....X..o..o.X.oo\nH|x.xox.x.x.xox.x.x.xox.x.x.xox.O.\nC|x...............................", 168},
+        {"Drum & Bass", "Dancefloor", 2, .5, false,
+         "K|X.........x.....X.......x.x.....\nS|....X.......X.......X.......X...\nH|xoxoxoxoxoxoxoxOxoxoxoxoxoxoxoxO\nR|..b.......b.......b.......b.....", 174},
+        {"Breakbeat", "Syncopated Break", 2, .53, false,
+         "K|X.....x...x.....X..x....x.x.....\nS|....X..o....X.o.....X.......X..o\nH|x.xox.xOx.xox.xOx.xox.xOx.xox.O.", 132},
+        {"Breakbeat", "Big Beat", 1, .5, false,
+         "K|X.....x.x.....x.\nS|....X.......X...\nH|x.x.x.O.x.x.x.O.\nC|x...............", 128},
+        {"Breakbeat", "Electro", 1, .5, false,
+         "K|X......x..x.....\nS|....X.......X...\nH|xox.xox.xox.xoxO", 130},
+        {"Breakbeat", "Garage Two Step", 2, .62, false,
+         "K|X.....x.........X..x......x.....\nS|....X.......X.......X.......X...\nH|x.o.x.O.x.o.x.O.x.o.x.O.x.o.x.O.", 132},
+        {"Metal", "Double Kick Variation", 2, .5, false,
+         "K|XoxoxoxoxoxoxoxoXoxoxoxoXoxxxxxx\nS|....X.......X.......X.......X...\nR|x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.x.\nC|x...............x...............", 170},
+        {"Metal", "China Breakdown", 1, .5, false,
+         "K|X..xx...X.xx..x.\nS|........X.......\nC|c...c...c...c...", 120},
+        {"Metal", "Skank Beat", 1, .5, false,
+         "K|x...x...x...x...\nS|..X...X...X...X.\nR|x.x.x.x.x.x.x.x.", 200},
+        {"Reggae", "Dub One Drop", 2, .58, false,
+         "K|........x...............x.......\nS|........r...............r.....o.\nH|x.xox.x.x.xox.O.x.xox.x.x.xox.O.", 72},
+        {"Reggae", "Rockers Variation", 2, .54, false,
+         "K|X.......x.....x.X.......x.......\nS|........r...............r.......\nH|x.xox.xOx.xox.xOx.xox.xOx.xox.xO", 82},
+        {"Disco", "Four on the Floor", 1, .5, false,
+         "K|X...x...x...x...\nS|....X.......X...\nH|x.O.x.O.x.O.x.O.", 118},
+        {"Disco", "Funky Sixteenths", 2, .53, false,
+         "K|X...x...x...x...X...x...x...x...\nS|....X..o....X.......X..o....X..o\nH|xoxOxoxOxoxOxoxOxoxOxoxOxoxOxoxO", 116},
+        {"Afrobeat", "Interlocking", 2, .5, false,
+         "K|X.....x...x..x..X.....x...x..x..\nS|....r......or.......r......or...\nH|x.xox.x.x.xox.x.x.xox.x.x.xox.x.", 108},
+        {"Afrobeat", "Ride Bell", 2, .5, false,
+         "K|X..x..x...x.....X..x..x...x.....\nS|....r.......r.......r.......r...\nR|b..b..b.b..b..b.b..b..b.b..b..b.", 112},
+        {"Dubstep", "Half Time", 1, .5, false,
+         "K|X.........x.....\nS|........X.......\nH|x.x.x.x.x.x.x.O.", 140},
+        {"Dubstep", "Shuffled", 2, .6, false,
+         "K|X.....x......x..X.........x.....\nS|........X...............X....o..\nH|xox.x.O.xox.x.O.xox.x.O.xox.x.O.", 140},
+        {"Rock", "Verse to Fill", 2, .5, false,
+         "K|X.......x.x.....X.......x.......\nS|....X.......X.......X...xx......\nH|x.x.x.x.x.x.x.x.x.x.x.x.........\n1|..........................xx....\n2|............................xx..\n3|..............................xx", 122},
+        {"Fills", "DnB Turnaround", 1, .5, false,
+         "K|X.........x.....\nS|....X..o....XoXX\nH|x.x.x.x.x.x.....", 174},
+        {"Fills", "Metal Descent", 1, .5, false,
+         "K|x.x.x.x.x.x.x.xx\nS|XXXX............\n1|....XXXX........\n2|........XXXX....\n3|............XXXX", 170},
         // ---------------------------------------------------------------- Fills
         {"Fills", "Snare Roll", 1, 0.5, false,
          "K|x.......x.......\nS|....x...xxxxXXXX\nH|x.x.x.x.........\nC|................", 120},
@@ -235,6 +294,36 @@ QVector<Note> notes(const Groove& g, double humanVel, double humanTime, unsigned
     }
     std::sort(out.begin(), out.end(), [](const Note& a, const Note& b) { return a.start < b.start || (a.start == b.start && a.pitch < b.pitch); });
     return out;
+}
+
+QByteArray midi(const Groove& g, double humanVel, double humanTime) {
+    QByteArray track;
+    auto vlq = [](quint32 value) { QByteArray b(1, char(value & 127)); while ((value >>= 7)) b.prepend(char((value & 127) | 128)); return b; };
+    const auto title = QString("%1 - %2").arg(g.style, g.name).toUtf8();
+    track += char(0); track += QByteArray::fromHex("ff03"); track += vlq(title.size()); track += title;
+    const quint32 tempo = quint32(std::llround(60000000. / g.tempo));
+    track += QByteArray::fromHex("00ff5103"); track += char(tempo >> 16); track += char(tempo >> 8); track += char(tempo);
+    track += QByteArray::fromHex("00ff580404021808");
+    struct Event { int tick, note, velocity; bool on; }; std::vector<Event> events;
+    constexpr int ppqn = 960;
+    for (const auto& n : notes(g, humanVel, humanTime)) {
+        const int tick = int(std::llround(n.start * ppqn));
+        events.push_back({tick, n.pitch, std::clamp(int(std::lround(n.velocity * 127)), 1, 127), true});
+        events.push_back({std::min(g.bars * 4 * ppqn, tick + 96), n.pitch, 0, false});
+    }
+    std::stable_sort(events.begin(), events.end(), [](const Event& a, const Event& b) { return a.tick < b.tick || (a.tick == b.tick && a.on < b.on); });
+    int last = 0;
+    for (const auto& e : events) { track += vlq(e.tick - last); track += char(e.on ? 0x99 : 0x89); track += char(e.note); track += char(e.velocity); last = e.tick; }
+    track += vlq(std::max(0, g.bars * 4 * ppqn - last)); track += QByteArray::fromHex("ff2f00");
+    QByteArray out = QByteArray::fromHex("4d546864000000060000000103c0"); out += "MTrk";
+    const quint32 size = qToBigEndian(quint32(track.size())); out.append(reinterpret_cast<const char*>(&size), 4); out += track;
+    return out;
+}
+bool exportMidi(const QString& path, const Groove& g, double humanVel, double humanTime, QString* error) {
+    QSaveFile file(path); if (!file.open(QIODevice::WriteOnly)) { if (error) *error = file.errorString(); return false; }
+    const auto bytes = midi(g, humanVel, humanTime);
+    if (file.write(bytes) != bytes.size() || !file.commit()) { if (error) *error = file.errorString(); return false; }
+    return true;
 }
 
 QString describe(const Groove& g) {

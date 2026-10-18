@@ -13,7 +13,7 @@
 #include <QApplication>
 #include <QComboBox>
 #include <QCompleter>
-#include <QDialog>
+#include <QAction>
 #include <QDir>
 #include <QJsonArray>
 #include <QMouseEvent>
@@ -63,11 +63,14 @@ int main(int argc, char** argv) {
     const auto legacy = setfile::deviceFromJson(QJsonObject{{"name", "Monolith"}, {"curves", QJsonArray{QJsonArray{QJsonArray{0, 0}, QJsonArray{1, 1}}}}});
     CHECK(legacy.curves[0][0].bend == 0 && legacy.curves[0][0].shape == 0, "Legacy two-coordinate Monolith curves stay linear");
     audio::Engine engine(&p); Transport transport(&p, &engine);
-    DevicePanel panel(&p, &transport, 0, current(), nullptr, {}); panel.show(); QApplication::processEvents();
+    DeviceView deviceView(&p, &transport); auto& panel = deviceView;
+    deviceView.resize(1240, 600); deviceView.show(); QApplication::processEvents();
+    auto* undoAction = p.undoStack()->createUndoAction(&deviceView); undoAction->setShortcut(QKeySequence::Undo); deviceView.addAction(undoAction);
+    auto* redoAction = p.undoStack()->createRedoAction(&deviceView); redoAction->setShortcut(QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z)); deviceView.addAction(redoAction);
     auto* open = panel.findChild<QPushButton*>("osmiumOpenEditor"); CHECK(open, "Osmium is accessible from its rack panel");
     open->click(); QApplication::processEvents();
-    auto* editor = panel.findChild<devui::DeviceBody*>("osmiumEditor"); auto* dialog = panel.findChild<QDialog*>("osmiumWindow");
-    CHECK(editor && dialog && dialog->isVisible() && editor->width() == 1180, "The floating editor opens with a full-size modulation workspace");
+    auto* editor = panel.findChild<devui::DeviceBody*>("osmiumEditor"); auto* dialog = &deviceView;
+    CHECK(editor && dialog->isVisible() && deviceView.editorExpanded() && !editor->isWindow() && editor->width() >= 1060, "The integrated editor expands inside DeviceView with a full modulation workspace");
     auto* knob = editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::fparam(0, mo::FCutoff)));
     const double base = current().params[mo::fparam(0, mo::FCutoff)].value, amount = current().mods[0].amount;
     int undo = p.undoStack()->index();
@@ -130,14 +133,14 @@ int main(int argc, char** argv) {
     p.undoStack()->undo(); CHECK(current().curves[0] == beforeDraw, "Undo restores the curve before freehand drawing"); draw->click();
     // A knob's range source is focus, not a request to navigate to its editor.
     auto pageButton = [&](const QString& label) -> QPushButton* { for (auto* b : editor->findChildren<QPushButton*>()) if (b->text() == label) return b; return nullptr; };
-    pageButton("Voice & mixer")->click();
+    pageButton("Voice && mixer")->click();
     auto* detune = editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::Detune));
     QTest::mouseClick(detune, Qt::LeftButton, Qt::NoModifier, QPoint(detune->width() / 2, detune->height() - 8));
     drag(detune, QPoint(detune->width() / 2, 31), QPoint(detune->width() / 2, 21));
-    CHECK(pageButton("Voice & mixer")->isChecked() && detune->isVisible(), "Editing Detune's base keeps Voice & mixer open");
-    envSource->click(); pageButton("Voice & mixer")->click();
+    CHECK(pageButton("Voice && mixer")->isChecked() && detune->isVisible(), "Editing Detune's base keeps Voice & mixer open");
+    envSource->click(); pageButton("Voice && mixer")->click();
     drag(detune, QPoint(detune->width() / 2, 15), QPoint(detune->width() / 2 + 15, 0));
-    CHECK(pageButton("Voice & mixer")->isChecked() && curveSource->isChecked(), "Dragging an existing Curve range selects its source without leaving Voice & mixer");
+    CHECK(pageButton("Voice && mixer")->isChecked() && curveSource->isChecked(), "Dragging an existing Curve range selects its source without leaving Voice & mixer");
     pageButton("Effects")->click();
     auto* effect = editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::fx(mo::ChorusDepth)));
     drag(effect, QPoint(effect->width() / 2, 15), QPoint(effect->width() / 2 + 15, 0));
@@ -161,18 +164,17 @@ int main(int argc, char** argv) {
     CHECK(energy(highCurve, 3000, 10000) > energy(lowCurve, 3000, 10000) * 2, "An envelope's level curve shapes its modulation source as well as its display");
     CHECK(std::all_of(fast.begin(), fast.end(), [](float f) { return std::isfinite(f) && std::abs(f) < 4; }), "Osmium renders finite, bounded audio");
     // Exercise the real DeviceView rebuild path, rather than just a standalone panel.
-    DeviceView deviceView(&p, &transport); deviceView.show(); QApplication::processEvents();
-    QPointer<QDialog> sameWindow = dialog; QPointer<devui::DeviceBody> sameEditor = editor;
+    QPointer<QWidget> sameWindow = dialog; QPointer<devui::DeviceBody> sameEditor = editor;
     editor->edit(mo::FDrive, 0.41); p.undoStack()->undo(); QApplication::processEvents();
     QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    CHECK(sameWindow && sameEditor && sameWindow->isVisible(), "The floating editor survives undo and deferred deletion of its rack panel");
+    CHECK(sameWindow && sameEditor && sameWindow->isVisible(), "The integrated editor survives undo and deferred deletion of its rack panel");
     const auto size = dialog->size(); deviceView.rebuild(); QApplication::processEvents(); QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
-    CHECK(sameWindow && sameEditor && dialog->size() == size, "Rebuilding a device panel reuses the editor and preserves its window size");
+    CHECK(sameWindow && sameEditor && dialog->size() == size, "Rebuilding a device panel reuses the editor and preserves its pane size");
     const double beforeShortcut = current().params[mo::FDrive].value; editor->edit(mo::FDrive, 0.42);
     dialog->activateWindow(); QTest::qWait(20); QTest::keyClick(dialog, Qt::Key_Z, Qt::ControlModifier); QApplication::processEvents();
-    CHECK(std::abs(current().params[mo::FDrive].value - beforeShortcut) < 1e-6, "Ctrl+Z in the floating editor undoes the instrument edit");
+    CHECK(std::abs(current().params[mo::FDrive].value - beforeShortcut) < 1e-6, "Ctrl+Z in the integrated editor undoes the instrument edit");
     QTest::keyClick(dialog, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
-    CHECK(std::abs(current().params[mo::FDrive].value - 0.42) < 1e-6, "Ctrl+Shift+Z in the floating editor restores the instrument edit");
+    CHECK(std::abs(current().params[mo::FDrive].value - 0.42) < 1e-6, "Ctrl+Shift+Z in the integrated editor restores the instrument edit");
     auto* patches = editor->findChild<QComboBox*>("osmiumPatch");
     CHECK(patches->isEditable() && patches->count() == 46, "The searchable selector contains all 40 DnB presets and the original five entries");
     patches->completer()->setCompletionPrefix("seismic");
@@ -200,7 +202,7 @@ int main(int argc, char** argv) {
         QApplication::processEvents(); editor->grab().save(dir + "/osmium-curve.png");
         lfo->click(); QApplication::processEvents(); editor->grab().save(dir + "/osmium-lfo.png");
         editor->findChild<QPushButton*>(QString("osmiumSource_%1").arg(mo::SrcStep1))->click(); QApplication::processEvents(); editor->grab().save(dir + "/osmium-step.png");
-        for (auto* b : editor->findChildren<QPushButton*>()) if (b->text() == "Voice & mixer") b->click();
+        for (auto* b : editor->findChildren<QPushButton*>()) if (b->text() == "Voice && mixer") b->click();
         QApplication::processEvents(); editor->grab().save(dir + "/osmium-voice.png");
         for (auto* b : editor->findChildren<QPushButton*>()) if (b->text() == "Effects") b->click();
         QApplication::processEvents(); editor->grab().save(dir + "/osmium-effects.png"); lfo->click();
@@ -217,6 +219,6 @@ int main(int argc, char** argv) {
     }
     { EditScope edit(&p, "Delete Osmium"); p.tracks[0].devices.clear(); }
     emit p.structureChanged(); QTest::qWait(70);
-    CHECK(sameWindow && !sameWindow->isVisible(), "Deleting the instrument closes its floating editor");
+    CHECK(!deviceView.editorExpanded() && (!sameEditor || !sameEditor->isVisible()), "Deleting the instrument closes its integrated editor without closing Sessions");
     dialog->close(); std::printf("%d checks, %d failures\n", checks, failures); return failures ? 1 : 0;
 }
