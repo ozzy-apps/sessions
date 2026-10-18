@@ -265,7 +265,10 @@ private:
 
     float source(int s, const Voice& v) const {
         switch (s) {
-        case SrcEnv1: case SrcEnv2: case SrcEnv3: case SrcEnv4: return v.env[s - SrcEnv1].level;
+        case SrcEnv1: case SrcEnv2: case SrcEnv3: case SrcEnv4: {
+            const int e = s - SrcEnv1;
+            return m_osmium ? curved(v.env[e].level, v.curve[e]) : v.env[e].level;
+        }
         case SrcLfo1: case SrcLfo2: case SrcLfo3: case SrcLfo4: return v.lfoVal[lfoOfSource(s)];
         case SrcStep1: case SrcStep2: return v.stepOut[s - SrcStep1];
         case SrcMacro1: case SrcMacro2: case SrcMacro3: case SrcMacro4: case SrcMacro5: case SrcMacro6: case SrcMacro7: case SrcMacro8: return m_p[macro(macroOfSource(s))];

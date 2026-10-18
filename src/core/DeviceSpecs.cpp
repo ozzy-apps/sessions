@@ -408,7 +408,7 @@ std::vector<DeviceSpec> build() {
                              "Env2 Attack Bend", "Env2 Decay Bend", "Env2 Release Bend",
                              "Env3 Attack Bend", "Env3 Decay Bend", "Env3 Release Bend",
                              "Env4 Attack Bend", "Env4 Decay Bend", "Env4 Release Bend"})
-        osmiumParams.push_back(lin(name, -1, 1, 0.5));
+        osmiumParams.push_back(lin(name, -1, 1, 0.5, U::None));
     std::vector<DeviceSpec> s = {
         // ---------------------------------------------------------------- instruments
         {"Instrument Rack", T::InstrumentRack, K::Instrument, rackParams(),

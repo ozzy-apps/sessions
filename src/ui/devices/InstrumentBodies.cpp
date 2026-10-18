@@ -2172,6 +2172,7 @@ DeviceBody* createInstrumentBody(const DeviceContext& ctx, QWidget* parent) {
     case T::DrumRack:       return new DrumRackBody(ctx, parent);
     case T::DrumStudio:     return createDrumStudioBody(ctx, parent);
     case T::Monolith:       return new MonolithBody(ctx, parent);
+    case T::Osmium:         return createOsmiumBody(ctx, parent);
     case T::DrumKit: case T::Drum808: case T::DrumAcoustic: return new DrumBody(ctx, parent);
     case T::AnalogSynth:    return new AnalogBody(ctx, parent);
     case T::FMSynth:        return new FmBody(ctx, parent);

@@ -351,6 +351,7 @@ Device Project::makeDevice(const QString& name, DeviceKind kind) {
         if (s->type == DeviceType::DrumRack) d.pads = audio::defaultDrumPads();   // a ready kit: the 808's sounds
         if (s->type == DeviceType::Monolith) for (const ModRoute& r : presetMods(name)) d.mods.push_back(r);   // a Sound's routes
         if (s->type == DeviceType::Osmium) {
+            d.mods = {{monolith::SrcEnv2, monolith::fparam(0, monolith::FCutoff), 0.28}};
             d.curves = {{{0, 0}, {0.25, 1, -0.35, 1}, {0.5, 0.15}, {0.75, 0.7, 0.3, 1}, {1, 0}},
                         {{0, 1, 0.35}, {0.5, 0, -0.35}, {1, 1}}};
         }

@@ -127,7 +127,8 @@ bool isAccentColour(const QString& n) { return n == "accent" || n == "devCurve" 
 bool isTintable(const QString& n) {
     // the greys: everything that isn't a signal colour; the accent family follows the accent instead
     static const QStringList fixed = {"play", "record", "mute", "solo", "peakClip", "envelope", "envelopeOff", "warpMarker", "clipPlaying", "groupPlaying",
-                                      "slotArmed", "missingText", "takeFill", "punchLine", "devMissing", "devCyan", "devCyanFill", "devCyanDark", "timeSelection"};
+                                      "slotArmed", "missingText", "takeFill", "punchLine", "devMissing", "devCyan", "devCyanFill", "devCyanDark", "timeSelection",
+                                      "osmiumGreen", "osmiumEnv", "osmiumLfo", "osmiumCurve"};
     return !fixed.contains(n) && !isAccentColour(n);
 }
 

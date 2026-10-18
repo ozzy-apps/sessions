@@ -14,6 +14,7 @@ DeviceBody* createMidiBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createRackBody(const DeviceContext& ctx, QWidget* parent);   // Instrument / Audio Effect Rack
 DeviceBody* createGuitarBody(const DeviceContext& ctx, QWidget* parent);  // Tuner, Guitar Amp, pedals
 DeviceBody* createDrumStudioBody(const DeviceContext& ctx, QWidget* parent);   // DrumStudioBody.cpp
+DeviceBody* createOsmiumBody(const DeviceContext& ctx, QWidget* parent);
 
 // A thin vertical line between a device's sections.
 inline QFrame* vline(QWidget* parent) {

@@ -11,6 +11,24 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ![Session View](docs/screenshots/01-session-clip.png)
 
+## Osmium
+
+Load **Instruments → Osmium**, then click **Open Editor**. Monolith is still available with its original panel and sound engine behavior.
+
+- Select an envelope, LFO, curve or stepper, then click a knob's **+** slot, or drag the source onto it. Drag the **green outer ring** to set the range; drag the knob's centre to set its base. Shift makes fine adjustments. The range panel shows both ends in the parameter's units and accepts an exact signed percentage.
+- Shape the four envelopes with timing/level nodes and separate attack, decay and release bend diamonds. Loop repeats attack and decay while held.
+- Edit the two phrase curves with nodes, bend diamonds, Curve / Smooth / Hold segments, freehand drawing, snap, editable shapes, invert/reverse and copy/paste. Double-click to add a point; Delete removes a selected interior point. Alt bypasses snap.
+- Four LFOs, two 16-step sequencers, eight macros, dual filters, unison, sub/noise/modulation oscillators, drive and effects share the same modulation system. **Voice & mixer** and **Effects** expose the remaining controls. Five patches provide starting sounds.
+- The floating editor stays open across undo and track/panel changes. Ctrl+Z / Ctrl+Shift+Z work in the editor; **Audition C2** plays through the track.
+
+![Osmium curve editor](docs/screenshots/osmium/osmium-curve.png)
+
+Focused checks and reproducible editor captures:
+
+```sh
+QT_QPA_PLATFORM=offscreen ./build/sessions_osmium docs/screenshots/osmium
+```
+
 ## Build (Linux)
 
 ```sh

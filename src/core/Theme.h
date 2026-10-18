@@ -173,6 +173,14 @@ enum class Kind { Dark, Mid, Light };
     X(rackPanel,     "#1f1f1f",   "#767676",   "#b4b4b0") \
     X(rackEdge,      "#5a5a5a",   "#5a5a5a",   "#8c8c89") \
     /* ---- device panels (devui::col in ui/devices/DeviceBody.h refers to these) */ \
+    X(osmiumBg,      "#111715",   "#c0c9c3",   "#eef4ef") \
+    X(osmiumSurface, "#1b2420",   "#d1d9d3",   "#ffffff") \
+    X(osmiumInset,   "#141c18",   "#bbc8be",   "#e5eee7") \
+    X(osmiumBorder,  "#344139",   "#86988b",   "#c5d3c9") \
+    X(osmiumGreen,   "#a6ed8c",   "#306b20",   "#326c23") \
+    X(osmiumEnv,     "#f1c17b",   "#805006",   "#895200") \
+    X(osmiumLfo,     "#88d6d0",   "#216c67",   "#176f69") \
+    X(osmiumCurve,   "#c5b3f4",   "#665192",   "#6f509e") \
     X(devDisplay,    "#171717",   "#b4b4b4",   "#ebebe8") \
     X(devDisplayEdge,"#0c0c0c",   "#5c5c5c",   "#8f8f8c") \
     X(devGrid,       "#272727",   "#a4a4a4",   "#dcdcd9") \

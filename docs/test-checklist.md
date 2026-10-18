@@ -7,6 +7,19 @@ The automated tests can't plug in a keyboard, sing into a microphone or tell whe
 1. Install the newest `.deb` from `dist/` (`sudo apt install <full path>`) and start Sessions from the app menu → the demo set opens; Help → About says 0.18.
 2. Press Space → the demo plays; Space again stops it.
 
+## Osmium (0.27)
+
+1. Load Instruments → Osmium onto a MIDI track and click Open Editor → a floating synth opens; the rack remains compact. Play a keyboard or press Audition C2 → sound comes through the track.
+2. Env 2 initially controls Filter 1 Cutoff. Drag Cutoff's green ring → the range changes and its base stays put. Drag the centre → the base changes. Shift → fine movement. Inspect the reachable Hz values on the right.
+3. Select LFO 1 and click Cutoff's + / source slot → both sources control the same parameter. Drag its range below zero → modulation reverses. Double-click the range amount and type -42.5 → the amount reads -42.5%.
+4. Drag Curve 1 onto Position → Curve 1 becomes selected and its ring appears. Use Remove, undo and redo → the assignment and its signed amount return.
+5. Drag an envelope's peak, decay and release nodes → the times and sustain controls follow. Drag each diamond → only that segment's bend changes. Hold a note while editing and listen for the contour; toggle Loop.
+6. Curve 1: add nodes with double-click, move them, drag the segment diamonds, choose Smooth / Hold, change snap and hold Alt. Try Draw with a fast diagonal sweep → no skipped grid positions. Each drag undoes in one step.
+7. Try the curve shapes, Invert, Reverse, Copy and Paste into Curve 2. Save the instrument as a preset and save/reopen the set → nodes, bends, segment modes, timing and routes persist.
+8. Try the four LFOs, both steppers, eight macros and performance sources under More sources. Change Voice & mixer and Effects; move a knob from a mapped MIDI controller → the display follows.
+9. Change track, undo a knob gesture, and change theme while the editor is open → it stays open. Re-select Osmium → Open Editor reuses the same window. Delete the instrument → its editor closes.
+10. At a smaller window size, scroll to the controls. Check Dark and Light themes; verify Monolith still uses its original drawers and existing sets sound the same.
+
 ## 1. MIDI keyboard and controller (0.5)
 
 1. Plug in a MIDI keyboard, select the Keys track and play → you hear it; the small ● next to KEY / MIDI in the control bar flickers.

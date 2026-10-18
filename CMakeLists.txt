@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.26.0 LANGUAGES CXX)
+project(Sessions VERSION 0.27.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -73,6 +73,7 @@ set(SESSIONS_SOURCES
     src/ui/devices/DeviceBody.cpp
     src/ui/devices/EffectBodies.cpp
     src/ui/devices/InstrumentBodies.cpp
+    src/ui/devices/OsmiumBody.cpp
     src/ui/devices/DrumStudioBody.cpp
     src/ui/devices/MidiBodies.cpp
     src/ui/devices/RackBodies.cpp
@@ -109,6 +110,10 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     enable_testing()
     add_test(NAME smoke COMMAND sessions_smoke)
     set_tests_properties(smoke PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(sessions_osmium tests/osmium.cpp)
+    target_link_libraries(sessions_osmium PRIVATE sessions_core Qt6::Test)
+    add_test(NAME osmium COMMAND sessions_osmium)
+    set_tests_properties(osmium PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin)
