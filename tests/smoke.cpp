@@ -79,6 +79,9 @@
 #include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QLabel>
+#include <QMessageBox>
+#include <QAbstractButton>
+#include <QScreen>
 #include <QDialog>
 #include <array>
 #include <QLineEdit>
@@ -8220,6 +8223,44 @@ int main(int argc, char** argv) {
         p->undoStack()->undo();
         PreferencesDialog prefs(w.engine(), w.midiInput(), {}, &w);
         CHECK((prefs.findChild<QComboBox*>("uiZoom") && !prefs.findChild<QPushButton*>("restartNow")), "M26 zoom: Preferences' Zoom applies at once (no Restart Now button)");
+    }
+
+    // ================================================================ Milestone 28: endless drags, typing into fields, dialog buttons that fit
+    {
+        // typing into a DragValue: an opaque editor showing the value as it reads (a percentage), units ignored
+        QWidget host;
+        host.setStyleSheet("QLineEdit { background: transparent; }");   // what device bodies do
+        auto* amount = new DragValue(&host);
+        amount->setRange(-1, 1); amount->setEditScale(100); amount->setValue(0.35, false);
+        amount->setFormatter([](double v) { return QString("%1 %").arg(int(std::lround(v * 100))); });
+        host.show(); QApplication::processEvents();
+        QTest::mouseDClick(amount, Qt::LeftButton, Qt::NoModifier, QPoint(10, 9));
+        auto* editor = amount->findChild<QLineEdit*>("dragValueEditor");
+        const QImage shown = amount->grab().toImage();   // the editor's corner: the field colour, not the panel's transparent line edit over the old text
+        CHECK((editor && editor->isVisible() && editor->text() == "35" && amount->editing() && shown.pixelColor(3, 3) == theme::field.rgb()), "M28 fields: double-click types the value as it reads (35 for 35 %) in an opaque editor");
+        if (editor) { editor->setText("40 %"); QTest::keyClick(editor, Qt::Key_Return); QApplication::processEvents(); }
+        CHECK((std::abs(amount->value() - 0.4) < 1e-9 && !amount->editing()), "M28 fields: typing 40 % reads back as 0.4, the unit ignored, the editor gone");
+        // a drag measured in global coordinates still works (the endless drag re-anchors on them)
+        amount->setValue(0, false);
+        QTest::mousePress(amount, Qt::LeftButton, Qt::NoModifier, QPoint(10, 9));
+        QTest::mouseMove(amount, QPoint(10, -31));
+        QTest::mouseRelease(amount, Qt::LeftButton, Qt::NoModifier, QPoint(10, -31));
+        CHECK((amount->value() > 0.3), "M28 fields: dragging up 40 px raises the amount (global coordinates)");
+        // the endless drag: nothing happens away from an edge; at the top edge the pointer lands near the bottom (where the platform can warp it)
+        const QRect screen = host.screen()->geometry();
+        QPoint landed;
+        CHECK((!dragwrap::vertical(amount, screen.center(), &landed)), "M28 fields: an endless drag does nothing mid-screen");
+        const bool warped = dragwrap::vertical(amount, QPoint(screen.center().x(), screen.top()), &landed);
+        CHECK((!warped || landed.y() > screen.center().y()), qPrintable(QString("M28 fields: at the top edge the pointer jumps to the bottom (%1)").arg(warped ? "warped" : "this platform can't warp; the drag stops there")));
+        // dialog buttons fit their text, however long
+        MainWindow w;
+        QMessageBox box(QMessageBox::Question, "Sessions", "Save changes?", QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, &w);
+        box.setButtonText(QMessageBox::Discard, "Close without Saving");
+        box.show(); QApplication::processEvents();
+        bool fit = true; int widest = 0;
+        for (QAbstractButton* b : box.buttons()) { fit &= b->width() >= b->sizeHint().width() && b->sizeHint().width() >= b->fontMetrics().horizontalAdvance(b->text()) + 20; widest = std::max(widest, b->width()); }
+        CHECK((fit && widest > 110), "M28 dialogs: every button is as wide as its text plus padding (Close without Saving used to be cropped)");
+        box.hide();
     }
 
     std::printf("%d failure(s)\n", failures);

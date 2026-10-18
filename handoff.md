@@ -2,7 +2,7 @@
 
 ## Milestone 27 · Osmium instrument · 2026-10-18
 
-**Last updated:** 2026-10-18 · **Milestone 27 complete: Osmium**, a separate Massive-inspired instrument with direct green modulation ranges and bendable envelope/phrase curves. Sessions **0.27.0**, native C++17 / Qt 6 Widgets. Both CTest suites pass: **1,018 existing smoke checks + 33 Osmium checks (1,051 total)**. Fresh installable .deb in `dist/`; captures in `docs/screenshots/osmium/`.
+**Last updated:** 2026-10-18 · **Milestone 28 done (an endless drag for every value field: at the screen's edge the pointer jumps to the other edge and the drag goes on; typing into a field is opaque and reads as the field does, 35 for 35 %; dialog buttons fit their text; the export Tail is a drag field)**, after **Milestone 27** (Osmium, Codex) · v0.28.0 · 50k lines · builds clean on Qt 6.4, all 1024 smoke checks pass, plus the 33 Osmium checks · ships a .deb on every build · `docs/test-checklist.md` lists what to try by hand.
 
 1. Inspect existing Monolith, device registration, undo, persistence and panel constraints (done). Monolith has 170 parameters, 26 sources, two 32-point linear curves; rack bodies are 192 px tall.
 2. Core complete: Osmium registered separately with 182 parameters. Monolith retains 170. Shared wavetable DSP now has an Osmium-only timed ADSR path with independent segment bends. CurvePoint stores optional outgoing bend and interpolation (curve / smooth / hold), read/written by SetFile for sets and presets; two-coordinate legacy points stay linear.
@@ -1340,6 +1340,29 @@ After 0.25: "I can't drag an instrument like Monolith to a new track or empty sp
 - Info View text review; packaging beyond .deb: AppImage / Flatpak, Windows and macOS builds.
 
 ---
+
+## Milestone 28: endless drags, typing into fields, dialog buttons that fit (done)
+
+After 0.27: "fix the cropping of the button (Close without Saving) and verify other popups are clean · in Monolith the mod percentage is hard to scroll up or down, and double-clicking and typing a value overlays the new one over the old · verify every value field is draggable vertically · when the cursor reaches a screen edge it should jump to the other side and continue, an endless scroll; the BPM is at the top of the app, so dragging up gets stuck after a few BPM".
+
+### The endless drag (`widgets/DragValue.h` `dragwrap::vertical` / `horizontal`)
+
+- `dragwrap::vertical(widget, global, &landed)`: when a move's global position is at the screen's top or bottom edge, the pointer is warped (`QCursor::setPos`) to four pixels inside the opposite edge and `landed` says where; the caller then measures the next move from there, so the jump isn't distance. Away from the edge, or where the pointer can't be warped (Wayland), it returns false and the drag just stops at the edge. `DragValue` (and so `Knob`, `Fader`, `LevelFader`, the mixer, the control bar's tempo, the Clip box, every panel knob) measures drags in **global** coordinates now and calls it after every move; the Arrangement's header fields (`Drag::Field`, `m_fieldWrap`) and Monolith's two painted vertical drags (the Position / ring displays) do too.
+- `DragValue::mouseMoveEvent` keeps the same sensitivity (`m_sens` pixels for the range, Shift ten times finer).
+
+### Typing into a field (`DragValue::mouseDoubleClickEvent`, `setEditScale`, `editing()`)
+
+- The editor is an opaque, frameless `QLineEdit#dragValueEditor` (its own stylesheet in the theme's field / text / accent colours; `autoFillBackground`), and `paintEvent` skips the value while it's up: device bodies style line edits transparent, so Monolith's amount showed the old value under the new one.
+- `setEditScale(100)` on the Monolith route amounts: the editor shows 35 for 35 % and reads what you type back through the scale; reading takes the first number in the text, so "40 %", "-12.5 dB" and "+3" all work.
+
+### Dialog buttons (`Theme.cpp` stylesheet)
+
+- The 0.25 `QDialog QPushButton` rule had `min-width: 64px`; with the stylesheet style a min-width *is* the button's content width, so every dialog button was 94 px and "Close without Saving" (the GNOME platform's text for Discard) was cropped on both sides. The min-width is gone; padding 3 / 14 px and the 20 px height stay. Checked offscreen: the save box, Export Audio, Keyboard Shortcuts, the theme editor and the file dialog.
+- The Export Audio dialog's **Tail** was a QSpinBox, the one value in the app that wasn't a drag field; it's a `DragValue` now (0..30 s, step 1, double-click to type).
+
+### Tests (6 new; 1024 in all)
+
+- M28 fields: a DragValue in a transparent-line-edit host: double-click shows an opaque editor reading 35 for 0.35 at scale 100, typing "40 %" reads back 0.4; a 40 px drag in global coordinates raises the value; `dragwrap::vertical` does nothing mid-screen and, where the platform warps, lands the pointer near the bottom from the top edge; a message box with "Close without Saving" gives every button its text's width plus padding.
 
 ## Conventions for future iterations
 

@@ -25,6 +25,7 @@
 #include <QMimeData>
 #include <QDragEnterEvent>
 #include "DeviceDrag.h"
+#include "widgets/DragValue.h"
 #include "core/Grooves.h"
 #include "core/Presets.h"
 #include <algorithm>
@@ -829,6 +830,7 @@ void ArrangementView::mousePressEvent(QMouseEvent* e) {
             m_field = f;
             m_fieldV0 = fieldValue(f);
             m_drag = Drag::Field;
+            m_fieldWrap = 0;
             m_project->beginEdit(f.kind == Field::Pan ? "Pan" : f.kind == Field::Send ? "Send " + QString(QChar('A' + f.send)) : f.kind == Field::MainVolume ? "Master Volume" : "Volume",
                                  mixerMergeKey(ft ? ft->id : 0, what));
             m_editOpen = true;
@@ -1063,7 +1065,9 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
     case Drag::Field: {   // like a DragValue: up raises, Shift for fine
         const double range = m_field.kind == Field::Pan ? 2.0 : 1.0;
         const double px = (e->modifiers() & Qt::ShiftModifier) ? 800.0 : 200.0;
-        setFieldValue(m_field, m_fieldV0 + (m_pressPos.y() - pos.y()) / px * range);
+        setFieldValue(m_field, m_fieldV0 + (m_pressPos.y() - pos.y() + m_fieldWrap) / px * range);
+        QPoint landed;   // the endless drag: the jump doesn't count as distance
+        if (dragwrap::vertical(this, e->globalPosition().toPoint(), &landed)) m_fieldWrap += landed.y() - e->globalPosition().toPoint().y();
         break;
     }
     case Drag::Ruler:

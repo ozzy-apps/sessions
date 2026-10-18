@@ -690,9 +690,14 @@ protected:
         p.drawText(QPointF(r.right() - 16, r.bottom() - 3), "C8");
         drawCaption(p, r, "C3 rings " + m_body->text(2), Qt::AlignTop | Qt::AlignRight);
     }
-    void mousePressEvent(QMouseEvent* e) override { m_y = e->position().y(); m_start = m_body->pos(2); }
+    void mousePressEvent(QMouseEvent* e) override { m_y = e->globalPosition().y(); m_start = m_body->pos(2); }
     void mouseMoveEvent(QMouseEvent* e) override {
-        if (e->buttons() & Qt::LeftButton) m_body->editMany({{2, m_start + (m_y - e->position().y()) / 120.0}}, 2);
+        if (!(e->buttons() & Qt::LeftButton)) return;
+        m_start += (m_y - e->globalPosition().y()) / 120.0;   // move by move, so the endless drag can re-anchor
+        m_y = e->globalPosition().y();
+        m_body->editMany({{2, m_start}}, 2);
+        QPoint landed;
+        if (dragwrap::vertical(this, e->globalPosition().toPoint(), &landed)) m_y = landed.y();
     }
 private:
     double m_y = 0, m_start = 0;
@@ -1161,10 +1166,14 @@ protected:
         p.drawPath(path);
         drawCaption(p, r, QString("%1 · %2").arg(t.name, m_body->text(mono::oparam(m_osc, mono::Mode))), Qt::AlignTop | Qt::AlignLeft);
     }
-    void mousePressEvent(QMouseEvent* e) override { m_y = e->position().y(); m_start = m_body->pos(mono::oparam(m_osc, mono::Position)); }
+    void mousePressEvent(QMouseEvent* e) override { m_y = e->globalPosition().y(); m_start = m_body->pos(mono::oparam(m_osc, mono::Position)); }
     void mouseMoveEvent(QMouseEvent* e) override {
         if (!(e->buttons() & Qt::LeftButton)) return;
-        m_body->editMany({{mono::oparam(m_osc, mono::Position), m_start + (m_y - e->position().y()) / 120.0}}, m_osc);
+        m_start += (m_y - e->globalPosition().y()) / 120.0;   // move by move, so the endless drag can re-anchor
+        m_y = e->globalPosition().y();
+        m_body->editMany({{mono::oparam(m_osc, mono::Position), m_start}}, m_osc);
+        QPoint landed;
+        if (dragwrap::vertical(this, e->globalPosition().toPoint(), &landed)) m_y = landed.y();
     }
 private:
     int m_osc;
@@ -2132,6 +2141,7 @@ private:
             amount->setDefault(0);
             amount->setValue(r.amount, false);
             amount->setDragSensitivity(200);
+            amount->setEditScale(100);   // typed as a percentage, like it reads
             amount->setFixedWidth(48);
             amount->setFormatter([](double v) { return QString("%1 %").arg(int(std::lround(v * 100))); });
             InfoView::attach(amount, "Amount", "How far the source turns the knob: a share of the knob's range, up or down. Drag, Shift for fine; double-click to type.");

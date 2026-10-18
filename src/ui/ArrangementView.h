@@ -197,6 +197,7 @@ private:
 
     // interaction state
     enum class Drag { None, Ruler, Move, Resize, ResizeLeft, Time, Point, Header, Locator, LoopMove, LoopStart, LoopEnd, Overview, Field, MoveRange };
+    double  m_fieldWrap = 0;   // Drag::Field: pixels the endless drag has warped the pointer by (added to the drag's distance)
     // Drag::ResizeLeft: the clip's left edge: the start moves, the audio stays put (the offset follows; a
     // looping clip wraps, a one-shot stops at its audio's start)
     double  m_clipOffset0 = 0;

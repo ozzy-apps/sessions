@@ -344,6 +344,13 @@ Get a few captures: [tonehunt.org](https://tonehunt.org) (free `.nam` files; "st
 4. View → Zoom → 125 % → Sessions reloads at once at 125 %, the set as it was (unsaved changes included), the window where it was, the same view; only Ctrl+Z has nothing to undo. Zoom → 100 % → it reloads at 100 % right away (before 0.26 this needed a second, manual start). Preferences → Look → Zoom does the same.
 5. With `QT_SCALE_FACTOR=1.25 sessions` from a terminal, View → Zoom reloads but your 1.25 stays: the environment wins.
 
+## 24. Endless drags, typing into fields, dialog buttons that fit (0.28)
+
+1. Control bar → drag the **BPM** field upwards past the top of the screen → the pointer jumps to the bottom of the screen and the tempo keeps rising as you go on dragging; the same downwards past the bottom. Shift still makes it fine. Every other field does it: mixer volume / pan / sends, Arrangement header fields, panel knobs, the Clip box, Monolith's mod amounts and its Position / ring displays.
+2. Monolith → Mod tab → drag a route's amount up and down → it follows smoothly; double-click it → a plain field with **35** (not 0.35) and nothing showing through; type 40 → 40 %; type "-20 %" → -20 %. Double-click the tempo → type 128 → 128.
+3. File → New Set with unsaved changes → the three buttons read in full: **Save**, **Close without Saving** (or Discard), **Cancel**; nothing cropped, the default outlined in orange. Also check Export Audio (Export… / Cancel), Keyboard Shortcuts (OK), View → Theme → Customize… (Save / Delete / Revert), Preferences (Close), About (OK).
+4. File → Export Audio → **Tail** is a drag field: drag it, double-click to type 5 → "5 s".
+
 ## How to tell me what you found
 
 For each problem: the section and number (e.g. "4.3"), what you did, what happened, and what you expected. For sound problems, which device and settings, and whether it's a click, crackle, noise, distortion, a wrong level or a delay. If something crashed, say what you clicked last.

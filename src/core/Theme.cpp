@@ -392,7 +392,7 @@ QToolButton:hover, QPushButton:hover { background: {hover}; }
 QToolButton:pressed, QPushButton:pressed { background: {panel}; }
 QToolButton:checked, QPushButton:checked { background: {accent}; color: {onAccent}; }
 QToolButton:disabled, QPushButton:disabled { color: {disabled}; }
-QDialog QPushButton { padding: 3px 14px; min-height: 20px; min-width: 64px; }
+QDialog QPushButton { padding: 3px 14px; min-height: 20px; }   /* no min-width: the stylesheet would size every button to it and crop a long label (Close without Saving) */
 QDialog QPushButton:default { border-color: {accent}; }
 QDialogButtonBox { dialogbuttonbox-buttons-have-icons: 0; }
 QMessageBox QLabel { font-size: 11px; }

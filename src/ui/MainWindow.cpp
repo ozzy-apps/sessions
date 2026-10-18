@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "widgets/DragValue.h"
 #include "ControlBar.h"
 #include "Browser.h"
 #include "SampleEditor.h"
@@ -922,11 +923,15 @@ void MainWindow::fileExportAudio() {
                        .arg(int((m_transport->loopStart() + m_transport->loopLength()) / 4) + 1));
     if (song <= 0) range->setCurrentIndex(1);
     form->addRow("Render", range);
-    auto* tail = new QSpinBox(&dlg);
+    auto* tail = new DragValue(&dlg);   // 0.28: a drag field, like every value in the app
     tail->setRange(0, 30);
-    tail->setValue(2);
-    tail->setSuffix(" s");
-    tail->setToolTip("Extra time after the end, so reverb and delay tails ring out.");
+    tail->setStep(1);
+    tail->setDefault(2);
+    tail->setValue(2, false);
+    tail->setDragSensitivity(300);
+    tail->setAccentText(false);
+    tail->setFormatter([](double v) { return QString("%1 s").arg(int(v)); });
+    tail->setToolTip("Extra time after the end, so reverb and delay tails ring out. Drag up or down, double-click to type.");
     form->addRow("Tail", tail);
     auto* format = new QComboBox(&dlg);
     format->addItems({"WAV 16-bit", "WAV 24-bit", "WAV 32-bit float"});
