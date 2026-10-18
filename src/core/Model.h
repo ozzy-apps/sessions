@@ -324,12 +324,31 @@ int  deviceBlockEnd(const QVector<Device>& devices, int index);   // index just 
 void normalizeRacks(QVector<Device>& devices);                    // restores that order (sets read from files)
 struct RackRecipe;
 
+// A fade's gain `t` of the way through it (0 .. 1), for a curve: the gain half-way through, 0.5
+// for a straight line, less for a slow start (exponential), more for a fast one (logarithmic).
+inline double fadeGain(double t, double curve) {
+    t = std::clamp(t, 0.0, 1.0);
+    curve = std::clamp(curve, 0.02, 0.98);
+    return std::pow(t, std::log(curve) / std::log(0.5));
+}
+
 struct ArrangementClip {
     double  start  = 0.0;   // beats on the timeline
     double  length = 4.0;   // beats
     double  offset = 0.0;   // clip time at `start` (a split's second half starts mid-clip): the placement's own start marker
     ClipPtr clip;
+    // Fades (0.33, audio clips): a fade-in over the first `fadeIn` beats of the placement and a
+    // fade-out over its last `fadeOut` (0: none), each with its curve (fadeGain). They belong to
+    // the placement, not the clip: the same clip placed twice can fade differently. The Arrangement
+    // shows them as a line from the corner with a square handle (the length) and a round one (the curve).
+    double  fadeIn = 0, fadeOut = 0, fadeInCurve = 0.5, fadeOutCurve = 0.5;
     double  beatOf(double clipBeat) const;   // the first timeline beat where this placement plays that clip beat, or -1
+    double  fadeAt(double beat) const {      // the fades' gain at a timeline beat inside the placement
+        double g = 1;
+        if (fadeIn > 0) g *= fadeGain((beat - start) / fadeIn, fadeInCurve);
+        if (fadeOut > 0) g *= fadeGain((start + length - beat) / fadeOut, fadeOutCurve);
+        return g;
+    }
 };
 
 // MIDI tracks: notes -> instrument. Audio tracks: audio clips (and the audio input), audio
@@ -386,7 +405,7 @@ struct Locator {
 
 // Everything undo/redo restores.
 struct EditState {
-    struct Placed { double start, length, offset; int clip; };
+    struct Placed { double start, length, offset; int clip; double fadeIn = 0, fadeOut = 0, fadeInCurve = 0.5, fadeOutCurve = 0.5; };
     struct TrackState {
         int id; QString name; QColor color;
         double volume, pan; QVector<double> sends; bool active, preFader;

@@ -47,6 +47,7 @@ ArrangementView::ArrangementView(Project* project, Transport* transport, QWidget
     InfoView::attach(this, "Arrangement View",
         "Drag empty space to select time (Shift extends): Ctrl+L loops it, Ctrl+E splits, Ctrl+J consolidates, Delete clears. "
         "Drag clips to move them, their right edge to lengthen. Double-click a lane to add a clip. "
+        "Audio clips: hover one for its fade handles: drag a top-corner square sideways for a fade's length, the circle on the curve up or down for its shape. "
         "Top strip: double-click to add a locator. Below it, drag the loop brace. Drag the ruler up/down to zoom. A toggles automation.");
 
     m_backToArr = new QToolButton(this);
@@ -257,6 +258,41 @@ ArrangementClip* ArrangementView::clipAt(int track, double beat) {
     return nullptr;
 }
 
+ArrangementView::FadeHandles ArrangementView::fadeHandles(const ArrangementClip& a, int lane) const {
+    const double x = beatToX(a.start), w = a.length * m_zoom;
+    const int y = laneTop(lane), h = laneHeight(lane);
+    const double yb0 = y + 13, yb1 = y + h - 2, bh = h - 15;
+    FadeHandles f;
+    f.inSq = QPointF(a.fadeIn > 0 ? x + a.fadeIn * m_zoom : x + 4, yb0 + 4);
+    f.outSq = QPointF(a.fadeOut > 0 ? x + w - 1 - a.fadeOut * m_zoom : x + w - 5, yb0 + 4);
+    f.inCircle = QPointF(x + a.fadeIn * m_zoom / 2, yb1 - a.fadeInCurve * bh);
+    f.outCircle = QPointF(x + w - 1 - a.fadeOut * m_zoom / 2, yb1 - a.fadeOutCurve * bh);
+    return f;
+}
+
+bool ArrangementView::hovered(const ArrangementClip& a) const {
+    if (m_hoverLane < 0 || m_hoverLane >= m_project->tracks.size()) return false;
+    const QVector<ArrangementClip>& arr = m_project->tracks[m_hoverLane].arrangement;
+    return m_hoverIndex >= 0 && m_hoverIndex < arr.size() && &arr[m_hoverIndex] == &a;
+}
+
+void ArrangementView::leaveEvent(QEvent*) {
+    if (m_hoverLane >= 0 || m_hoverIndex >= 0) { m_hoverLane = m_hoverIndex = -1; update(); }
+}
+
+void ArrangementView::resetFades() {
+    ArrangementClip* a = validSel();
+    if (!a || (a->fadeIn <= 0 && a->fadeOut <= 0)) return;
+    {
+        EditScope edit(m_project, "Reset Fades");
+        a->fadeIn = a->fadeOut = 0;
+        a->fadeInCurve = a->fadeOutCurve = 0.5;
+    }
+    emit m_project->clipChanged();
+    emit m_project->structureChanged();
+    update();
+}
+
 ArrangementClip* ArrangementView::validSel() {
     if (!m_sel) return nullptr;
     for (Track& t : m_project->tracks)
@@ -386,6 +422,37 @@ void ArrangementView::drawClip(QPainter& p, const Track& t, const ArrangementCli
                 const double cycle = a.start + at;
                 if (cycle > a.start + 1e-9 && cycle < end) p.fillRect(QRectF(beatToX(cycle), y + 13, 1, h - 15), theme::withAlpha(theme::clipInk, int(120 * alpha)));
             });
+        }
+        if (!m_autoMode) {   // the fades (0.33): a line from the corner up to full level, the faded part shaded; the handles on the hovered / selected clip
+            const double yb1 = y + h - 2, bh = h - 15;
+            auto curve = [&](double xa, double xb, double shape) {   // xa: silent end, xb: full level
+                QPainterPath path;
+                path.moveTo(xa, yb1);
+                const int steps = std::max(2, int(std::fabs(xb - xa) / 3));
+                for (int k = 0; k <= steps; ++k) { const double t = double(k) / steps; path.lineTo(xa + (xb - xa) * t, yb1 - fadeGain(t, shape) * bh); }
+                return path;
+            };
+            auto drawFade = [&](double xa, double xb, double shape) {
+                QPainterPath line = curve(xa, xb, shape);
+                QPainterPath region = line;
+                region.lineTo(xb, y + 13); region.lineTo(xa, y + 13); region.closeSubpath();
+                p.fillPath(region, theme::outOfClip);
+                p.setPen(QPen(theme::withAlpha(theme::clipInk, int(230 * alpha)), 1.2));
+                p.setBrush(Qt::NoBrush);
+                p.drawPath(line);
+            };
+            if (a.fadeIn > 0) drawFade(x, x + a.fadeIn * m_zoom, a.fadeInCurve);
+            if (a.fadeOut > 0) drawFade(x + w - 1, x + w - 1 - a.fadeOut * m_zoom, a.fadeOutCurve);
+            if (&a == m_sel || hovered(a)) {
+                const int lane = int(&t - m_project->tracks.constData());
+                const FadeHandles fh = fadeHandles(a, lane);
+                p.setPen(QPen(theme::ink, 1));
+                p.setBrush(theme::outline);
+                p.drawRect(QRectF(fh.inSq.x() - 3.5, fh.inSq.y() - 3.5, 7, 7));
+                p.drawRect(QRectF(fh.outSq.x() - 3.5, fh.outSq.y() - 3.5, 7, 7));
+                if (a.fadeIn > 0) p.drawEllipse(fh.inCircle, 3.5, 3.5);
+                if (a.fadeOut > 0) p.drawEllipse(fh.outCircle, 3.5, 3.5);
+            }
         }
         p.restore();
         if (&a == m_sel && !m_autoMode) { p.setPen(QPen(theme::outline, 1)); p.setBrush(Qt::NoBrush); p.drawRect(QRectF(x + 0.5, y + 1.5, w - 2, h - 3)); }
@@ -965,6 +1032,25 @@ void ArrangementView::mousePressEvent(QMouseEvent* e) {
     m_copyDrag = false;
     m_copyOrig = -1;
     const bool ctrl = e->modifiers() & Qt::ControlModifier;
+    if (a && a->clip && a->clip->isAudio()) {   // the fade handles (0.33): a square for a fade's length, a circle for its curve
+        const FadeHandles fh = fadeHandles(*a, i);
+        auto hit = [&](const QPointF& hp) { return std::fabs(pos.x() - hp.x()) <= 6 && std::fabs(pos.y() - hp.y()) <= 6; };
+        Drag d = Drag::None;
+        if (a->fadeIn > 0 && hit(fh.inCircle)) d = Drag::FadeInCurve;
+        else if (a->fadeOut > 0 && hit(fh.outCircle)) d = Drag::FadeOutCurve;
+        else if (hit(fh.inSq)) d = Drag::FadeIn;
+        else if (hit(fh.outSq)) d = Drag::FadeOut;
+        if (d != Drag::None) {
+            emit clipSelected(i, a);
+            m_dragTrack = i;
+            m_drag = d;
+            m_project->beginEdit(d == Drag::FadeIn ? "Fade In" : d == Drag::FadeOut ? "Fade Out" : "Fade Curve");
+            m_editOpen = true;
+            m_timeSel.active = false;
+            update();
+            return;
+        }
+    }
     const bool edge = a && (a->start + a->length - beat) * m_zoom < 6;
     const bool leftEdge = a && !edge && (beat - a->start) * m_zoom < 6;
     const bool title = a && pos.y() < laneTop(i) + 14;   // the clip's name bar moves it; its body selects time inside it
@@ -1040,9 +1126,20 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
             const int i = trackAt(int(pos.y()));
             const double b = xToBeat(pos.x());
             const bool ctrl = e->modifiers() & Qt::ControlModifier;
-            if (ArrangementClip* a = clipAt(i, b)) {
+            ArrangementClip* a = clipAt(i, b);
+            const int hoverIndex = a ? int(a - m_project->tracks[i].arrangement.constData()) : -1;
+            if (i != m_hoverLane || hoverIndex != m_hoverIndex) { m_hoverLane = i; m_hoverIndex = hoverIndex; update(); }   // the fade handles show on the hovered clip
+            if (a) {
                 const bool inRange = hasTimeSelection() && i >= m_timeSel.lane0 && i <= m_timeSel.lane1 && b >= m_timeSel.start && b < m_timeSel.end;
-                if ((a->start + a->length - b) * m_zoom < 6 || (b - a->start) * m_zoom < 6) cur = Qt::SizeHorCursor;
+                Qt::CursorShape fadeCur = Qt::ArrowCursor;
+                if (a->clip && a->clip->isAudio()) {
+                    const FadeHandles fh = fadeHandles(*a, i);
+                    auto hit = [&](const QPointF& hp) { return std::fabs(pos.x() - hp.x()) <= 6 && std::fabs(pos.y() - hp.y()) <= 6; };
+                    if ((a->fadeIn > 0 && hit(fh.inCircle)) || (a->fadeOut > 0 && hit(fh.outCircle))) fadeCur = Qt::SizeVerCursor;
+                    else if (hit(fh.inSq) || hit(fh.outSq)) fadeCur = Qt::SizeHorCursor;
+                }
+                if (fadeCur != Qt::ArrowCursor) cur = fadeCur;
+                else if ((a->start + a->length - b) * m_zoom < 6 || (b - a->start) * m_zoom < 6) cur = Qt::SizeHorCursor;
                 else if (pos.y() < laneTop(i) + 14 || inRange) cur = ctrl ? Qt::DragCopyCursor : Qt::OpenHandCursor;
                 else cur = Qt::IBeamCursor;
             } else if (i >= 0) cur = Qt::IBeamCursor;
@@ -1126,6 +1223,22 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
                 emit trackSelected(ni);
             }
         }
+        break;
+    }
+    case Drag::FadeIn:
+    case Drag::FadeOut: {   // the square: the fade's length, on the grid (Alt: free), never past the other fade
+        if (!validSel()) break;
+        const double end = m_sel->start + m_sel->length;
+        if (m_drag == Drag::FadeIn) m_sel->fadeIn = std::clamp(snap(beat, fine) - m_sel->start, 0.0, std::max(0.0, m_sel->length - m_sel->fadeOut));
+        else m_sel->fadeOut = std::clamp(end - snap(beat, fine), 0.0, std::max(0.0, m_sel->length - m_sel->fadeIn));
+        break;
+    }
+    case Drag::FadeInCurve:
+    case Drag::FadeOutCurve: {   // the circle: how high the curve is half-way along
+        if (!validSel() || m_dragTrack < 0) break;
+        const int y = laneTop(m_dragTrack), h = laneHeight(m_dragTrack);
+        const double c = std::clamp((y + h - 2 - pos.y()) / std::max(1.0, h - 15.0), 0.05, 0.95);
+        (m_drag == Drag::FadeInCurve ? m_sel->fadeInCurve : m_sel->fadeOutCurve) = c;
         break;
     }
     case Drag::Time: {
@@ -1224,6 +1337,7 @@ void ArrangementView::mouseReleaseEvent(QMouseEvent* e) {
         }
     }
     if (m_editOpen) { m_editOpen = false; m_project->endEdit(); }
+    if (drag == Drag::FadeIn || drag == Drag::FadeOut || drag == Drag::FadeInCurve || drag == Drag::FadeOutCurve) { emit m_project->clipChanged(); emit m_project->structureChanged(); }
     if (drag == Drag::Move || drag == Drag::Resize || drag == Drag::ResizeLeft) emit m_project->clipChanged();
     if (drag == Drag::MoveRange || ((drag == Drag::Move || drag == Drag::Resize || drag == Drag::ResizeLeft) && m_sel && m_moved)) emit m_project->structureChanged();
     m_rangeDrag.clear();
@@ -1414,6 +1528,7 @@ void ArrangementView::contextMenuEvent(QContextMenuEvent* e) {
             if (clip->isAudio()) {
                 menu.addAction(clip->reverse ? "Play Forwards" : "Reverse", this, [this, clip] { EditScope edit(m_project, "Reverse"); clip->reverse = !clip->reverse; emit m_project->clipChanged(); })->setEnabled(clip->takes.isEmpty());
                 menu.addAction(clip->warp ? "Warp Off" : "Warp On", this, [this, clip] { EditScope edit(m_project, clip->warp ? "Warp Off" : "Warp On"); clip->warp = !clip->warp; emit m_project->clipChanged(); });
+                menu.addAction("Reset Fades", this, [this] { resetFades(); })->setEnabled(a->fadeIn > 0 || a->fadeOut > 0);
             }
         }
         menu.addAction("Loop Clip\tCtrl+L", this, [this] { loopSelection(); });

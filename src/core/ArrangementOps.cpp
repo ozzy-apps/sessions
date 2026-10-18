@@ -26,7 +26,11 @@ void split(Project& p, Track& t, double beat) {
         right.length = a.start + a.length - beat;
         right.offset = a.offset + (beat - a.start);   // unwrapped: play time takes it round the brace (clipPositionAt)
         right.clip = p.copyClip(a.clip);
+        right.fadeIn = 0; right.fadeInCurve = 0.5;   // the fade-in stays with the left part, the fade-out goes with the right
         a.length = beat - a.start;
+        a.fadeOut = 0; a.fadeOutCurve = 0.5;
+        a.fadeIn = std::min(a.fadeIn, a.length);
+        right.fadeOut = std::min(right.fadeOut, right.length);
         extra.push_back(right);
     }
     t.arrangement += extra;
@@ -96,6 +100,8 @@ void duplicateTime(Project& p, double start, double end) {
             c.start = s + len;
             c.length = e - s;
             c.clip = p.copyClip(a.clip);
+            if (s > a.start + kEps) { c.fadeIn = 0; c.fadeInCurve = 0.5; }   // a cut edge has no fade
+            if (e < a.start + a.length - kEps) { c.fadeOut = 0; c.fadeOutCurve = 0.5; }
             copies[i].push_back(c);
         }
     }

@@ -235,8 +235,12 @@ QJsonObject writeTrack(const EditState::TrackState& t, bool isReturn, int width,
     if (!isReturn) {
         QJsonArray slotIds, arrangement;
         for (int id : t.slotClips) slotIds.append(id ? QJsonValue(id) : QJsonValue());
-        for (const EditState::Placed& p : t.arrangement)
-            arrangement.append(QJsonObject{{"start", p.start}, {"length", p.length}, {"offset", p.offset}, {"clip", p.clip}});
+        for (const EditState::Placed& p : t.arrangement) {
+            QJsonObject po{{"start", p.start}, {"length", p.length}, {"offset", p.offset}, {"clip", p.clip}};
+            if (p.fadeIn > 0) { po.insert("fadeIn", p.fadeIn); if (p.fadeInCurve != 0.5) po.insert("fadeInCurve", p.fadeInCurve); }
+            if (p.fadeOut > 0) { po.insert("fadeOut", p.fadeOut); if (p.fadeOutCurve != 0.5) po.insert("fadeOutCurve", p.fadeOutCurve); }
+            arrangement.append(po);
+        }
         o.insert("slots", slotIds);
         o.insert("arrangement", arrangement);
     }
@@ -454,6 +458,10 @@ EditState::TrackState readTrack(const QJsonObject& o, bool isReturn, const QStri
         for (const QJsonValue& v : o.value("arrangement").toArray()) {
             const QJsonObject p = v.toObject();
             EditState::Placed placed{std::max(0.0, num(p, "start", 0)), num(p, "length", 4), std::max(0.0, num(p, "offset", 0)), integer(p, "clip", 0)};
+            placed.fadeIn = std::clamp(num(p, "fadeIn", 0), 0.0, placed.length);
+            placed.fadeOut = std::clamp(num(p, "fadeOut", 0), 0.0, placed.length);
+            placed.fadeInCurve = std::clamp(num(p, "fadeInCurve", 0.5), 0.02, 0.98);
+            placed.fadeOutCurve = std::clamp(num(p, "fadeOutCurve", 0.5), 0.02, 0.98);
             if (placed.length > 0) t.arrangement.push_back(placed);
         }
     }

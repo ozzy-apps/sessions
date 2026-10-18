@@ -193,7 +193,7 @@ private:
     struct Live { int track; int pitch; float velocity; bool off; int duration; };
     // Audio tracks: the stretches of audio clips under the playhead in this block.
     // start: the clip beat the first pass begins at (Clip::start for a launched clip, a placement's offset)
-    struct AudioSeg { const ClipData* clip; double origin, start, lo, hi, from, to; };
+    struct AudioSeg { const ClipData* clip; double origin, start, lo, hi, from, to; double fadeIn = 0, fadeOut = 0, inCurve = 0.5, outCurve = 0.5; };
 
     void scheduleRepublish();
     void adopt(RenderState* s);
@@ -205,7 +205,8 @@ private:
     void emitSource(const TrackData& td, PlayState& ps, double from, double to, double b0, double bps, int n, EventList& ev);
     int  followTarget(const TrackData& td, int current, int action);
     void allNotesOff();
-    void addSegment(const ClipData& c, double origin, double start, double lo, double hi, double from, double to);
+    void addSegment(const ClipData& c, double origin, double start, double lo, double hi, double from, double to,
+                    double fadeIn = 0, double fadeOut = 0, double inCurve = 0.5, double outCurve = 0.5);   // the fades: a placement's (Session clips have none)
     void renderAudio(double b0, double bps, double tempo, int n, float* L, float* R);
     void renderComp(const ClipData& c, double local, double fade, double secPerBeat, float& L, float& R) const;   // a comped clip's sample at a clip beat
     // Tones / Texture / Complex / Complex Pro: a Stretcher per playing placement (by clip id and

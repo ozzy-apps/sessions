@@ -1,5 +1,15 @@
 # Sessions 0.23 — things to try by hand
 
+## 0.33 · Fades on Arrangement clips
+
+1. Put an audio clip on the Arrangement (drop a sample on a lane). Hover it → a small square at each top corner of its body. Drag the left one to the right → a fade-in: the line rises from the corner, the part above it is shaded, the waveform stays. The length snaps to the grid; Alt drags it freely. Ctrl+Z takes it back in one step.
+2. With a fade in place a round handle sits half-way along the line: drag it up → the curve bulges up (a fast start, logarithmic), down → it sags (a slow start, exponential). Play the clip and listen: up is louder sooner.
+3. Drag the right square to the left for a fade-out; the clip's end and length don't move. Dragging a square across the other fade stops at it.
+4. The handles show on the clip under the mouse and on the selected clip; elsewhere only the curves. Zoom in and out → the handles follow. Automation mode (A) hides them and the drags go to the breakpoints as before.
+5. Right-click the clip → **Reset Fades** → both gone, one undo step. The menu entry is greyed on a clip without fades.
+6. Split a faded clip (Ctrl+E) → the fade-in stays on the left part, the fade-out on the right, the cut has none. Duplicate Time over it → the copy fades the same. Move the clip to another lane → the fades go with it.
+7. Save, reopen → the fades and curves come back; open a set from before 0.33 → no fades, as it was. Export Audio → the rendered file fades the same way.
+
 ## 0.32 · Sampler
 
 1. Browser → Instruments → **Sampler** onto a MIDI track; drop a drum loop onto its panel (or double-click one in the browser). The header shows the file's name, **Warp** off, the tempo Sessions found in the BPM field (`— BPM` for a one-shot), the waveform its bars / tempo / length. The panel is 1130 px wide; the Device View scrolls.

@@ -47,7 +47,8 @@ static bool operator==(const Device& a, const Device& b) {
 }
 static bool operator==(const Locator& a, const Locator& b) { return a.beat == b.beat && a.name == b.name; }
 static bool operator==(const EditState::Placed& a, const EditState::Placed& b) {
-    return a.start == b.start && a.length == b.length && a.offset == b.offset && a.clip == b.clip;
+    return a.start == b.start && a.length == b.length && a.offset == b.offset && a.clip == b.clip
+        && a.fadeIn == b.fadeIn && a.fadeOut == b.fadeOut && a.fadeInCurve == b.fadeInCurve && a.fadeOutCurve == b.fadeOutCurve;
 }
 static bool operator==(const EditState::TrackState& a, const EditState::TrackState& b) {
     return a.id == b.id && a.name == b.name && a.color == b.color && a.volume == b.volume && a.pan == b.pan
@@ -1727,7 +1728,7 @@ EditState Project::captureEditState() const {
         EditState::TrackState ts{t.id, t.name, t.color, t.volume, t.pan, t.sends, t.active, t.preFader, {}, {}, t.devices, t.automation, t.type,
                                  t.monitor, t.inputChannel, t.groupId};
         for (const ClipPtr& c : t.clipSlots) ts.slotClips.push_back(keep(c));
-        for (const ArrangementClip& a : t.arrangement) ts.arrangement.push_back({a.start, a.length, a.offset, keep(a.clip)});
+        for (const ArrangementClip& a : t.arrangement) ts.arrangement.push_back({a.start, a.length, a.offset, keep(a.clip), a.fadeIn, a.fadeOut, a.fadeInCurve, a.fadeOutCurve});
         return ts;
     };
     for (const Track& t : tracks) s.tracks.push_back(capture(t));
@@ -1762,7 +1763,7 @@ void Project::restoreEditState(const EditState& s) {
             t.clipSlots.clear();
             for (int id : ts.slotClips) t.clipSlots.push_back(live.value(id));
             t.arrangement.clear();
-            for (const EditState::Placed& p : ts.arrangement) t.arrangement.push_back({p.start, p.length, p.offset, live.value(p.clip)});
+            for (const EditState::Placed& p : ts.arrangement) t.arrangement.push_back({p.start, p.length, p.offset, live.value(p.clip), p.fadeIn, p.fadeOut, p.fadeInCurve, p.fadeOutCurve});
             t.devices = ts.devices;
             t.automation = ts.automation;
             list.push_back(std::move(t));

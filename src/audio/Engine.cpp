@@ -86,7 +86,7 @@ float curveAt(const std::vector<AutoPoint>& pts, double beat) {
 }
 } // namespace
 
-struct Placement { double start, length, offset; ClipRef clip; };
+struct Placement { double start, length, offset; ClipRef clip; double fadeIn = 0, fadeOut = 0, fadeInCurve = 0.5, fadeOutCurve = 0.5; };
 
 // An automation envelope, resolved to what it drives.
 struct Auto {
@@ -521,7 +521,7 @@ void Engine::publish() {
         td.bus = t.isGroup() ? busOf.value(t.id, -1) : busOf.value(t.groupId, -1);
         td.soloed = t.solo || (t.isGroup() ? groupsWithSolo.contains(t.id) : soloedGroups.contains(t.groupId));
         for (const ClipPtr& c : t.clipSlots) td.slotClips.push_back(clipRef(c));
-        for (const ArrangementClip& a : t.arrangement) td.arrangement.push_back({a.start, a.length, a.offset, clipRef(a.clip)});
+        for (const ArrangementClip& a : t.arrangement) td.arrangement.push_back({a.start, a.length, a.offset, clipRef(a.clip), a.fadeIn, a.fadeOut, a.fadeInCurve, a.fadeOutCurve});
         std::sort(td.arrangement.begin(), td.arrangement.end(), [](const Placement& a, const Placement& b) { return a.start < b.start; });
         fill(t, td);
         s->tracks.push_back(std::move(td));
@@ -1089,7 +1089,7 @@ void Engine::emitSource(const TrackData& td, PlayState& ps, double from, double 
         for (const Placement& p : td.arrangement) {   // a placement's first pass starts at its offset
             if (p.start >= to) break;
             if (!p.clip || p.start + p.length <= from) continue;
-            if (td.audio) addSegment(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to);
+            if (td.audio) addSegment(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to, p.fadeIn, p.fadeOut, p.fadeInCurve, p.fadeOutCurve);
             else emitClip(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to, b0, bps, n, ev, m_rng);
         }
     }
@@ -1117,9 +1117,10 @@ constexpr double kGrainIn   = 0.0003;  // s: Beats mode, start of a slice that d
 
 } // namespace
 
-void Engine::addSegment(const ClipData& c, double origin, double start, double lo, double hi, double from, double to) {
+void Engine::addSegment(const ClipData& c, double origin, double start, double lo, double hi, double from, double to,
+                        double fadeIn, double fadeOut, double inCurve, double outCurve) {
     if (m_segCount >= int(std::size(m_segs)) || !c.audio || (!c.sample && !c.comped()) || to <= from) return;
-    m_segs[m_segCount++] = {&c, origin, start, lo, hi, std::max(from, lo), std::min(to, hi)};
+    m_segs[m_segCount++] = {&c, origin, start, lo, hi, std::max(from, lo), std::min(to, hi), std::min(fadeIn, hi - lo), std::min(fadeOut, hi - lo), inCurve, outCurve};
 }
 
 Stretcher* Engine::stretchVoice(int clipId, double origin) {
@@ -1180,6 +1181,8 @@ void Engine::renderAudio(double b0, double bps, double tempo, int n, float* L, f
                 fade = std::min(fade, (loopEnd - local) / edge);
                 if (sinceLaunch >= firstPass) fade = std::min(fade, (local - c.loopStart + bps) / edgeIn);   // after a wrap, not while running into the brace
             }
+            if (g.fadeIn > 0) fade *= fadeGain((b - g.lo) / g.fadeIn, g.inCurve);      // the placement's fades (0.33)
+            if (g.fadeOut > 0) fade *= fadeGain((g.hi - b) / g.fadeOut, g.outCurve);
             if (fade <= 0) continue;
             if (c.comped()) {   // a loop-recorded clip: from its takes, through the comp
                 renderComp(c, local, fade, secPerBeat, L[s], R[s]);

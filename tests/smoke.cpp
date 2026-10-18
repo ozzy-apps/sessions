@@ -8521,6 +8521,93 @@ int main(int argc, char** argv) {
         }
     }
 
+
+    // ---- Milestone 33: fades on Arrangement clips (the placement's fade-in / fade-out, their curves, the handles)
+    {
+        const QString toneWav = audioDir.filePath("tone 2s.wav");
+        {
+            std::vector<float> v(96000);
+            for (size_t i = 0; i < v.size(); ++i) v[i] = 0.5f * std::sin(2 * 3.14159265f * 440.0f * float(i) / 48000.0f);
+            writeMonoWav(toneWav, v, 48000);
+        }
+        auto rmsSec = [](const std::vector<float>& out, double a, double b) { return rmsOf(out, size_t(a * 96000), size_t(b * 96000)); };   // interleaved stereo
+        // the engine: a one-beat fade-in and fade-out on a four-beat tone at 120
+        {
+            Project p; audioProject(p, toneWav);
+            ArrangementClip& a = p.tracks[0].arrangement[0];
+            a.fadeIn = 1; a.fadeOut = 1;
+            std::vector<float> lin = playArrangement(p, 96000);
+            CHECK(rmsSec(lin, 0.0, 0.05) < 0.04f && near(int(rmsSec(lin, 0.24, 0.26) * 1000), 177, 30) && rmsSec(lin, 0.6, 0.9) > 0.3f,
+                  "M33 fades: a one-beat fade-in rises from silence through half level to full");
+            CHECK(near(int(rmsSec(lin, 1.74, 1.76) * 1000), 177, 30) && rmsSec(lin, 1.95, 2.0) < 0.04f, "M33 fades: the fade-out falls to silence at the clip's end");
+            a.fadeInCurve = 0.2;
+            std::vector<float> slow = playArrangement(p, 96000);
+            a.fadeInCurve = 0.8;
+            std::vector<float> fast = playArrangement(p, 96000);
+            CHECK(rmsSec(slow, 0.24, 0.26) < 0.1f && rmsSec(fast, 0.24, 0.26) > 0.25f && std::fabs(fadeGain(0.5, 0.2) - 0.2) < 1e-9 && std::fabs(fadeGain(0.5, 0.5) - 0.5) < 1e-9,
+                  "M33 fades: the curve is the level half-way along: 0.2 starts slow, 0.8 fast");
+            a.fadeIn = a.fadeOut = 0; a.fadeInCurve = 0.5;
+            std::vector<float> none = playArrangement(p, 96000);
+            CHECK(rmsSec(none, 0.01, 0.05) > 0.3f, "M33 fades: no fade, the clip starts at full level (the 0.3 ms declick aside)");
+            // the set file and the undo state carry them
+            a.fadeIn = 0.5; a.fadeOut = 1.25; a.fadeInCurve = 0.3; a.fadeOutCurve = 0.75;
+            const QString setPath = audioDir.filePath("fades/fades.sessions");
+            QDir().mkpath(audioDir.filePath("fades"));
+            setfile::Extras x, y;
+            Project q;
+            CHECK(setfile::save(setPath, p, x) && setfile::load(setPath, q, y) && q.tracks[0].arrangement.size() == 1
+                  && q.tracks[0].arrangement[0].fadeIn == 0.5 && q.tracks[0].arrangement[0].fadeOut == 1.25
+                  && q.tracks[0].arrangement[0].fadeInCurve == 0.3 && q.tracks[0].arrangement[0].fadeOutCurve == 0.75 && q.captureEditState() == p.captureEditState(),
+                  "M33 sets: a placement's fades and curves round-trip (captureEditState ==)");
+            // ops: a split keeps the fade-in on the left and the fade-out on the right; Duplicate Time copies both
+            arrangement::split(p, p.tracks[0], 2);
+            const QVector<ArrangementClip>& arr = p.tracks[0].arrangement;
+            CHECK(arr.size() == 2 && arr[0].fadeIn == 0.5 && arr[0].fadeOut == 0 && arr[1].fadeIn == 0 && arr[1].fadeOut == 1.25 && arr[1].fadeOutCurve == 0.75,
+                  "M33 ops: a split leaves the fade-in with the left part and the fade-out with the right");
+            arrangement::duplicateTime(p, 0, 4);
+            CHECK(p.tracks[0].arrangement.size() == 4 && p.tracks[0].arrangement[2].fadeIn == 0.5 && p.tracks[0].arrangement[3].fadeOut == 1.25,
+                  "M33 ops: Duplicate Time copies the fades with the clips");
+        }
+        // the view: the squares at the top corners set the lengths, the circles the curves; Reset Fades
+        {
+            Project p; audioProject(p, toneWav);
+            audio::Engine e(&p);
+            Transport t(&p, &e);
+            ArrangementView arr(&p, &t);
+            arr.resize(1000, 400); arr.show();
+            QApplication::processEvents();
+            arr.setFollow(false);
+            arr.zoomToFit();
+            QApplication::processEvents();
+            const QRect lane = arr.laneRect(0);
+            const int top = lane.top(), h = lane.height();
+            const int sqY = top + 17, bottom = top + h - 2, bh = h - 15;
+            auto& a = p.tracks[0].arrangement[0];
+            const int steps0 = p.undoStack()->count();
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(2)), top + 30));   // hover: the handles show
+            QTest::mousePress(&arr, Qt::LeftButton, Qt::NoModifier, QPoint(int(arr.beatToX(0)) + 4, sqY));
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(0.5)), sqY));
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(1)), sqY));
+            QTest::mouseRelease(&arr, Qt::LeftButton, Qt::NoModifier, QPoint(int(arr.beatToX(1)), sqY));
+            CHECK(std::fabs(a.fadeIn - 1) < 0.13 && a.fadeOut == 0 && p.undoStack()->count() == steps0 + 1, "M33 view: dragging the top-left square to beat 2 makes a one-beat fade-in, one undo step");
+            const int circleY = int(bottom - 0.5 * bh), up = int(0.3 * bh);   // a third of the body up: the curve's level goes from 0.5 to about 0.8
+            QTest::mousePress(&arr, Qt::LeftButton, Qt::NoModifier, QPoint(int(arr.beatToX(a.fadeIn / 2)), circleY));
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(a.fadeIn / 2)), circleY - up / 2));
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(a.fadeIn / 2)), circleY - up));
+            QTest::mouseRelease(&arr, Qt::LeftButton, Qt::NoModifier, QPoint(int(arr.beatToX(a.fadeIn / 2)), circleY - up));
+            CHECK(a.fadeInCurve > 0.65 && a.fadeInCurve < 0.9 && std::fabs(a.fadeIn - 1) < 0.13, "M33 view: dragging the circle up bends the curve towards a fast start");
+            QTest::mousePress(&arr, Qt::LeftButton, Qt::NoModifier, QPoint(int(arr.beatToX(4)) - 5, sqY));
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(3.5)), sqY));
+            QTest::mouseMove(&arr, QPoint(int(arr.beatToX(3)), sqY));
+            QTest::mouseRelease(&arr, Qt::LeftButton, Qt::NoModifier, QPoint(int(arr.beatToX(3)), sqY));
+            CHECK(std::fabs(a.fadeOut - 1) < 0.13 && std::fabs(a.length - 4) < 1e-9 && p.undoStack()->count() == steps0 + 3, "M33 view: the top-right square makes the fade-out (the clip's length stays)");
+            arr.resetFades();
+            const bool reset = a.fadeIn == 0 && a.fadeOut == 0 && a.fadeInCurve == 0.5;
+            p.undoStack()->undo();
+            CHECK(reset && std::fabs(a.fadeOut - 1) < 0.13 && a.fadeInCurve > 0.65, "M33 view: Reset Fades clears them in one step, undo brings them back");
+        }
+    }
+
     std::printf("%d failure(s)\n", failures);
     return failures ? 1 : 0;
 }

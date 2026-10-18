@@ -21,7 +21,11 @@
 //    (returns: Pre / Post), volume and pan fields, send fields. Drag a field up or down
 //    (Shift: fine), double-click it to reset.
 //  - return tracks as slim lanes under the tracks (no clips), then the Main lane (main volume)
-//  - audio clips show their waveform; drop audio files (browser, file manager) on an audio
+//  - audio clips show their waveform, and their fades (0.33): hover a clip and a square sits at
+//    each top corner; drag it sideways for a fade-in / fade-out of that length (the grid; Alt:
+//    free), then drag the round handle on the curve up or down for its shape; right-click →
+//    Reset Fades. Fades belong to the placement (a split keeps the fade-in left, the fade-out right)
+//  - drop audio files (browser, file manager) on an audio
 //    lane to place them at the snapped beat, anywhere else for a new audio track
 //  - devices (browser items, presets, device panels dragged by their title) dropped on a
 //    track's lane or header go on that track; on the Main lane or below it, onto a new track
@@ -63,6 +67,7 @@ public:
     void loopSelection();        // Ctrl+L
     void splitAtSelection();     // Ctrl+E
     void consolidateSelection(); // Ctrl+J
+    void resetFades();           // the selected clip's fades go (the context menu)
     void insertTime();
     void deleteTime();
     void duplicateTime();
@@ -130,8 +135,14 @@ protected:
     void dragMoveEvent(QDragMoveEvent*) override;
     void dragLeaveEvent(QDragLeaveEvent*) override;
     void dropEvent(QDropEvent*) override;
+    void leaveEvent(QEvent*) override;
 
 private:
+    // The fade handles of an audio placement on a lane (0.33): the squares at the top of the
+    // body where each fade ends (at the corner with no fade), the circles half-way along each curve.
+    struct FadeHandles { QPointF inSq, outSq, inCircle, outCircle; };
+    FadeHandles fadeHandles(const ArrangementClip& a, int lane) const;
+    bool   hovered(const ArrangementClip& a) const;   // the clip under the mouse (its handles show)
     int    laneWidth() const { return width() - m_headerW; }
     int    trackAt(int y) const;      // lane index (tracks then returns), -1 outside
     ArrangementClip* clipAt(int track, double beat);
@@ -196,7 +207,9 @@ private:
     int    m_selLocator = -1;
 
     // interaction state
-    enum class Drag { None, Ruler, Move, Resize, ResizeLeft, Time, Point, Header, Locator, LoopMove, LoopStart, LoopEnd, Overview, Field, MoveRange };
+    enum class Drag { None, Ruler, Move, Resize, ResizeLeft, Time, Point, Header, Locator, LoopMove, LoopStart, LoopEnd, Overview, Field, MoveRange,
+                      FadeIn, FadeOut, FadeInCurve, FadeOutCurve };
+    int     m_hoverLane = -1, m_hoverIndex = -1;   // the clip under the mouse (lane, index in its arrangement)
     double  m_fieldWrap = 0;   // Drag::Field: pixels the endless drag has warped the pointer by (added to the drag's distance)
     // Drag::ResizeLeft: the clip's left edge: the start moves, the audio stays put (the offset follows; a
     // looping clip wraps, a one-shot stops at its audio's start)
