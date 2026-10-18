@@ -7853,9 +7853,9 @@ int main(int argc, char** argv) {
             QApplication::processEvents();
             auto* tree = br.findChild<QTreeWidget*>("browserItems");
             QTreeWidgetItem* kicks = nullptr;
-            for (int i = 0; tree && i < tree->topLevelItemCount(); ++i) if (tree->topLevelItem(i)->text(0).endsWith(" Kicks")) kicks = tree->topLevelItem(i);
+            for (int i = 0; tree && i < tree->topLevelItemCount(); ++i) if (tree->topLevelItem(i)->text(0) == "Kicks") kicks = tree->topLevelItem(i);
             QTreeWidgetItem* deep = nullptr;
-            for (int i = 0; kicks && i < kicks->childCount(); ++i) if (kicks->child(i)->text(0).endsWith(" Deep")) deep = kicks->child(i);
+            for (int i = 0; kicks && i < kicks->childCount(); ++i) if (kicks->child(i)->text(0) == "Deep") deep = kicks->child(i);
             const QStringList items = br.listedItems();
             CHECK((tree && kicks && deep && deep->childCount() == 1 && kicks->childCount() == 2 && tree->topLevelItemCount() == 2 && items.size() == 3
                    && items.contains(lib.filePath("Kicks/Deep/sub.wav") + "|s") && !kicks->isExpanded()),
@@ -7865,8 +7865,8 @@ int main(int argc, char** argv) {
             QApplication::processEvents();
             tree = br.findChild<QTreeWidget*>("browserItems");
             kicks = nullptr;
-            for (int i = 0; tree && i < tree->topLevelItemCount(); ++i) if (tree->topLevelItem(i)->text(0).endsWith(" Kicks")) kicks = tree->topLevelItem(i);
-            CHECK((kicks && kicks->isExpanded() && kicks->text(0).startsWith(QStringLiteral("▾"))), "M22 browser: a folder you opened stays open across a rebuild (and shows ▾)");
+            for (int i = 0; tree && i < tree->topLevelItemCount(); ++i) if (tree->topLevelItem(i)->text(0) == "Kicks") kicks = tree->topLevelItem(i);
+            CHECK((kicks && kicks->isExpanded() && !kicks->icon(0).isNull() && kicks->text(0) == "Kicks"), "M22 browser: a folder you opened stays open across a rebuild with its SVG folder icon");
             QLineEdit* search = br.findChild<QLineEdit*>();
             if (search) search->setText("sub");
             const QStringList found = br.listedItems();

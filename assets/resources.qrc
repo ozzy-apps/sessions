@@ -11,5 +11,31 @@
     <file>icon/variants/E-paper.svg</file>
     <file>icon/variants/F-dusk.svg</file>
     <file>sessions.desktop</file>
+    <file>browser/sounds.svg</file>
+    <file>browser/drums.svg</file>
+    <file>browser/instrument.svg</file>
+    <file>browser/audio-effect.svg</file>
+    <file>browser/guitar.svg</file>
+    <file>browser/midi-effect.svg</file>
+    <file>browser/impulse.svg</file>
+    <file>browser/library.svg</file>
+    <file>browser/folder.svg</file>
+    <file>browser/folder-open.svg</file>
+    <file>browser/add-folder.svg</file>
+    <file>browser/project.svg</file>
+    <file>browser/sample.svg</file>
+    <file>browser/capture.svg</file>
+    <file>browser/clip.svg</file>
+    <file>browser/preset.svg</file>
+    <file>browser/rack.svg</file>
+    <file>browser/sampler.svg</file>
+    <file>browser/wavetable.svg</file>
+    <file>browser/fm.svg</file>
+    <file>browser/oscillator.svg</file>
+    <file>browser/search.svg</file>
+    <file>browser/headphones.svg</file>
+    <file>browser/chevron-right.svg</file>
+    <file>browser/chevron-down.svg</file>
+    <file>browser/close.svg</file>
   </qresource>
 </RCC>

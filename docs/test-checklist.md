@@ -1,5 +1,14 @@
 # Sessions 0.23 — things to try by hand
 
+## 0.34 · Browser appearance and denser Osmium voice layout
+
+1. Check category and item SVG icons at 100%, 125% and 200% scale. Instruments, drums, effects, captures, samples, clips and folders have meaningful distinct symbols; filenames contain no decorative characters.
+2. Drag the divider between Categories and items. Resize the whole browser narrow/wide. The sidebar width is remembered, long names elide and the current location/item count remain readable.
+3. Add a sample/capture folder with subfolders. Click its arrow, click its row, use Left/Right keys and double-click a leaf. Expansion, activation, exact drag payloads and context actions still work. Open folders and selection survive a theme change; opened nodes survive a rescan.
+4. Search by part of a filename, then clear using the X action. Results remain grouped by source and their count matches the files. Instrument and preset double-clicks still load the correct device.
+5. Headphones on: clicking audio previews once at Cue volume and shows its filename. Headphones off: no automatic preview. This setting persists. Captures/devices/folders don't preview as audio.
+6. Osmium → Voice & mixer: widen the pane and verify all controls fit in fewer rows with the same base/range hit areas. Narrow it again and scroll if needed. Macros keep their large size.
+
 ## 0.33 · Fades on Arrangement clips
 
 1. Put an audio clip on the Arrangement (drop a sample on a lane). Hover it → a small square at each top corner of its body. Drag the left one to the right → a fade-in: the line rises from the corner, the part above it is shaded, the waveform stays. The length snaps to the grid; Alt drags it freely. Ctrl+Z takes it back in one step.

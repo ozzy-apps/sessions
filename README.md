@@ -128,6 +128,18 @@ Drag the bar between the clip slots and the mixer to show more slots or more mix
 
 **Group tracks:** Ctrl+click (or Shift+click) track titles to select several, then **Create → Group Tracks** (Ctrl+G). The group track's fader, sends and devices act on its tracks' mixed sound, its solo plays all of them, and its slots launch (or stop) its tracks' clips in that scene. Click the ▾ on its title to fold its tracks away, in the Session View and the Arrangement; **Ungroup Tracks** (Ctrl+Shift+G) frees them again.
 
+## Browser
+
+Updated in **0.34.0**.
+
+The browser uses original SVG icons for categories, instruments, effects, captures, samples and clips. Folder arrows, open-folder icons, subtle hierarchy guides and child counts make nested libraries easier to scan. Drag the internal divider to resize the categories column; its width is remembered. The header shows the current location and total items, and search keeps exact file/device names separate from their icons.
+
+The **headphones Preview** control toggles sample audition at the Cue volume. The selected sample's filename appears beside it. Colors follow Dark, Light and custom themes without resetting the selected item or expanded folders.
+
+Osmium's **Voice & mixer** page also uses the available width to fit more controls per row, retaining the larger knob centers and separate modulation rings.
+
+[Browser preview](docs/screenshots/browser/browser-instruments-dark.png) · [Folder preview](docs/screenshots/browser/browser-captures-dark.png) · [Voice layout](docs/screenshots/browser/osmium-voice-efficient.png)
+
 ## Devices
 
 Double-click a device in the browser (or drag it onto a track) and it appears in the Device View (Shift+Tab).

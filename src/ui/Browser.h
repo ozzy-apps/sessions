@@ -12,7 +12,8 @@
 // Laid out: a sidebar (Categories, then Places: User Library (your presets), your
 // sample folders, the current set's folder and Add Folder…) next to the content pane. Folders are
 // remembered in QSettings "browser/folders"; right-click one to remove it. Clicking a
-// sample previews it when Preview is on.
+// sample previews it when the headphones Preview control is on. The sidebar divider is resizable;
+// category/item decoration uses the embedded theme-colored SVGs in BrowserIcons.
 //
 // The content pane is a tree (0.22): a sample folder shows its subfolders as nodes you open and
 // close (what you opened stays open while you browse), the User Library its presets, then a
@@ -31,6 +32,7 @@ class QTreeWidget;
 class QTreeWidgetItem;
 class QMimeData;
 class QToolButton;
+class QLabel;
 
 namespace sessions {
 
@@ -65,6 +67,7 @@ signals:
 private:
     void rebuild();
     void saveFolders();
+    void refreshAppearance();
     QStringList scan(const QString& dir) const;   // audio files below `dir`, relative paths
     QTreeWidgetItem* leaf(QTreeWidgetItem* parent, const QString& text, const QString& payload, const QString& tip);
     QTreeWidgetItem* node(QTreeWidgetItem* parent, const QString& text, const QString& key, const QString& path = {});   // a folder: open when it was
@@ -76,6 +79,9 @@ private:
     QTreeWidget* m_items;
     QSet<QString> m_expanded;   // the folder nodes you opened (by key), so a rebuild keeps them open
     QToolButton* m_preview;
+    QLabel* m_location;
+    QLabel* m_count;
+    QLabel* m_previewName;
     QString      m_category = "Instruments";
     QStringList  m_folders;
     QString      m_projectFolder;

@@ -146,7 +146,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     middle->addWidget(m_mainStack);
     middle->setStretchFactor(0, 0);
     middle->setStretchFactor(1, 1);
-    middle->setSizes({292, 900});
+    middle->setSizes({336, 900});
     vsplit->addWidget(middle);
 
     // ---- bottom: info | detail (clip / device)

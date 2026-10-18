@@ -1,5 +1,5 @@
 #include "Browser.h"
-#include "Icons.h"
+#include "BrowserIcons.h"
 #include "core/Theme.h"
 #include "InfoView.h"
 #include "core/Sample.h"
@@ -32,6 +32,12 @@
 #include <QDesktopServices>
 #include <QInputDialog>
 #include <QMessageBox>
+#include <QSplitter>
+#include <QStyledItemDelegate>
+#include <QAction>
+#include <QPainter>
+#include <QHeaderView>
+#include <QScrollBar>
 
 namespace sessions {
 
@@ -81,19 +87,82 @@ const char* kAddIrFolder = "add-ir-folder";
 const QString kFolderPrefix = QStringLiteral("folder:");
 const QString kIrFolderPrefix = QStringLiteral("irfolder:");
 
-QString glyph(char k) {
-    switch (k) { case 'i': return "◆ "; case 'f': return "◇ "; case 'm': return "◈ "; case 'n': return "≈ "; case 'r': return "◠ "; default: return "∿ "; }
+using Symbol = browsericons::Symbol;
+Symbol categoryIcon(const QString& name) {
+    if (name == "Sounds") return Symbol::Sounds;
+    if (name == "Drums") return Symbol::Drums;
+    if (name == "Instruments") return Symbol::Instrument;
+    if (name == "Audio Effects") return Symbol::AudioEffect;
+    if (name == "Guitar") return Symbol::Guitar;
+    if (name == Browser::irCategory()) return Symbol::Impulse;
+    return Symbol::MidiEffect;
+}
+Symbol payloadIcon(const QString& payload) {
+    const QChar kind = payload.isEmpty() ? QChar() : payload.back();
+    if (kind == 's') return Symbol::Sample;
+    if (kind == 'n') return Symbol::Capture;
+    if (kind == 'r') return Symbol::Impulse;
+    if (kind == 'c') return Symbol::Clip;
+    if (kind == 'u') return Symbol::Preset;
+    const DeviceType type = deviceType(payload.chopped(2));
+    if (isRackType(type)) return Symbol::Rack;
+    if (isGuitarType(type)) return type == DeviceType::Nam ? Symbol::Capture : Symbol::Guitar;
+    switch (type) {
+    case DeviceType::Sampler: return Symbol::Sampler;
+    case DeviceType::WavetableSynth: return Symbol::Wavetable;
+    case DeviceType::FMSynth: return Symbol::Fm;
+    case DeviceType::Monolith: case DeviceType::Osmium: return Symbol::Oscillator;
+    case DeviceType::DrumKit: case DeviceType::Drum808: case DeviceType::DrumAcoustic: case DeviceType::DrumStudio: return Symbol::Drums;
+    default: return kind == 'i' ? Symbol::Instrument : kind == 'm' ? Symbol::MidiEffect : Symbol::AudioEffect;
+    }
 }
 
-QString categoryGlyph(const QString& name) {
-    if (name == "Sounds") return "♪  ";
-    if (name == "Drums") return "▦  ";
-    if (name == "Instruments") return "◆  ";
-    if (name == "Audio Effects") return "◇  ";
-    if (name == "Guitar") return "♫  ";
-    if (name == Browser::irCategory()) return "◠  ";
-    return "◈  ";
-}
+class BrowserLabel : public QLabel {
+public:
+    using QLabel::QLabel;
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this); p.setFont(font()); p.setPen(palette().color(QPalette::WindowText));
+        p.drawText(contentsRect(), Qt::AlignVCenter | Qt::AlignLeft, fontMetrics().elidedText(text(), Qt::ElideMiddle, contentsRect().width()));
+    }
+};
+
+// Original SVGs and one row rhythm for both lists. Colors are read while painting,
+// so switching themes doesn't rebuild the library or lose its current selection.
+class BrowserRows : public QStyledItemDelegate {
+public:
+    BrowserRows(bool sidebar, QObject* parent) : QStyledItemDelegate(parent), m_sidebar(sidebar) {}
+    QSize sizeHint(const QStyleOptionViewItem& o, const QModelIndex&) const override {
+        return {100, std::max(28, QFontMetrics(o.font).height() + 11)};
+    }
+    void paint(QPainter* p, const QStyleOptionViewItem& option, const QModelIndex& index) const override {
+        QStyleOptionViewItem o(option); initStyleOption(&o, index);
+        const bool header = m_sidebar && index.data(Qt::UserRole).toString() == "header";
+        const bool selected = o.state & QStyle::State_Selected, hover = o.state & QStyle::State_MouseOver;
+        const bool folder = !m_sidebar && !index.data(Qt::UserRole + 1).toString().isEmpty();
+        p->save(); p->fillRect(o.rect, selected ? theme::panel2 : hover && !header ? theme::itemHover : m_sidebar ? theme::sidebar : theme::panel);
+        if (header) {
+            auto f = o.font; f.setBold(true); f.setPointSizeF(std::max(7.0, f.pointSizeF() - 1)); p->setFont(f); p->setPen(theme::textFaint);
+            p->drawText(o.rect.adjusted(11, 4, -4, 0), Qt::AlignVCenter, o.text); p->restore(); return;
+        }
+        if (m_sidebar && selected) p->fillRect(QRect(o.rect.left(), o.rect.top() + 3, 2, o.rect.height() - 6), theme::accent);
+        const int iconX = o.rect.left() + (m_sidebar ? 10 : 4), iconY = o.rect.center().y() - 8;
+        if (!o.icon.isNull()) o.icon.paint(p, QRect(iconX, iconY, 18, 18), Qt::AlignCenter, selected ? QIcon::Selected : QIcon::Normal,
+                                         folder && (o.state & QStyle::State_Open) ? QIcon::On : QIcon::Off);
+        QRect textRect = o.rect.adjusted(m_sidebar ? 36 : 29, 0, -8, 0);
+        if (folder && o.rect.width() > 150) {
+            const int rows = index.model()->rowCount(index);
+            const int count = rows == 1 && !(index.model()->index(0, 0, index).flags() & Qt::ItemIsEnabled) ? 0 : rows; auto f = o.font; f.setPointSizeF(std::max(7.0, f.pointSizeF() - 1));
+            p->setFont(f); p->setPen(theme::textFaint); p->drawText(textRect, Qt::AlignRight | Qt::AlignVCenter, QString::number(count)); textRect.adjust(0, 0, -27, 0);
+        }
+        auto f = o.font; f.setBold(folder); p->setFont(f); p->setPen(selected ? theme::textBright : index.flags() & Qt::ItemIsEnabled ? theme::text : theme::textFaint);
+        p->drawText(textRect, Qt::AlignVCenter, QFontMetrics(f).elidedText(o.text, Qt::ElideRight, std::max(0, textRect.width())));
+        if ((o.state & QStyle::State_HasFocus) && !m_sidebar) { p->setPen(QPen(theme::withAlpha(theme::accent, 120), 1)); p->setBrush(Qt::NoBrush); p->drawRect(o.rect.adjusted(0, 1, -1, -2)); }
+        p->restore();
+    }
+private:
+    bool m_sidebar;
+};
 
 QHash<QString, QStringList>& scanCache() { static QHash<QString, QStringList> c; return c; }
 
@@ -106,6 +175,16 @@ class ItemTree : public QTreeWidget {
 public:
     using QTreeWidget::QTreeWidget;
 protected:
+    void drawBranches(QPainter* p, const QRect& rect, const QModelIndex& index) const override {
+        p->fillRect(rect, selectionModel()->isSelected(index) ? theme::panel2 : theme::panel);
+        if (model()->hasChildren(index)) browsericons::icon(isExpanded(index) ? Symbol::ChevronDown : Symbol::ChevronRight)
+            .paint(p, QRect(rect.right() - indentation() + 3, rect.center().y() - 6, 13, 13));
+        if (index.parent().isValid()) {
+            p->setPen(QPen(theme::withAlpha(theme::textFaint, 38), 1));
+            const int x = rect.right() - indentation() + 9;
+            p->drawLine(x, rect.top(), x, rect.bottom());
+        }
+    }
     void mousePressEvent(QMouseEvent* e) override { m_pressPos = e->pos(); QTreeWidget::mousePressEvent(e); }
     void mouseMoveEvent(QMouseEvent* e) override {
         if (!(e->buttons() & Qt::LeftButton)) { QTreeWidget::mouseMoveEvent(e); return; }
@@ -184,24 +263,30 @@ QStringList Browser::clipFilesIn(const QMimeData* mime) {
 
 Browser::Browser(QWidget* parent) : QWidget(parent) {
     setObjectName("browser");
-    setMinimumWidth(220);   // the splitter next to it sets the width (View > Browser hides it)
+    setMinimumWidth(280);   // the splitter next to it sets the width (View > Browser hides it)
     auto* lay = new QVBoxLayout(this);
     lay->setContentsMargins(6, 6, 6, 6);
     lay->setSpacing(4);
 
     m_search = new QLineEdit(this);
-    m_search->setPlaceholderText("Search");
-    m_search->setClearButtonEnabled(true);
+    m_search->setObjectName("browserSearch"); m_search->setAccessibleName("Search library");
+    m_search->setPlaceholderText("Search"); m_search->setFixedHeight(30);
+    auto* searchIcon = m_search->addAction(browsericons::icon(Symbol::Search), QLineEdit::LeadingPosition); searchIcon->setObjectName("browserSearchIcon");
+    auto* clear = m_search->addAction(browsericons::icon(Symbol::Close), QLineEdit::TrailingPosition); clear->setObjectName("browserClearSearch");
+    clear->setToolTip("Clear search"); clear->setVisible(false); connect(clear, &QAction::triggered, m_search, &QLineEdit::clear);
+    connect(m_search, &QLineEdit::textChanged, clear, [clear](const QString& text) { clear->setVisible(!text.isEmpty()); });
     InfoView::attach(m_search, "Search", "Filters items, and the samples in your folders, as you type.");
     connect(m_search, &QLineEdit::textChanged, this, &Browser::rebuild);
     lay->addWidget(m_search);
 
-    auto* panes = new QHBoxLayout;
-    panes->setContentsMargins(0, 0, 0, 0);
-    panes->setSpacing(1);
+    auto* panes = new QSplitter(Qt::Horizontal, this); panes->setObjectName("browserPanes");
+    panes->setChildrenCollapsible(false); panes->setHandleWidth(4);
     m_categories = new QListWidget(this);
     m_categories->setObjectName("browserSidebar");
-    m_categories->setFixedWidth(128);
+    m_categories->setMinimumWidth(142); m_categories->setMaximumWidth(232);
+    m_categories->setItemDelegate(new BrowserRows(true, m_categories));
+    m_categories->setIconSize(QSize(18, 18)); m_categories->setMouseTracking(true);
+    m_categories->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_categories->setFocusPolicy(Qt::NoFocus);
     m_categories->setContextMenuPolicy(Qt::CustomContextMenu);
     InfoView::attach(m_categories, "Library", "Click a category to show what it holds. Add Folder… adds a folder of samples; right-click a folder to remove it.");
@@ -258,33 +343,33 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
     });
     panes->addWidget(m_categories);
 
-    auto* content = new QVBoxLayout;
-    content->setContentsMargins(0, 0, 0, 0);
-    content->setSpacing(0);
-    auto* nameHeader = new QLabel("Name", this);
-    nameHeader->setObjectName("browserColumnHeader");
-    nameHeader->setFixedHeight(18);
-    content->addWidget(nameHeader);
+    auto* results = new QWidget(panes); auto* content = new QVBoxLayout(results);
+    content->setContentsMargins(0, 0, 0, 0); content->setSpacing(0);
+    auto* heading = new QWidget(results); heading->setObjectName("browserContentHeader"); heading->setFixedHeight(28);
+    auto* header = new QHBoxLayout(heading); header->setContentsMargins(9, 0, 9, 0); header->setSpacing(6);
+    m_location = new BrowserLabel(heading); m_location->setObjectName("browserLocation"); m_location->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_count = new QLabel(heading); m_count->setObjectName("browserCount"); header->addWidget(m_location, 1); header->addWidget(m_count);
+    content->addWidget(heading);
     m_items = new ItemTree(this);
     m_items->setObjectName("browserItems");
     m_items->setHeaderHidden(true);
     m_items->setColumnCount(1);
-    m_items->setRootIsDecorated(false);   // folders carry their own ▸ / ▾ (the themes would hide Qt's arrows)
-    m_items->setIndentation(14);
+    m_items->setRootIsDecorated(true);
+    m_items->setIndentation(18);
+    m_items->setItemDelegate(new BrowserRows(false, m_items));
+    m_items->setIconSize(QSize(18, 18));
+    m_items->setMouseTracking(true);
+    m_items->header()->setStretchLastSection(true);
+    m_items->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     m_items->setUniformRowHeights(true);
-    m_items->setExpandsOnDoubleClick(true);
+    m_items->setExpandsOnDoubleClick(false);
     m_items->setContextMenuPolicy(Qt::CustomContextMenu);
     InfoView::attach(m_items, "Browser", "Double-click an item to add it to the selected track, or drag it: onto a track (its column, mixer strip or Arrangement lane), "
                                          "a place in the Device View, or the empty space for a new track. Samples go onto audio tracks or into a Sampler. "
                                          "Folders open and close with their arrows; right-click an item for more.");
     connect(m_items, &QTreeWidget::customContextMenuRequested, this, &Browser::itemMenu);
-    auto mark = [](QTreeWidgetItem* it, bool open) {
-        QString t = it->text(0);
-        if (t.startsWith(QStringLiteral("▸ ")) || t.startsWith(QStringLiteral("▾ "))) t = t.mid(2);
-        it->setText(0, (open ? QStringLiteral("▾ ") : QStringLiteral("▸ ")) + t);
-    };
-    connect(m_items, &QTreeWidget::itemExpanded, this, [this, mark](QTreeWidgetItem* it) { const QString k = it->data(0, kKeyRole).toString(); if (!k.isEmpty()) { m_expanded.insert(k); mark(it, true); } });
-    connect(m_items, &QTreeWidget::itemCollapsed, this, [this, mark](QTreeWidgetItem* it) { const QString k = it->data(0, kKeyRole).toString(); if (!k.isEmpty()) { m_expanded.remove(k); mark(it, false); } });
+    connect(m_items, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem* it) { const auto key = it->data(0, kKeyRole).toString(); if (!key.isEmpty()) m_expanded.insert(key); });
+    connect(m_items, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem* it) { m_expanded.remove(it->data(0, kKeyRole).toString()); });
     m_expanded = {"ir:builtin", "ir:mine", "user:clips", "user:captures"};   // open to begin with; close one and it stays closed
     connect(presets::Library::instance(), &presets::Library::changed, this, &Browser::rebuild);
     connect(m_items, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem* it) {
@@ -299,26 +384,41 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
         if (payload.endsWith("|s") && m_preview->isChecked()) emit previewRequested(payload.chopped(2));
     });
     content->addWidget(m_items, 1);
-    panes->addLayout(content, 1);
-    lay->addLayout(panes, 1);
+    panes->addWidget(results); panes->setStretchFactor(0, 0); panes->setStretchFactor(1, 1);
+    panes->setSizes({156, 180});
+    connect(panes, &QSplitter::splitterMoved, this, [panes] { QSettings("Sessions", "Sessions").setValue("browser/sidebarWidth", panes->sizes().value(0)); });
+    const int sidebarWidth = QSettings("Sessions", "Sessions").value("browser/sidebarWidth", 156).toInt();
+    panes->setSizes({std::clamp(sidebarWidth, 142, 232), 200});
+    lay->addWidget(panes, 1);
 
-    m_preview = new QToolButton(this);
-    m_preview->setText("Preview");
-    m_preview->setIcon(icons::icon(icons::Glyph::Play, theme::onAccent, theme::onAccent, 11));
-    m_preview->setIconSize(QSize(11, 11));
-    m_preview->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    connect(theme::notifier(), &theme::Notifier::changed, m_preview, [b = m_preview] { b->setIcon(icons::icon(icons::Glyph::Play, theme::onAccent, theme::onAccent, 11)); });
-    m_preview->setCheckable(true);
-    m_preview->setFocusPolicy(Qt::NoFocus);
-    m_preview->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    auto* footer = new QWidget(this); footer->setObjectName("browserPreviewBar");
+    auto* previewRow = new QHBoxLayout(footer); previewRow->setContentsMargins(0, 4, 0, 0); previewRow->setSpacing(9);
+    m_preview = new QToolButton(footer); m_preview->setObjectName("browserPreview"); m_preview->setAccessibleName("Preview samples");
+    m_preview->setText("Preview"); m_preview->setIcon(browsericons::icon(Symbol::Headphones, true)); m_preview->setIconSize(QSize(18, 18));
+    m_preview->setToolButtonStyle(Qt::ToolButtonTextBesideIcon); m_preview->setCheckable(true); m_preview->setFocusPolicy(Qt::NoFocus);
+    m_preview->setFixedHeight(28); m_preview->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_preview->setChecked(QSettings("Sessions", "Sessions").value("browser/preview", true).toBool());
-    InfoView::attach(m_preview, "Preview", "On: clicking a sample plays it (at the Cue volume).");
+    InfoView::attach(m_preview, "Preview samples", "On: clicking a sample plays it at the Cue volume. The headphones button toggles preview.");
     connect(m_preview, &QToolButton::toggled, this, [](bool on) { QSettings("Sessions", "Sessions").setValue("browser/preview", on); });
-    lay->addWidget(m_preview);
+    m_previewName = new BrowserLabel(footer); m_previewName->setObjectName("browserPreviewName"); m_previewName->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    previewRow->addWidget(m_preview); previewRow->addWidget(m_previewName, 1); lay->addWidget(footer);
+    connect(m_items, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* it) {
+        const QString payload = it ? it->data(0, kPayloadRole).toString() : QString();
+        m_previewName->setText(payload.endsWith("|s") ? QFileInfo(payload.chopped(2)).fileName() : QString());
+        m_previewName->setToolTip(payload.endsWith("|s") ? QDir::toNativeSeparators(payload.chopped(2)) : QString());
+    });
+    connect(theme::notifier(), &theme::Notifier::changed, this, &Browser::refreshAppearance);
 
     for (const QString& dir : QSettings("Sessions", "Sessions").value("browser/folders").toStringList())
         if (QDir(dir).exists()) m_folders << dir;
     rebuild();
+}
+
+void Browser::refreshAppearance() {
+    m_search->findChild<QAction*>("browserSearchIcon")->setIcon(browsericons::icon(Symbol::Search));
+    m_search->findChild<QAction*>("browserClearSearch")->setIcon(browsericons::icon(Symbol::Close));
+    m_preview->setIcon(browsericons::icon(Symbol::Headphones, true));
+    m_categories->viewport()->update(); m_items->viewport()->update();
 }
 
 void Browser::saveFolders() { QSettings("Sessions", "Sessions").setValue("browser/folders", m_folders); }
@@ -388,6 +488,7 @@ QStringList Browser::listedItems() const {
 QTreeWidgetItem* Browser::leaf(QTreeWidgetItem* parent, const QString& text, const QString& payload, const QString& tip) {
     auto* it = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_items);
     it->setText(0, text);
+    if (!payload.isEmpty()) it->setIcon(0, browsericons::icon(payloadIcon(payload)));
     it->setData(0, kPayloadRole, payload);
     if (!tip.isEmpty()) it->setToolTip(0, tip);
     if (payload.isEmpty()) it->setFlags(Qt::NoItemFlags);   // a note ("No audio files here")
@@ -397,7 +498,10 @@ QTreeWidgetItem* Browser::leaf(QTreeWidgetItem* parent, const QString& text, con
 
 QTreeWidgetItem* Browser::node(QTreeWidgetItem* parent, const QString& text, const QString& key, const QString& path) {
     auto* it = parent ? new QTreeWidgetItem(parent) : new QTreeWidgetItem(m_items);
-    it->setText(0, (m_expanded.contains(key) ? QStringLiteral("▾ ") : QStringLiteral("▸ ")) + text);
+    it->setText(0, text);
+    it->setIcon(0, key == "cat:user" ? browsericons::icon(Symbol::Library) : key == "user:clips" ? browsericons::icon(Symbol::Clip)
+        : key == "user:captures" ? browsericons::icon(Symbol::Capture) : key.startsWith("ir:") ? browsericons::icon(Symbol::Impulse)
+        : key.startsWith("cat:") ? browsericons::icon(categoryIcon(text)) : browsericons::folder());
     it->setData(0, kKeyRole, key);
     it->setData(0, kPathRole, path);
     it->setFlags(Qt::ItemIsEnabled | Qt::ItemIsSelectable);
@@ -427,7 +531,7 @@ void Browser::addFiles(QTreeWidgetItem* parent, const QString& dir, const QStrin
         for (const QString& r : d.files) {
             const QString abs = QDir(dir).filePath(r);
             const bool capture = nam::isModelFile(abs);   // a Neural Amp Modeler capture among the samples
-            leaf(into, glyph(capture ? 'n' : 's') + QFileInfo(r).fileName(), abs + (capture ? "|n" : "|s"),
+            leaf(into, QFileInfo(r).fileName(), abs + (capture ? "|n" : "|s"),
                  QDir::toNativeSeparators(abs) + (capture ? "\nNeural Amp Modeler capture: drag it onto an audio track (or a NAM device), or double-click to load it onto the selected track."
                                                           : "\nClick to preview, drag onto a track, or double-click to load."));
         }
@@ -490,6 +594,9 @@ void Browser::rebuild() {
         auto add = [this](const QString& text, const QString& key, const QString& tip = {}) {
             auto* it = new QListWidgetItem(text, m_categories);
             it->setData(Qt::UserRole, key);
+            it->setIcon(key == kUserLibrary ? browsericons::icon(Symbol::Library) : key == kAddFolder || key == kAddIrFolder ? browsericons::icon(Symbol::AddFolder)
+                : key == kFolderPrefix + m_projectFolder ? browsericons::icon(Symbol::Project) : key.startsWith(kFolderPrefix) ? browsericons::folder()
+                : key.startsWith(kIrFolderPrefix) ? browsericons::icon(Symbol::Impulse) : browsericons::icon(categoryIcon(key)));
             if (!tip.isEmpty()) it->setToolTip(tip);
             if (key == m_category) m_categories->setCurrentItem(it);
         };
@@ -501,17 +608,17 @@ void Browser::rebuild() {
             it->setForeground(theme::neutral);
         };
         section("Categories");
-        for (const Category& c : catalogue()) add(categoryGlyph(c.name) + c.name, c.name);
-        add(categoryGlyph(irCategory()) + irCategory(), irCategory(), "Cabinet and room impulse responses: the amp's own cabinets, and the audio files in your Impulse Responses folder "
+        for (const Category& c : catalogue()) add(QString::fromUtf8(c.name), c.name);
+        add(irCategory(), irCategory(), "Cabinet and room impulse responses: the amp's own cabinets, and the audio files in your Impulse Responses folder "
                                                                      "(right-click to open it, or to add a folder of your own). Drag one onto a Guitar Amp, a NAM or a Cabinet device, or onto a track.");
         section("Places");
-        add("★  User Library", kUserLibrary, "Your presets: right-click a device's title and choose Save as Preset.");
+        add("User Library", kUserLibrary, "Your presets: right-click a device's title and choose Save as Preset.");
         if (!m_projectFolder.isEmpty())
-            add("▸  Current Project", kFolderPrefix + m_projectFolder, "The saved set's folder: " + QDir::toNativeSeparators(m_projectFolder));
-        for (const QString& dir : m_folders) add("▸  " + QDir(dir).dirName(), kFolderPrefix + dir, QDir::toNativeSeparators(dir));
-        add("＋ Add Folder…", kAddFolder, "Browse a folder of samples here.");
-        for (const QString& dir : import::irFolders()) add("◠  " + QDir(dir).dirName(), kIrFolderPrefix + dir, "Impulse responses: " + QDir::toNativeSeparators(dir) + "\nRight-click to remove the folder.");
-        add("＋ Add IR Folder…", kAddIrFolder, "Browse a folder of impulse responses here (they're listed under Impulse Responses too).");
+            add("Current Project", kFolderPrefix + m_projectFolder, "The saved set's folder: " + QDir::toNativeSeparators(m_projectFolder));
+        for (const QString& dir : m_folders) add(QDir(dir).dirName(), kFolderPrefix + dir, QDir::toNativeSeparators(dir));
+        add("Add Folder…", kAddFolder, "Browse a folder of samples here.");
+        for (const QString& dir : import::irFolders()) add(QDir(dir).dirName(), kIrFolderPrefix + dir, "Impulse responses: " + QDir::toNativeSeparators(dir) + "\nRight-click to remove the folder.");
+        add("Add IR Folder…", kAddIrFolder, "Browse a folder of impulse responses here (they're listed under Impulse Responses too).");
     }
 
     m_items->clear();
@@ -526,22 +633,22 @@ void Browser::rebuild() {
     auto dropEmpty = [](QTreeWidgetItem* n) { if (n && n->childCount() == 0) delete n; };
     for (const Category& c : catalogue()) {
         if (!searching && QString(c.name) != m_category) continue;
-        QTreeWidgetItem* parent = group(categoryGlyph(c.name) + c.name, QString("cat:") + c.name);
+        QTreeWidgetItem* parent = group(QString::fromUtf8(c.name), QString("cat:") + c.name);
         for (const Item& it : c.items) {
             if (searching && !QString(it.name).toLower().contains(q)) continue;
             const DeviceSpec* spec = deviceSpec(it.name);
-            leaf(parent, glyph(it.kind) + it.name, QString("%1|%2").arg(it.name).arg(it.kind),
+            leaf(parent, QString::fromUtf8(it.name), QString("%1|%2").arg(it.name).arg(it.kind),
                  spec && *spec->help ? QString("%1\nDouble-click to load.").arg(QString::fromUtf8(spec->help)) : QString("%1 — double-click to load").arg(it.name));
         }
         dropEmpty(parent);
     }
     // impulse responses: the built-in cabinets, then the Impulse Responses folder and your IR folders
     if (searching || m_category == irCategory() || m_category.startsWith(kIrFolderPrefix)) {
-        QTreeWidgetItem* parent = group(categoryGlyph(irCategory()) + irCategory(), "cat:ir");
+        QTreeWidgetItem* parent = group(irCategory(), "cat:ir");
         auto addIr = [&](QTreeWidgetItem* into, const QString& path, bool builtin) {
             const QString name = builtin ? audio::builtinName(path) : QFileInfo(path).fileName();
             if (searching && !name.toLower().contains(q)) return;
-            leaf(into, glyph('r') + name, path + "|r",
+            leaf(into, name, path + "|r",
                  (builtin ? "Built-in cabinet impulse response: " + name : QDir::toNativeSeparators(path))
                  + "\nDrag it onto a Guitar Amp, NAM or Cabinet device (or onto a track: it goes into the track's amp, or a new Cabinet), or double-click to load it onto the selected track.");
         };
@@ -561,7 +668,7 @@ void Browser::rebuild() {
     }
     // your presets, clips and captures
     if (searching || m_category == kUserLibrary) {
-        QTreeWidgetItem* parent = group("★  User Library", "cat:user", presets::folder());
+        QTreeWidgetItem* parent = group("User Library", "cat:user", presets::folder());
         const QStringList mine = presets::list();
         int shown = 0;
         for (const QString& path : mine) {
@@ -576,7 +683,7 @@ void Browser::rebuild() {
                 if (b.first().kind == DeviceKind::Instrument) kind = 'i';
                 else if (b.first().kind == DeviceKind::MidiEffect && kind != 'i') kind = 'm';
             }
-            leaf(parent, glyph(kind) + name, path + "|u", QString("Your preset: %1.\nDrag it onto a track, or double-click to load. Right-click to rename or delete it.").arg(names.join(" → ")));
+            leaf(parent, name, path + "|u", QString("Your preset: %1.\nDrag it onto a track, or double-click to load. Right-click to rename or delete it.").arg(names.join(" → ")));
             ++shown;
         }
         // the clips you saved (Clips)
@@ -585,11 +692,11 @@ void Browser::rebuild() {
         for (const QString& path : clips) {
             const QString name = presets::clipNameOf(path);
             if (searching && !name.toLower().contains(q)) continue;
-            leaf(clipNode, "▤ " + name, path + "|c", QString("Your clip: %1\nDrag it onto a clip slot or an Arrangement lane, or double-click to put it on the selected track. Right-click to rename or delete it.")
+            leaf(clipNode, name, path + "|c", QString("Your clip: %1\nDrag it onto a clip slot or an Arrangement lane, or double-click to put it on the selected track. Right-click to rename or delete it.")
                                                      .arg(QDir::toNativeSeparators(path)));
             ++shown;
         }
-        if (!searching && clipNode->childCount() == 0) leaf(clipNode, "No clips yet: right-click a clip and choose Save Clip to User Library", QString(), QString());
+        if (!searching && clipNode->childCount() == 0) leaf(clipNode, "No saved clips", QString(), "Right-click a clip and choose Save Clip to User Library.");
         // .nam captures kept in the User Library folder (any subfolder)
         QTreeWidgetItem* capNode = searching ? parent : nullptr;
         QDirIterator caps(presets::folder(), nam::nameFilters(), QDir::Files | QDir::Readable, QDirIterator::Subdirectories | QDirIterator::FollowSymlinks);
@@ -598,11 +705,11 @@ void Browser::rebuild() {
             const QString name = QFileInfo(abs).completeBaseName();
             if (searching && !name.toLower().contains(q)) continue;
             if (!capNode) capNode = node(nullptr, "Captures", "user:captures", presets::folder());
-            leaf(capNode, glyph('n') + name, abs + "|n", QString("Neural Amp Modeler capture: %1\nDrag it onto an audio track (or a NAM device), or double-click to load it onto the selected track.").arg(QDir::toNativeSeparators(abs)));
+            leaf(capNode, name, abs + "|n", QString("Neural Amp Modeler capture: %1\nDrag it onto an audio track (or a NAM device), or double-click to load it onto the selected track.").arg(QDir::toNativeSeparators(abs)));
             ++shown;
         }
         if (!searching && mine.isEmpty() && shown == 0)
-            leaf(nullptr, "No presets yet. Right-click a device's title in the Device View and choose Save as Preset. .nam captures put in this folder are listed here too.", QString(), QString());
+            leaf(nullptr, "No saved presets", QString(), "Right-click a device title and choose Save as Preset. Captures stored here are also listed.");
         dropEmpty(parent);
     }
     QStringList places = m_folders;
@@ -610,13 +717,22 @@ void Browser::rebuild() {
     for (const QString& dir : places) {
         if (!searching && m_category != kFolderPrefix + dir) continue;
         const QStringList rel = scan(dir);
-        QTreeWidgetItem* parent = group("▸  " + QDir(dir).dirName(), "folder:" + dir, dir);
+        QTreeWidgetItem* parent = group(QDir(dir).dirName(), "folder:" + dir, dir);
         addFiles(parent, dir, rel, q);
         dropEmpty(parent);
     }
     if (!searching && m_category.startsWith(kFolderPrefix) && m_items->topLevelItemCount() == 0)
-        leaf(nullptr, QString("No audio files or captures (%1)").arg((samples::nameFilters() + nam::nameFilters()).join(' ').remove("*.")), QString(), QString());
+        leaf(nullptr, "No samples or captures", QString(), "Supported files: " + (samples::nameFilters() + nam::nameFilters()).join(' '));
     if (searching && m_items->topLevelItemCount() == 0) leaf(nullptr, "Nothing matches \"" + m_search->text().trimmed() + "\"", QString(), QString());
+    bool hierarchy = false;
+    for (int i = 0; i < m_items->topLevelItemCount(); ++i) hierarchy |= m_items->topLevelItem(i)->childCount() > 0;
+    m_items->setRootIsDecorated(hierarchy); // Flat catalogues use the full column width.
+    const int results = listedItems().size();
+    const QString location = searching ? "Search" : m_category == kUserLibrary ? "User Library" : m_category.startsWith(kFolderPrefix) ? QDir(m_category.mid(kFolderPrefix.size())).dirName()
+        : m_category.startsWith(kIrFolderPrefix) ? QDir(m_category.mid(kIrFolderPrefix.size())).dirName() : m_category;
+    m_location->setText(location); m_location->setToolTip(location); m_count->setText(QString::number(results));
+    m_count->setToolTip(QString("%1 item%2").arg(results).arg(results == 1 ? "" : "s"));
+
 }
 
 } // namespace sessions

@@ -365,7 +365,17 @@ QMainWindow, QWidget { background: {bg}; color: {text}; font-size: 11px; }
 QWidget#panel { background: {panel}; }
 QWidget#controlBar { background: {panel}; border-bottom: 1px solid {line}; }
 QWidget#browser { background: {panel}; border-right: 1px solid {line}; }
-QListWidget#browserSidebar { background: {sidebar}; }
+QListWidget#browserSidebar { background: {sidebar}; border: 0; }
+QTreeWidget#browserItems { background: {panel}; }
+QWidget#browserContentHeader { background: {columnHeader}; border-bottom: 1px solid {line}; }
+QLabel#browserLocation { background: transparent; color: {textSoft}; font-size: 10px; font-weight: 600; }
+QLabel#browserCount, QLabel#browserPreviewName { background: transparent; color: {textFaint}; font-size: 10px; }
+QLineEdit#browserSearch { padding-left: 4px; border-radius: 3px; }
+QWidget#browserPreviewBar { background: {panel}; border-top: 1px solid {line}; }
+QToolButton#browserPreview { padding: 3px 8px; border-radius: 3px; border: 1px solid {line}; }
+QToolButton#browserPreview:checked { background: {accent}; color: {onAccent}; border-color: {accent}; }
+QSplitter#browserPanes::handle { background: {line}; }
+QSplitter#browserPanes::handle:hover { background: {splitHover}; }
 QLabel#browserColumnHeader { background: {columnHeader}; color: {textSoft}; font-weight: 600; padding-left: 6px; border-bottom: 1px solid {line}; }
 QWidget#infoView { background: {panel}; border-right: 1px solid {line}; }
 QWidget#detailHeader { background: {panel}; border-bottom: 1px solid {line}; }

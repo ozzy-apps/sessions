@@ -787,6 +787,30 @@ private:
     std::vector<QWidget*> m_cells; QGridLayout* m_grid; int m_columns = 0;
 };
 
+// Use the pane's available width before adding another row of voice controls.
+class VoiceGrid : public QWidget {
+public:
+    VoiceGrid(std::vector<QWidget*> controls, QWidget* parent) : QWidget(parent), m_controls(std::move(controls)) {
+        m_grid = new QGridLayout(this); m_grid->setContentsMargins(4, 6, 4, 4); m_grid->setSpacing(8);
+        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(430); reflow(7);
+    }
+protected:
+    void resizeEvent(QResizeEvent* e) override {
+        QWidget::resizeEvent(e); const int columns = std::clamp((width() - 8) / 108, 4, 12); if (columns != m_columns) reflow(columns);
+    }
+private:
+    void reflow(int columns) {
+        m_columns = columns;
+        while (auto* item = m_grid->takeAt(0)) delete item;
+        for (int r = 0; r < m_grid->rowCount(); ++r) m_grid->setRowStretch(r, 0);
+        for (int c = 0; c < 12; ++c) m_grid->setColumnStretch(c, c < columns ? 1 : 0);
+        for (int i = 0; i < int(m_controls.size()); ++i) m_grid->addWidget(m_controls[size_t(i)], i / columns, i % columns, Qt::AlignTop | Qt::AlignHCenter);
+        m_grid->setRowStretch((int(m_controls.size()) + columns - 1) / columns, 1);
+        setMinimumHeight(m_grid->minimumSize().height()); m_grid->activate();
+    }
+    std::vector<QWidget*> m_controls; QGridLayout* m_grid; int m_columns = 0;
+};
+
 class OsmiumEditor : public DeviceBody {
 public:
     OsmiumEditor(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
@@ -1081,18 +1105,16 @@ private:
         grid->setRowStretch(2, 1); scroll->setWidget(w); return scroll;
     }
     QWidget* voice() {
-        auto* scroll = new QScrollArea(this); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
-        auto* w = new QWidget(scroll); auto* grid = new QGridLayout(w); grid->setContentsMargins(4, 8, 4, 4); grid->setHorizontalSpacing(10); grid->setVerticalSpacing(8);
-        int n = 0;
+        auto* scroll = new QScrollArea(this); scroll->setObjectName("osmiumVoiceScroll"); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
+        std::vector<QWidget*> controls;
         // FX, macros and output are built below; all other unused parameters belong here.
         for (int i = 0; i < count(); ++i) {
             if (m_used.count(i) || i == mo::Volume || (i >= mo::kFxBase && i < mo::kFxBase + mo::kFx)) continue;
             bool macro = false; for (int k = 0; k < 8; ++k) macro |= i == mo::macro(k); if (macro) continue;
             const auto& p = specOf(ctx().type)->params[size_t(i)];
-            QWidget* control = p.kind == ParamKind::Choice || p.kind == ParamKind::Toggle ? labelledChoice(i, p.name, 96) : dial(i, p.name, 32);
-            grid->addWidget(control, n / 7, n % 7, Qt::AlignTop | Qt::AlignHCenter); ++n;
+            controls.push_back(p.kind == ParamKind::Choice || p.kind == ParamKind::Toggle ? labelledChoice(i, p.name, 96) : dial(i, p.name, 64));
         }
-        grid->setRowStretch((n + 6) / 7, 1); scroll->setWidget(w); return scroll;
+        scroll->setWidget(new VoiceGrid(std::move(controls), scroll)); return scroll;
     }
     QWidget* scrollPage(QWidget* w) {
         auto* scroll = new QScrollArea(this); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
