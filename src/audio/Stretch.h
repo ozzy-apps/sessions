@@ -7,11 +7,11 @@
 //    stays smooth. Grain Size sets the grain.
 //  - Texture: the same grains, but wandering: Flux moves each grain's start and length by a
 //    random amount, for a loose, cloudy sound.
-//  - Complex: a phase vocoder. An FFT frame (2048 points) every 512 output samples, read at
+//  - Complex: a stereo-linked, peak phase-locked vocoder. An FFT frame (2048 points) every
+//    512 output samples, read at
 //    the warp map's position; each bin's phase is advanced at the frequency its own phase
 //    difference says it has, so every partial keeps its pitch however the time stretches.
-//  - Complex Pro: the vocoder with its bins locked to the phase of the nearest spectral peak
-//    (clean chords instead of a phasey smear), its phases started afresh when the spectrum
+//  - Complex Pro: the vocoder with its phases started afresh when the spectrum
 //    jumps (a transient stays sharp), and Formants: the spectral envelope is put back where
 //    it was when the clip is transposed, so a voice stays a voice.
 // Transposition is the same for all four: the stretched audio is read faster or slower (that is
@@ -50,6 +50,11 @@ public:
     static constexpr int kMaxGrains = 12;
     Stretcher();
     void reset();
+    // Build the initial overlap on the preparation/UI thread, without consuming
+    // an output sample. A newly launched audio-thread voice can copy this state
+    // instead of running several FFTs at its first callback sample.
+    void prime(const StretchSource& s, double local, float sampleRate);
+    void copyPrepared(const Stretcher& prepared); // fixed-size copies into existing buffers; never allocates
     // The next output sample for clip beat `local` (the beats advance a sample at a time: a jump
     // restarts the stretcher there), at `sampleRate`, into l and r.
     void sample(const StretchSource& s, double local, float sampleRate, float& l, float& r);
@@ -64,13 +69,20 @@ private:
     float random();   // 0 .. 1
 
     bool   m_active = false;
-    double m_beat0 = 0;        // the clip beat the restart was at
+    double m_local = 0;        // actual clip beat of the current output sample
     double m_t = 0;            // output seconds since the restart
     double m_expectBeat = 0;   // the beat the next call should bring (continuity check)
     uint32_t m_rng = 0x9e3779b9u;
+    const SampleData* m_sample = nullptr;
+    StretchMode m_mode = StretchMode::None;
+    float m_rate = 0;
+    bool m_direct = false;
+    float m_previousL = 0, m_previousR = 0;
+    float m_transitionL = 0, m_transitionR = 0;
+    int m_transitionLeft = 0;
 
     // granular
-    struct Grain { double src = 0; int age = 0, len = 0; };
+    struct Grain { double src = 0; int age = 0, len = 0; }; // src is the next read position, age only controls its window
     Grain  m_grains[kMaxGrains];
     int    m_nGrains = 0;
     double m_nextGrainT = 0;   // output seconds (since the restart) the next grain starts at
@@ -85,7 +97,9 @@ private:
     std::vector<int>   m_peak;                        // Complex Pro: the peak each bin follows
     long   m_nextFrame = 0;    // output sample index the next frame starts at
     double m_lastPos = 0;      // the last frame's analysis centre, in sample frames
+    double m_readPos = kFft / 2; // continuous synthesis position; changing pitch never jumps it
     bool   m_first = true;     // no frame yet since the restart
+    int    m_transientHold = 0;
 };
 
 } // namespace sessions::audio

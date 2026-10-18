@@ -120,6 +120,8 @@ private:
     QComboBox* m_warp;
     QPushButton* m_warpOn;
     QComboBox* m_slices;
+    QComboBox* m_beatsTail = nullptr;
+    QLabel*    m_beatsTailLabel = nullptr;
     QLabel*    m_warpExtraLabel = nullptr;   // the row under Warp: what the mode offers
     DragValue* m_grainSize = nullptr;        // Tones / Texture
     DragValue* m_flux = nullptr;             // Texture

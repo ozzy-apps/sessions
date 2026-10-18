@@ -149,6 +149,7 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
     m_launchBox = box("Launch", buildLaunchTab(), "How the clip behaves when launched from the Session View: mode, legato, quantization, follow actions.");
     m_notesBox = box("Notes", buildNotesTab(), "Note tools and the clip's scale.");
     m_sampleBox = box("Sample", buildSampleTab(), "The clip's sample: warp mode, original tempo, gain, transpose, reverse.");
+    m_sampleBox->setFixedWidth(176); // source BPM plus half/double controls must remain legible
     m_envBox = box("Envelopes", buildEnvelopeTab(), "Clip envelopes: a parameter's line that plays with the clip and loops with it.");
     lay->addWidget(m_props);
     // the editor column: the clip in miniature on top (what's on screen outlined; drag it sideways to scroll,
@@ -179,6 +180,7 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
     connect(m_roll, &PianoRoll::gridChanged, this, [this](double) { m_grid->setText(gridLabel()); });
     connect(m_roll, &PianoRoll::notesChanged, this, [this] { emit m_project->clipChanged(); });
     connect(project, &Project::clipChanged, this, [this] { if (m_clip && !m_name->hasFocus()) refresh(); });
+    connect(project, &Project::tempoChanged, this, [this] { if (m_clip) refresh(); });
     connect(project, &Project::restored, this, [this] { refresh(); m_roll->refreshRows(); });
 
     m_grid->setText(gridLabel());
@@ -527,28 +529,44 @@ QWidget* ClipView::buildSampleTab() {
     m_warpExtraLabel = dimLabel("Slices", w);
     form->addRow(m_warpExtraLabel, extra);
 
+    m_beatsTail = new QComboBox(w);
+    m_beatsTail->setObjectName("warpTail");
+    m_beatsTail->setFocusPolicy(Qt::NoFocus);
+    m_beatsTail->addItems({"Gate", "Sustain", "Bounce"});
+    InfoView::attach(m_beatsTail, "Beats Tail", "Gate leaves silence when a slice ends. Sustain fills the tail until the next hit. "
+                                                "Bounce alternates the tail forwards and backwards. The original transient attack stays at its warped beat.");
+    connect(m_beatsTail, &QComboBox::activated, this, [this](int i) {
+        editClip("Beats Tail", 0, [i](Clip& c) { c.beatsTail = std::clamp(i, 0, 2); });
+    });
+    m_beatsTailLabel = dimLabel("Tail", w);
+    form->addRow(m_beatsTailLabel, m_beatsTail);
+
     m_bpm = new DragValue(w);
-    m_bpm->setRange(20, 999);
+    m_bpm->setObjectName("sourceBpm");
+    m_bpm->setRange(0, 999); // zero is the unknown-source placeholder; actual source tempi are at least 20
     m_bpm->setDefault(120);
     m_bpm->setDragSensitivity(300);
     m_bpm->setMinimumChars(6);
-    m_bpm->setFormatter([](double v) { return QString::number(v, 'f', 2); });
+    m_bpm->setFormatter([this](double v) { return m_clip && m_clip->detectedBpm <= 0 ? QString::fromUtf8("—") : QString::number(v, 'f', 2); });
     InfoView::attach(m_bpm, "Original Tempo", "The tempo the audio was played at. Set it right and the clip follows the set's tempo. "
                                               "Changing it moves the warp markers (and the clip's length) with it.");
-    connect(m_bpm, &DragValue::valueEdited, this, [this](double v) { setSampleBpm(v); });
-    auto* half = toolButton(":2", "Half Tempo", "Halves the original tempo: the clip plays twice as long.", w);
-    auto* twice = toolButton("x2", "Double Tempo", "Doubles the original tempo: the clip plays in half the time.", w);
+    connect(m_bpm, &DragValue::valueEdited, this, [this](double v) {
+        if (v > 0) setSampleBpm(v);
+        else if (m_clip) m_bpm->setValue(m_clip->detectedBpm > 0 ? m_clip->sampleBpm() : 0, false);
+    });
+    auto* half = toolButton(":2", "Half Source Tempo", "Halves Source BPM and the source beat count: the clip plays in half the time at the same project tempo.", w);
+    auto* twice = toolButton("x2", "Double Source Tempo", "Doubles Source BPM and the source beat count: the clip plays twice as long at the same project tempo.", w);
     connect(half, &QPushButton::clicked, this, [this] { if (m_clip) setSampleBpm(m_clip->sampleBpm() / 2); });
     connect(twice, &QPushButton::clicked, this, [this] { if (m_clip) setSampleBpm(m_clip->sampleBpm() * 2); });
     auto* bpmRow = new QHBoxLayout; bpmRow->setSpacing(3);
     bpmRow->addWidget(m_bpm, 1); bpmRow->addWidget(half); bpmRow->addWidget(twice);
-    form->addRow(dimLabel("BPM", w), bpmRow);
+    form->addRow(dimLabel("Source BPM", w), bpmRow);
     // the tempo found in the audio and how the clip sits against the set's tempo; Sync fits it again
     m_tempoInfo = new ElidedLabel(w);
-    m_tempoInfo->setObjectName("dimLabel");
+    m_tempoInfo->setObjectName("sourceTempoInfo");
     m_tempoInfo->setWordWrap(false);
-    InfoView::attach(m_tempoInfo, "Found Tempo", "The tempo Sessions heard in the audio, and the tempo the clip plays at: the set's tempo halved or doubled "
-                                                 "until it's nearest the audio's own, so the clip is in sync whatever the set's tempo.");
+    InfoView::attach(m_tempoInfo, "Source and Project Tempo", "Source BPM describes the audio as recorded. Warp fits those source beats to the project tempo. "
+                                                 "Changing the project tempo keeps the clip's source beat grid. Use :2 or x2 if the detected beat is at half or double time.");
     auto* sync = toolButton("Sync", "Sync to Tempo", "Fits the clip to the set's tempo again from its audio: finds the tempo if it isn't known yet, "
                                                    "then sets the warp markers and the loop. Use it on a clip whose markers you've moved, or one from an older set.", w);
     sync->setObjectName("syncTempo");
@@ -606,12 +624,27 @@ QWidget* ClipView::buildSampleTab() {
 
 void ClipView::setSampleBpm(double bpm) {
     if (!m_clip || !m_clip->isAudio() || m_clip->warpMarkers.size() < 2 || bpm <= 0) return;
-    const double k = std::clamp(bpm, 5.0, 2000.0) / m_clip->sampleBpm();
-    if (std::abs(k - 1) < 1e-9) return;
-    editClip("Original Tempo", 5, [k](Clip& c) {
+    const double source = std::clamp(bpm, 20.0, 999.0);
+    const double k = source / m_clip->sampleBpm();
+    if (std::abs(k - 1) < 1e-9 && m_clip->warp && m_clip->detectedBpm > 0) return;
+    editClip("Original Tempo", 5, [this, k, source](Clip& c) {
         const double b0 = c.warpMarkers.first().beat;
+        auto scaled = [b0, k](double beat) { return b0 + (beat - b0) * k; };
         for (WarpMarker& m : c.warpMarkers) m.beat = b0 + (m.beat - b0) * k;
-        c.length = std::clamp(c.length * k, 0.25, 1024.0);
+        c.length = std::clamp(c.length * k, 0.25, 4096.0);
+        c.start = scaled(c.start);
+        c.loopStart = scaled(c.loopStart);
+        for (Envelope& e : c.envelopes) for (AutoPoint& point : e.points) point.beat = scaled(point.beat);
+        for (CompRegion& region : c.comp) { region.start = scaled(region.start); region.end = scaled(region.end); }
+        for (Take& take : c.takes) take.startBeat = scaled(take.startBeat);
+        for (Track& track : m_project->tracks) for (ArrangementClip& a : track.arrangement) if (a.clip.get() == &c) {
+            a.length *= k;
+            a.offset = scaled(a.offset);
+            a.fadeIn *= k;
+            a.fadeOut *= k;
+        }
+        c.detectedBpm = source;
+        c.warp = true;
     });
     m_sampleEditor->setClip(m_clip);   // refit
 }
@@ -802,11 +835,15 @@ void ClipView::refresh() {
         m_warp->setCurrentIndex(int(m_clip->warpMode));
         m_warpOn->setChecked(m_clip->warp);
         m_warp->setEnabled(m_clip->warp);
-        m_bpm->setEnabled(m_clip->warp);
+        m_bpm->setEnabled(bool(m_clip->sample));
         int g = 3;
         for (int i = 0; i < 5; ++i) if (std::abs(kGrains[i] - m_clip->grain) < 1e-9) g = i;
         { QSignalBlocker b8(m_slices); m_slices->setCurrentIndex(g); }
         const WarpMode wm = m_clip->warpMode;
+        m_beatsTail->setVisible(wm == WarpMode::Beats);
+        m_beatsTailLabel->setVisible(wm == WarpMode::Beats);
+        m_beatsTail->setEnabled(m_clip->warp);
+        { QSignalBlocker tailBlock(m_beatsTail); m_beatsTail->setCurrentIndex(std::clamp(m_clip->beatsTail, 0, 2)); }
         m_slices->setVisible(wm == WarpMode::Beats || wm == WarpMode::Repitch);
         m_slices->setEnabled(m_clip->warp && wm == WarpMode::Beats);
         m_grainSize->setVisible(wm == WarpMode::Tones || wm == WarpMode::Texture);
@@ -819,19 +856,19 @@ void ClipView::refresh() {
         m_flux->setValue(m_clip->flux * 100, false);
         m_formants->setValue(m_clip->formants * 100, false);
         m_warpExtraLabel->setText(wm == WarpMode::Texture ? "Grain Flux" : wm == WarpMode::Tones ? "Grain" : wm == WarpMode::Complex || wm == WarpMode::ComplexPro ? "Formants" : "Slices");
-        m_bpm->setValue(m_clip->sampleBpm(), false);
+        m_bpm->setValue(m_clip->detectedBpm > 0 ? m_clip->sampleBpm() : 0, false);
+        m_bpm->update(); // an unknown and a verified source can share the same underlying value
         if (m_clip->detectedBpm > 0) {
             const double own = m_clip->sampleBpm();
-            const int k = int(std::lround(std::log2(own / m_clip->detectedBpm)));
-            const double plays = m_clip->detectedBpm * m_project->tempo / own;   // what you hear
-            const QString share = k == 0 ? QString("1× the set") : k > 0 ? QString("1/%1 the set").arg(1 << k) : QString("%1× the set").arg(1 << -k);
-            const QString full = m_clip->warp ? QString("found %1 · plays at %2 BPM (%3)").arg(m_clip->detectedBpm, 0, 'f', 1).arg(plays, 0, 'f', 1).arg(share)
-                                              : QString("found %1 BPM · Warp off, plays as recorded").arg(m_clip->detectedBpm, 0, 'f', 1);
+            auto compactBpm = [](double bpm) { return QString::number(bpm, 'f', std::abs(bpm - std::round(bpm)) < 0.005 ? 0 : 2); };
+            const QString full = m_clip->warp ? QString("%1 → %2 BPM").arg(compactBpm(own), compactBpm(m_project->tempo))
+                                              : QString("Source %1 BPM · Warp off").arg(own, 0, 'f', 2);
             m_tempoInfo->setText(full);
-            m_tempoInfo->setToolTip(full);
+            m_tempoInfo->setToolTip(QString("Source %1 BPM → Project %2 BPM\nSource tempo reference: %3 BPM. The editable field describes the current warp-marker grid.")
+                                      .arg(own, 0, 'f', 2).arg(m_project->tempo, 0, 'f', 2).arg(m_clip->detectedBpm, 0, 'f', 2));
         } else {
-            m_tempoInfo->setText(m_clip->sample ? "no steady beat found" : "");
-            m_tempoInfo->setToolTip(QString());
+            m_tempoInfo->setText(m_clip->sample ? "Source tempo unknown · set BPM" : "");
+            m_tempoInfo->setToolTip(m_clip->sample ? "No steady source tempo was found. Set Source BPM to the tempo of the original recording to enable Warp." : QString());
         }
         m_gain->setValue(m_clip->gain, false);
         m_transpose->setValue(m_clip->transpose, false);

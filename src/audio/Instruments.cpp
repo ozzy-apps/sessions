@@ -4,6 +4,7 @@
 #include "DeviceKit.h"
 #include "Wavetables.h"
 #include "Stretch.h"
+#include "Resample.h"
 #include "core/Sample.h"
 
 namespace sessions::audio {
@@ -413,11 +414,10 @@ struct SamplerVoice {
         const double fadeInFrames = std::max(1.0, double(P.fadeIn) * s.rate), fadeOutFrames = std::max(1.0, double(P.fadeOut) * s.rate);
         const float relInc = 1.0f / std::max(1.0f, P.fadeOut * P.sr);
         const bool oneShotTrigger = kind == OneShot && P.trigger == 0;
-        auto read = [&s, frames](double at, float& l, float& r) {
-            const qint64 k = std::clamp<qint64>(qint64(at), 0, frames - 2);
-            const float f = float(at - double(k));
-            l = s.left[size_t(k)] + (s.left[size_t(k + 1)] - s.left[size_t(k)]) * f;
-            r = s.right[size_t(k)] + (s.right[size_t(k + 1)] - s.right[size_t(k)]) * f;
+        const auto readPlan = resample::plan(step);
+        auto read = [&s, readPlan](double at, float& l, float& r) {
+            l = resample::read(s.left, at, readPlan);
+            r = resample::read(s.right, at, readPlan);
         };
         for (int i = 0; i < n; ++i) {
             if (gate > 0 && --gate == 0 && !oneShotTrigger) release();

@@ -92,7 +92,7 @@ bool toSampler(Project& p, int track, int deviceId, const QString& path, QString
     if (!d) { if (error) *error = "That device isn't a Sampler."; return false; }
     d->samplePath = s->path;
     d->sample = s;
-    d->sampleBpm = tempo::detect(*s).bpm;   // what Warp stretches from (0: no steady beat; the panel's field sets one)
+    d->sampleBpm = tempo::detect(*s, 90, path).bpm;   // source tempo (0: unknown; the panel's field sets one)
     d->slices.clear();                      // manual slices belonged to the old sample
     emit p.structureChanged();
     emit p.deviceChanged();

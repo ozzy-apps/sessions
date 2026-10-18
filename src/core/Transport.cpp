@@ -421,7 +421,7 @@ void Transport::stop() {
     const bool rewind = !m_playing;
     if (rewind) m_beat = m_startMarker = 0;
     m_playing = false;
-    for (Track& t : m_project->tracks) { t.playingSlot = -1; t.queuedSlot = -2; }
+    for (Track& t : m_project->tracks) { t.playingSlot = -1; t.playingClipBeat = -1; t.playingClipPass = 0; t.queuedSlot = -2; }
     send({Command::Stop, -1, -1, 0, 0, rewind});
     if (m_arrRecord) {   // stopping ends the recording: the record button goes out (0.21)
         m_arrRecord = false;   // (the loop clips stay: the audio takes still in flight land in them)
@@ -529,6 +529,7 @@ void Transport::playClipFrom(const ClipPtr& clip, double clipBeat) {
     if (t.playingSlot != scene) launch(track, scene, true, true);   // at once, whatever the quantization
     const double elapsed = clipBeat - clip->start;   // beats after a launch at which the clip is at that beat (0.23: before the start marker is fine)
     t.slotStart = m_beat - elapsed;
+    if (!clip->warp) { t.playingClipBeat = clipBeat; t.playingClipPass = 1; }
     send({Command::SeekSlot, t.id, scene, elapsed});
     emit sessionChanged();
 }
@@ -536,7 +537,7 @@ void Transport::playClipFrom(const ClipPtr& clip, double clipBeat) {
 void Transport::stopAll() { for (int i = 0; i < m_project->tracks.size(); ++i) stopTrack(i); }
 
 void Transport::backToArrangement() {
-    for (Track& t : m_project->tracks) { t.playingSlot = -1; t.queuedSlot = -2; t.overridden = false; }
+    for (Track& t : m_project->tracks) { t.playingSlot = -1; t.playingClipBeat = -1; t.playingClipPass = 0; t.queuedSlot = -2; t.overridden = false; }
     send({Command::BackToArrangement});
     emit sessionChanged();
 }
@@ -555,7 +556,7 @@ void Transport::reset() {
     m_arrRecord = false;
     m_playing = false;
     m_beat = m_startMarker = 0;
-    for (Track& t : m_project->tracks) { t.playingSlot = -1; t.queuedSlot = -2; t.overridden = false; }
+    for (Track& t : m_project->tracks) { t.playingSlot = -1; t.playingClipBeat = -1; t.playingClipPass = 0; t.queuedSlot = -2; t.overridden = false; }
     send({Command::Stop, -1, -1, 0, 0, true});
     send({Command::BackToArrangement});
     emit stateChanged();
@@ -796,6 +797,23 @@ void Transport::onTimer() {
                 t.playingSlot = s.playingSlot;
                 t.queuedSlot = s.queuedSlot;
                 t.slotStart = s.slotStart;
+                t.playingClipBeat = s.clipPass > 0 ? s.clipBeat : -1;
+                t.playingClipPass = s.clipPass;
+                if (const ClipPtr clip = t.clipSlots.value(s.playingSlot); clip && !clip->warp && s.clipPass > 0) {
+                    // Native-speed audio has a separate seconds clock. Compensate
+                    // output latency in seconds before converting back to source beats.
+                    const double start = clip->secondsAt(clip->start), from = clip->secondsAt(clip->loopStart);
+                    const double end = std::min(clip->secondsAt(clip->loopEnd()), clip->sample ? clip->sample->seconds() : clip->secondsAt(clip->loopEnd()));
+                    double seconds = clip->secondsAt(s.clipBeat);
+                    if (clip->loop && s.clipPass > 1 && end > from) seconds = end + (s.clipPass - 2) * (end - from) + seconds - from;
+                    seconds = std::max(start, seconds - m_engine->latencySeconds());
+                    t.playingClipPass = 1;
+                    if (clip->loop && end > from && seconds >= end) {
+                        t.playingClipPass = 2 + int(std::floor((seconds - end) / (end - from)));
+                        seconds = from + std::fmod(seconds - from, end - from);
+                    }
+                    t.playingClipBeat = clip->beatAt(seconds);
+                }
                 t.queuedAt = s.queuedAt;
                 t.overridden = s.overridden;
             }

@@ -446,7 +446,7 @@ QCheckBox { spacing: 6px; }
 QCheckBox::indicator { width: 11px; height: 11px; border: 1px solid {checkBorder}; border-radius: 2px; background: {field}; }
 QCheckBox::indicator:checked { background: {accent}; border-color: {accent}; }
 QCheckBox:disabled { color: {disabled}; }
-QLabel#dimLabel { color: {dim}; font-size: 9px; }
+QLabel#dimLabel, QLabel#sourceTempoInfo { color: {dim}; font-size: 9px; }
 QLabel#infoTitle { color: {text}; font-size: 11px; font-weight: 600; }
 QLabel#infoBody  { color: {dim}; font-size: 10px; }
 QLabel#detailTitle { font-weight: 600; }

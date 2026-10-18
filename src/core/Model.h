@@ -180,13 +180,12 @@ struct Clip {
     bool      reverse   = false;     // plays the sample backwards; the markers refer to the reversed audio
     bool      warp      = true;      // off: plays at the file's own speed, ignoring the tempo
     double    grain     = 0;         // Beats mode slices: 0 = at transients, else a grid in beats (0.25 = 1/16)
+    int       beatsTail = 0;         // Beats: 0 gate, 1 crossfaded forward sustain, 2 reflected sustain
     double    grainMs   = 50;        // Tones / Texture: the grain size, 12 .. 256 ms
     double    flux      = 0.25;      // Texture: how far the grains wander, 0 .. 1
     double    formants  = 0;         // Complex Pro: how much the formants stay put when transposed, 0 .. 1
-    // The tempo found in the audio (core/Tempo.h), 0 when none was. The clip's own tempo
-    // (sampleBpm()) is this times a power of two: the set's tempo is the master, and the clip is
-    // warped to the nearest tempo in sync with it (87 at 172 plays at 86). When the set's tempo
-    // moves far enough for another power of two to be nearer, the clip is re-matched.
+    // The tempo found in the audio (core/Tempo.h), 0 when unknown. sampleBpm() is the
+    // editable source warp map's tempo; project tempo changes leave that map untouched.
     double    detectedBpm = 0;
 
     // Clip envelopes: the same targets as track automation ("device:<id>:<p>", "mixer:volume", …),
@@ -388,6 +387,8 @@ struct Track {
     QSet<QString> overriddenTargets;   // automation you've overridden by hand, until Re-Enable Automation
     int    playingSlot  = -1;   // session clip currently playing (mirrored from the engine)
     double slotStart    = 0.0;  // beat at which that clip started
+    double playingClipBeat = -1; // native-speed audio position mirrored from the engine
+    int    playingClipPass = 0;
     int    queuedSlot   = -2;   // -2 none, -1 stop, >=0 launch
     double queuedAt     = 0.0;
     bool   overridden   = false; // session has taken over from the arrangement

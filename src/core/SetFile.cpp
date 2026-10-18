@@ -138,6 +138,7 @@ QJsonObject writeClip(const Clip& c, const QString& baseDir) {
         audio.insert("warp", c.warp);
         audio.insert("grain", c.grain);
         audio.insert("grainMs", c.grainMs);
+        if (c.beatsTail) audio.insert("beatsTail", c.beatsTail);
         audio.insert("flux", c.flux);
         audio.insert("formants", c.formants);
         if (c.detectedBpm > 0) audio.insert("detectedBpm", c.detectedBpm);
@@ -298,6 +299,7 @@ Clip readClip(const QJsonObject& o, const QString& baseDir) {
         c.warp = flag(audio, "warp", true);
         c.grain = num(audio, "grain", 0.25);   // sets from before transient slicing used a 1/16 grid
         c.grainMs = std::clamp(num(audio, "grainMs", 50), 12.0, 256.0);
+        c.beatsTail = std::clamp(int(num(audio, "beatsTail", 0)), 0, 2);
         c.flux = std::clamp(num(audio, "flux", 0.25), 0.0, 1.0);
         c.formants = std::clamp(num(audio, "formants", 0), 0.0, 1.0);
         c.detectedBpm = std::clamp(num(audio, "detectedBpm", 0), 0.0, 999.0);

@@ -15,3 +15,5 @@
 - After a published update, bring a clean main checkout up to date with `git pull --ff-only`. Do not pull over uncommitted work or merge an active feature branch without authorization.
 
 Integration record (2026-10-18): the 0.34.0 browser release was combined with `93af5a8` / 0.33.0 (Arrangement clip fades), which includes `dc229a8` / 0.32.0 (Sampler and Osmium). All five combined suites passed, including the 11 fade checks. Always fetch the current origin/main again for the next update.
+
+Integration record (2026-10-19): the 0.36.0 warp release includes `86f5e2c` / 0.35.0 (control-bar sizing and themed SVGs). Both updates' tests and documentation were retained; all ten combined CTest suites and the installed app's 100 captures passed. Codex remains in the main checkout and the sampler worktree is retained for Claude. The user explicitly authorized this combined release's push; future updates still require their own push request.

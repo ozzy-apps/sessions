@@ -2140,7 +2140,7 @@ void MainWindow::captureScreenshots(const QString& dir) {
 
         theme::apply(theme::themeNamed("Midnight"));
         selectTrack(t);
-        selectClip(drums.clipSlots[0]);
+        selectClip(m_project->tracks[t].clipSlots[0]);
         showSession(true); showClipView(true);
         QApplication::processEvents();
         shot("36-midnight-theme");

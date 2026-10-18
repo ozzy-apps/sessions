@@ -438,6 +438,10 @@ QString ClipGrid::mapTargetAt(const QPoint& p) const {
 // sit a little ahead of the heard beat right after a launch (output latency): that counts as 0.
 double ClipGrid::loopFraction(const Track& t, const Clip& clip) const {
     if (clip.length <= 0) return 0;
+    if (!clip.warp && t.playingClipBeat >= 0) {
+        const double start = clip.loop ? clip.loopStart : clip.start;
+        return std::clamp((t.playingClipBeat - start) / std::max(1e-9, clip.loopEnd() - start), 0.0, 1.0);
+    }
     const double elapsed = std::max(0.0, m_transport->beat() - t.slotStart);
     const double firstPass = std::max(1e-9, clip.loopEnd() - clip.start);   // from the start marker to the end marker (0.23)
     if (!clip.loop) return std::min(1.0, elapsed / firstPass);
@@ -455,7 +459,7 @@ ClipGrid::TrackStatus ClipGrid::trackStatus(int track) const {
     st.playing = true;
     st.length = clip->length;
     st.fraction = loopFraction(*t, *clip);
-    st.pass = clip->loop ? int(elapsed / clip->length) + 1 : 0;
+    st.pass = clip->loop ? (!clip->warp && t->playingClipPass > 0 ? t->playingClipPass : int(elapsed / clip->length) + 1) : 0;
     return st;
 }
 

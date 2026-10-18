@@ -32,7 +32,7 @@ static bool operator==(const Clip& a, const Clip& b) {
         && a.samplePath == b.samplePath && a.warpMode == b.warpMode && a.warpMarkers == b.warpMarkers
         && a.gain == b.gain && a.transpose == b.transpose && a.reverse == b.reverse
         && a.grainMs == b.grainMs && a.flux == b.flux && a.formants == b.formants
-        && a.warp == b.warp && a.grain == b.grain && a.envelopes == b.envelopes && a.detectedBpm == b.detectedBpm;
+        && a.warp == b.warp && a.grain == b.grain && a.beatsTail == b.beatsTail && a.envelopes == b.envelopes && a.detectedBpm == b.detectedBpm;
 }
 static bool operator==(const DeviceParam& a, const DeviceParam& b) { return a.name == b.name && a.value == b.value; }
 static bool operator==(const DrumPad& a, const DrumPad& b) { return a.name == b.name && a.samplePath == b.samplePath; }
@@ -268,16 +268,18 @@ ClipPtr Project::newClip(const QString& name, double length) {
     return c;
 }
 
-// A new audio clip is warped to the set's tempo: the tempo found in the audio, halved or
-// doubled until it's nearest the set's (core/Tempo.h), a whole number of beats when it's a loop.
+// The file's source beat grid is independent of the project's playback tempo.
+// Warp then maps those source beats onto the project's clock.
 ClipPtr Project::newAudioClip(const QString& path, const SamplePtr& sample) {
     const double secs = sample && sample->seconds() > 0 ? sample->seconds() : 1.0;
-    const tempo::Sync s = sample ? tempo::syncTo(*sample, tempo) : tempo::Sync{secs * tempo / 60.0, false, 0};
+    const tempo::Sync s = sample ? tempo::syncTo(*sample, tempo, 0, path) : tempo::Sync{secs * tempo / 60.0, false, 0};
     ClipPtr c = newClip(QFileInfo(path).completeBaseName(), s.beats);
     c->samplePath = QFileInfo(path).absoluteFilePath();
     c->sample = sample;
     c->loop = s.loop;
+    c->warp = s.detected > 0;
     c->detectedBpm = s.detected;
+    c->beatsTail = 1;   // preserve attacks while filling stretched drum tails; old sets retain Gate
     c->warpMarkers = {{0, 0}, {s.beats, secs}};
     return c;
 }
@@ -293,33 +295,15 @@ QVector<ClipPtr> Project::audioClips() const {
     return out;
 }
 
-namespace {
-// Scales a clip's beat grid by `f` (another power of two of the set's tempo): the warp markers
-// around the first, the length, the envelopes, and every placement of the clip on the timeline
-// (its length and offset, so it keeps showing the same audio).
-void rescaleClip(Project& p, const ClipPtr& c, double f) {
-    const double b0 = c->warpMarkers.first().beat;
-    for (WarpMarker& m : c->warpMarkers) m.beat = b0 + (m.beat - b0) * f;
-    c->length = std::clamp(c->length * f, 0.25, 4096.0);
-    c->start *= f;
-    c->loopStart *= f;
-    for (Envelope& e : c->envelopes) for (AutoPoint& pt : e.points) pt.beat *= f;
-    for (CompRegion& r : c->comp) { r.start *= f; r.end *= f; }
-    for (Track& t : p.tracks)
-        for (ArrangementClip& a : t.arrangement)
-            if (a.clip == c) { a.length *= f; a.offset *= f; }
-}
-}
-
 bool Project::syncClipToTempo(const ClipPtr& clip) {
     if (!clip || !clip->isAudio() || !clip->sample || !clip->takes.isEmpty()) return false;
-    const tempo::Sync s = tempo::syncTo(*clip->sample, tempo, clip->detectedBpm);
+    const tempo::Sync s = tempo::syncTo(*clip->sample, tempo, clip->detectedBpm, clip->samplePath);
     EditScope edit(this, "Sync to Tempo");
     const double secs = clip->sample->seconds();
     const double before = clip->length;
     clip->detectedBpm = s.detected;
     clip->loop = s.loop;
-    clip->warp = true;
+    clip->warp = s.detected > 0;
     clip->warpMarkers = {{0, 0}, {s.beats, secs}};
     clip->length = s.beats;
     if (before > 0 && std::fabs(s.beats / before - 1) > 1e-9) {   // placements keep showing the same audio
@@ -1246,7 +1230,8 @@ int Project::duplicateTrack(int index) {
     EditScope edit(this, "Duplicate Track");
     Track t = tracks[index];
     t.id = m_nextTrackId++;
-    t.playingSlot = -1; t.queuedSlot = -2; t.overridden = false; t.meter = 0; t.solo = false; t.armed = false;
+    t.playingSlot = -1; t.playingClipBeat = -1; t.playingClipPass = 0;
+    t.queuedSlot = -2; t.overridden = false; t.meter = 0; t.solo = false; t.armed = false;
     t.overriddenTargets.clear();
     QHash<const Clip*, ClipPtr> copies;   // a clip shared by a slot and the timeline stays shared in the copy
     auto copy = [&](const ClipPtr& c) -> ClipPtr {
@@ -1599,7 +1584,7 @@ ClipPtr Project::playingClip(int index, double beat, double* local) const {
     double at = -1;
     if (t->playingSlot >= 0) {
         c = t->clipSlots.value(t->playingSlot);
-        if (c) at = c->positionAt(beat - t->slotStart);
+        if (c) at = !c->warp && t->playingClipBeat >= 0 ? t->playingClipBeat : c->positionAt(beat - t->slotStart);
     } else if (!t->overridden) {
         for (const ArrangementClip& a : t->arrangement)
             if (a.clip && beat >= a.start && beat < a.start + a.length) { c = a.clip; at = c->positionFrom(a.offset, beat - a.start); }
@@ -1612,7 +1597,8 @@ ClipPtr Project::playingClip(int index, double beat, double* local) const {
 double Project::clipPosition(const ClipPtr& clip, double beat) const {
     const Track* t = clip ? trackAt(trackOfClip(clip)) : nullptr;
     if (!t) return -1;
-    if (t->playingSlot >= 0 && t->clipSlots.value(t->playingSlot) == clip) return clip->positionAt(beat - t->slotStart);
+    if (t->playingSlot >= 0 && t->clipSlots.value(t->playingSlot) == clip)
+        return !clip->warp && t->playingClipBeat >= 0 ? t->playingClipBeat : clip->positionAt(beat - t->slotStart);
     if (!t->overridden)
         for (const ArrangementClip& a : t->arrangement)
             if (a.clip == clip && beat >= a.start && beat < a.start + a.length) return clip->positionFrom(a.offset, beat - a.start);
@@ -1682,19 +1668,9 @@ bool Project::anySolo() const {
 void Project::setTempo(double bpm) {
     if (bpm == tempo) return;
     tempo = bpm;
-    // The set's tempo is the master: a warped clip whose nearest in-sync tempo is now another
-    // power of two away is re-matched (an 87 BPM loop at 120 played at 120; at 172 it plays at 86).
-    bool clips = false;
-    for (const ClipPtr& c : audioClips()) {
-        if (!c->warp || c->detectedBpm <= 0 || c->warpMarkers.size() < 2 || !c->takes.isEmpty()) continue;
-        const int now = int(std::lround(std::log2(c->sampleBpm() / c->detectedBpm)));
-        const int want = tempo::octaveFor(c->detectedBpm, bpm);
-        if (now == want) continue;
-        rescaleClip(*this, c, std::exp2(want - now));
-        clips = true;
-    }
+    // A tempo move changes playback speed, never the source grid or musical placement.
+    // In particular, crossing a half/double-time threshold must not jump a live clip.
     emit tempoChanged();
-    if (clips) { emit clipChanged(); emit structureChanged(); }
 }
 
 // ---- undo -------------------------------------------------------------------

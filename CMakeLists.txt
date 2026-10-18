@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.35.0 LANGUAGES CXX)
+project(Sessions VERSION 0.36.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -45,6 +45,7 @@ set(SESSIONS_SOURCES
     src/audio/Guitar.cpp
     src/audio/Convolver.cpp
     src/audio/Stretch.cpp
+    src/audio/Resample.cpp
     src/audio/Nam.cpp
     src/audio/Builtin.cpp
     src/audio/Driver.cpp
@@ -131,6 +132,22 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     add_executable(sessions_osmium_bank tests/osmium_bank.cpp)
     target_link_libraries(sessions_osmium_bank PRIVATE sessions_core)
     add_test(NAME osmium_bank COMMAND sessions_osmium_bank)
+    add_executable(sessions_warp_dsp tests/warp_dsp.cpp)
+    target_link_libraries(sessions_warp_dsp PRIVATE sessions_core)
+    add_test(NAME warp_dsp COMMAND sessions_warp_dsp)
+    add_executable(sessions_warp_live tests/warp_live.cpp)
+    target_link_libraries(sessions_warp_live PRIVATE sessions_core)
+    add_test(NAME warp_live COMMAND sessions_warp_live)
+    add_executable(sessions_tempo_warp tests/tempo_warp.cpp)
+    target_link_libraries(sessions_tempo_warp PRIVATE sessions_core)
+    add_test(NAME tempo_warp COMMAND sessions_tempo_warp)
+    add_executable(sessions_warp_ui tests/warp_ui.cpp)
+    target_link_libraries(sessions_warp_ui PRIVATE sessions_core Qt6::Test)
+    add_test(NAME warp_ui COMMAND sessions_warp_ui)
+    set_tests_properties(warp_ui PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(sessions_resample tests/resample.cpp)
+    target_link_libraries(sessions_resample PRIVATE sessions_core)
+    add_test(NAME resample COMMAND sessions_resample)
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin)

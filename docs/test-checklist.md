@@ -1,4 +1,16 @@
-# Sessions 0.23 — things to try by hand
+# Sessions — manual test checklist
+
+## 0.36 · Source tempo, live synchronization and warp quality
+
+1. Import a known 176 BPM, four-bar drum loop into a 120 BPM project. Source BPM must show 176, the loop stays 16 beats, and each source beat lands on the project grid. Repeat with 44.1, 48 and 96 kHz files. Test the provided long drum stem separately: its measured tempo is approximately 172 BPM.
+2. On an older clip that showed 120 incorrectly, press **Sync**. The source grid must be rebuilt from the recording. Unknown material shows **—** and Warp off; entering its known source BPM enables Warp in one undo step. Correct half/double-time estimates with :2/x2.
+3. While a warped loop plays, move the project tempo through 60, 120 and 200 BPM. The source BPM, markers, loop, envelope beats, Arrangement placement and fades must stay unchanged. Future beats follow the new tempo without restarting the clip.
+4. Launch and stop clips/scenes on a quantized bar at an awkward tempo such as 137.3. Change audio buffer sizes. Every track switches on the same beat. Repeated Arrangement loops must not reset an independently playing Session clip or gradually change its phase; MIDI notes and the click at the loop start must still play every pass.
+5. Beats at a slower tempo: compare **Gate**, **Sustain** and **Bounce**. Gate intentionally leaves gaps; Sustain/Bounce extend only the tails. The next attack stays on the grid. At original tempo all three sound identical. Tail choice survives save, reopen and undo; older sets retain Gate.
+6. Compare Tones on bass/vocals, Texture on ambience, Complex/Pro on mixed material. Check stereo width and bass weight; use Texture Flux 0 for a neutral comparison. Test octave transposition and moving across a warp marker whose adjacent segment has a different speed. Neutral settings at original tempo should match the source.
+7. Play multiple warped tracks, insert another ahead of them, and relaunch all together. Existing voices must retain their state. Test at the buffer size used for performance and watch the CPU meter; spectral modes cost more than Beats.
+8. Warp off: change project tempo while a Session clip plays. It must retain its original speed and end at the file's physical duration. Pausing/resuming, seeking and an unrelated Arrangement loop must preserve this behavior.
+9. Save/reopen a set with source correction, several warp modes, a custom marker map and each Beats tail mode. Export a section and compare timing with live playback. Existing Sampler, fades and device tests must remain green.
 
 ## 0.35 · The control bar streamlined
 

@@ -294,9 +294,10 @@ void SampleEditor::paintEvent(QPaintEvent*) {
     // name and tempo, top right
     p.setFont(font());
     p.setPen(theme::textFaint);
-    const QString info = recording ? QString() : QString("%1   ·   %2 BPM   ·   %3")
+    const QString source = m_clip->detectedBpm > 0 ? QString("Source %1 BPM").arg(m_clip->sampleBpm(), 0, 'f', 2) : QString("Source BPM unknown");
+    const QString info = recording ? QString() : QString("%1   ·   %2   ·   %3")
         .arg(QFileInfo(m_clip->samplePath).fileName())
-        .arg(m_clip->sampleBpm(), 0, 'f', 2)
+        .arg(source)
         .arg(!m_clip->warp ? "Warp Off" : warpModeName(m_clip->warpMode));
     p.drawText(QRect(kLeft, top + 2, W - 2 * kLeft, 16), Qt::AlignRight | Qt::AlignTop, info);
 }

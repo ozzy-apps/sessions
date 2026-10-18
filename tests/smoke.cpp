@@ -316,6 +316,8 @@ static std::vector<float> runEffect(DeviceType type, const std::vector<float>& p
 int main(int argc, char** argv) {
     QTemporaryDir config;   // settings the test writes (recent files) go here, not into yours
     qputenv("XDG_CONFIG_HOME", config.path().toLocal8Bit());
+    QTemporaryDir data;     // presets and library clips stay isolated too
+    qputenv("XDG_DATA_HOME", data.path().toLocal8Bit());
     QApplication app(argc, argv);
     Q_INIT_RESOURCE(resources);   // the .qrc lives in the static sessions_core library (the About logo reads it)
     theme::installAppStyle();
@@ -970,8 +972,9 @@ int main(int argc, char** argv) {
               && std::abs(loop->sampleBpm() - 120) < 1e-9 && loop->name == "bursts 120",
               "M4 clips: a one-bar loop becomes a looping 4-beat clip at 120 BPM");
         CHECK(!shot->loop && std::abs(shot->length - 0.6) < 1e-9, "M4 clips: a short hit plays once at its own speed");
-        CHECK(nearBar->length == 4 && std::abs(nearBar->sampleBpm() - 4 * 60 / 1.9) < 1e-9,
-              qPrintable(QString("M4 clips: a loop near a bar long is warped to exactly one bar (length %1, %2 BPM, found %3)").arg(nearBar->length).arg(nearBar->sampleBpm()).arg(nearBar->detectedBpm)));
+        CHECK(!nearBar->loop && std::abs(nearBar->secondsAt(nearBar->length) - 1.9) < 1e-9
+              && (nearBar->detectedBpm > 0 ? std::abs(nearBar->sampleBpm() - nearBar->detectedBpm) < 1e-6 : !nearBar->warp),
+              qPrintable(QString("M35 clips: a truncated tail does not invent a nearby bar tempo (length %1, %2 BPM, found %3)").arg(nearBar->length).arg(nearBar->sampleBpm()).arg(nearBar->detectedBpm)));
     }
 
     // ---- Engine: audio clips land on the beat, Re-Pitch and Beats follow the tempo, gain, reverse, loops
@@ -5864,13 +5867,13 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < hit.size(); ++i) hit[i] = 0.5f * float(std::sin(2 * M_PI * 80 * i / 48000.0) * std::exp(-double(i) / 4000));
         const tempo::Estimate noiseT = tempo::detect(*sampleOf(noise, 48000)), hitT = tempo::detect(*sampleOf(hit, 48000));
         CHECK((noiseT.bpm == 0 && hitT.bpm == 0), qPrintable(QString("M18 tempo: noise and a single hit have no tempo (noise %1 BPM at %2, hit %3)").arg(noiseT.bpm, 0, 'f', 1).arg(noiseT.confidence, 0, 'f', 2).arg(hitT.bpm, 0, 'f', 1)));
-        // matching: the set's tempo halved or doubled until it's nearest the sample's
+        // Octave helper remains available, but importing no longer changes the source grid.
         CHECK((tempo::octaveFor(87, 172) == 1 && tempo::octaveFor(87, 120) == 0 && tempo::octaveFor(87, 60) == -1 && tempo::octaveFor(174, 87) == -1 && tempo::octaveFor(87, 87 * 1.5) == 1),
               "M18 tempo: the octave that brings the set's tempo nearest the sample's (87 at 172: one up, two set beats per sample beat)");
         const SamplePtr loop87 = sampleOf(loopAt(87, 4, 48000), 48000);
         const tempo::Sync s172 = tempo::syncTo(*loop87, 172), s120 = tempo::syncTo(*loop87, 120), s60 = tempo::syncTo(*loop87, 60);
-        CHECK((s172.beats == 32 && s172.loop && std::fabs(s172.detected - 87) < 1 && s120.beats == 16 && s120.loop && s60.beats == 8 && s60.loop),
-              "M18 tempo: a 4-bar loop at 87 BPM is 32 beats at 172 (plays at 86), 16 at 120, 8 at 60: whole bars, looping");
+        CHECK((s172.beats == 16 && s172.loop && std::fabs(s172.detected - 87) < 1 && s120.beats == 16 && s120.loop && s60.beats == 16 && s60.loop),
+              "M35 tempo: an 87 BPM four-bar source stays 16 beats at project tempos 172, 120 and 60");
         const tempo::Sync shot = tempo::syncTo(*sampleOf(hit, 48000), 120);
         CHECK((shot.detected == 0 && !shot.loop && std::fabs(shot.beats - 0.6) < 1e-9), "M18 tempo: a hit with no tempo plays once at its own speed");
         // a loop a little short of its bars is stretched to them; a phrase that isn't a whole number of beats plays once, warped
@@ -5880,32 +5883,33 @@ int main(int argc, char** argv) {
         std::vector<float> phrase = loopAt(100, 2, 48000);
         phrase.resize(phrase.size() + size_t(0.45 * 48000));
         const tempo::Sync ph = tempo::syncTo(*sampleOf(phrase, 48000), 100);
-        CHECK((sl.beats == 8 && sl.loop && !ph.loop && std::fabs(ph.beats - (8 + 0.75)) < 0.2), "M18 tempo: a loop 0.1 s short of two bars is stretched to them; a phrase 3/4 of a beat long plays once in tempo");
+        CHECK((!sl.loop && std::fabs(sl.beats - 4.7 * sl.detected / 60) < 1e-9 && !ph.loop && std::fabs(ph.beats - 5.25 * ph.detected / 60) < 1e-9),
+              "M35 tempo: truncated and extended tails retain the measured source beat grid instead of fitting a nearby bar");
 
-        // new clips are matched to the set's tempo; a tempo change re-matches them
+        // New clips retain the source grid; tempo moves only change the playback clock.
         Project p;
         p.scenes = {"1"};
         p.addTrack("Loop", QColor("#80c0ff"));
         p.tracks[0].type = TrackType::Audio;
         p.tempo = 172;
         ClipPtr c = p.newAudioClip("/tmp/loop87.wav", loop87);
-        CHECK((c->length == 32 && c->loop && c->warp && std::fabs(c->detectedBpm - 87) < 1 && std::fabs(c->sampleBpm() - 174) < 2 && c->warpMarkers.last().beat == 32),
-              "M18 clips: an 87 BPM loop dropped into a 172 BPM set becomes a 32-beat clip (plays at 86)");
+        CHECK((c->length == 16 && c->loop && c->warp && std::fabs(c->detectedBpm - 87) < 1 && std::fabs(c->sampleBpm() - 87) < 1 && c->warpMarkers.last().beat == 16),
+              "M35 clips: an 87 BPM source dropped into a 172 BPM project keeps its original 16-beat grid");
         p.tracks[0].clipSlots[0] = c;
-        p.tracks[0].arrangement = {{4, 32, 0, c}};
-        c->envelopes = {{target::volume(), {{0, 1}, {16, 0.5}}}};
+        p.tracks[0].arrangement = {{4, 16, 0, c}};
+        c->envelopes = {{target::volume(), {{0, 1}, {8, 0.5}}}};
         const int undo0 = p.undoStack()->count();
         { EditScope e(&p, "Tempo"); p.setTempo(100); }
         CHECK((c->length == 16 && c->warpMarkers.last().beat == 16 && p.tracks[0].arrangement[0].length == 16 && p.tracks[0].arrangement[0].start == 4
                && c->envelopes[0].points[1].beat == 8 && std::fabs(c->sampleBpm() - 87) < 1 && p.undoStack()->count() == undo0 + 1),
-              "M18 clips: at 100 BPM the loop is re-matched to 16 beats (plays at 100), its placement and envelopes scaled with it, one undo step");
+              "M35 clips: changing to 100 BPM preserves the source map, placement and envelope beats, one undo step");
         { EditScope e(&p, "Tempo"); p.setTempo(172); }
-        CHECK((c->length == 32 && p.tracks[0].arrangement[0].length == 32 && c->envelopes[0].points[1].beat == 16), "M18 clips: back at 172 it's 32 beats again");
+        CHECK((c->length == 16 && p.tracks[0].arrangement[0].length == 16 && c->envelopes[0].points[1].beat == 8), "M35 clips: returning to 172 BPM preserves the same source and musical grid");
         { EditScope e(&p, "Tempo"); p.setTempo(150); }
-        CHECK((c->length == 32), "M18 clips: a tempo that keeps the same octave nearest (150: 75 vs 87) changes nothing");
+        CHECK((c->length == 16), "M35 clips: crossing the old half/double tempo threshold does not change the clip length");
         p.undoStack()->undo();
         p.undoStack()->undo();
-        CHECK((p.tempo == 100 && c->length == 16 && p.tracks[0].arrangement[0].length == 16), "M18 clips: undo takes the tempo and the re-match back together");
+        CHECK((p.tempo == 100 && c->length == 16 && p.tracks[0].arrangement[0].length == 16), "M35 clips: tempo undo preserves the original source grid and arrangement length");
         c->warp = false;
         { EditScope e(&p, "Tempo"); p.setTempo(172); }
         CHECK((c->length == 16), "M18 clips: a clip with Warp off is left alone by a tempo change");
@@ -5913,8 +5917,8 @@ int main(int argc, char** argv) {
         c->warpMarkers = {{0, 0}, {20, loop87->seconds()}};   // moved by hand
         c->length = 20;
         const int undo1 = p.undoStack()->count();
-        CHECK((p.syncClipToTempo(c) && c->length == 32 && c->loop && c->warpMarkers.size() == 2 && c->warpMarkers.last().beat == 32 && p.undoStack()->count() == undo1 + 1),
-              "M18 clips: Sync fits the clip to the set's tempo again from its audio (one undo step)");
+        CHECK((p.syncClipToTempo(c) && c->length == 16 && c->loop && c->warpMarkers.size() == 2 && c->warpMarkers.last().beat == 16 && p.undoStack()->count() == undo1 + 1),
+              "M35 clips: Sync restores the source's original beat grid, independently of project tempo, in one undo step");
         ClipPtr pinned = p.newAudioClip("/tmp/hit.wav", sampleOf(hit, 48000));
         CHECK((pinned->detectedBpm == 0 && p.syncClipToTempo(pinned) && pinned->detectedBpm == 0 && !pinned->loop), "M18 clips: Sync on audio with no tempo keeps it a one-shot");
         // the set file keeps the found tempo
@@ -5939,10 +5943,13 @@ int main(int argc, char** argv) {
             e.tracks[0].arrangement = {{0, 32, 0, lc}};
             const std::vector<float> out = playArrangement(e, 120000);
             const std::vector<int> on = onsetsOf(out, 0.2f, 4000);
-            const double two = 2 * 60.0 / 172 * 48000;   // two set beats, in samples
+            const double two = 60.0 / 172 * 48000;   // one project beat, in samples
             bool onGrid = on.size() >= 3;
-            for (size_t k = 1; k < on.size() && k < 4; ++k) onGrid &= std::fabs(on[k] - k * two) < 150;
-            CHECK(onGrid, qPrintable(QString("M18 engine: the 87 BPM loop plays its beats on every second beat of the 172 BPM set (onsets at %1, %2, %3; two beats = %4)")
+            // The fresh engine's gain ramp can hide the first kick. Every
+            // measured onset must still occupy consecutive project beats.
+            const int firstBeat = on.empty() ? 0 : int(std::lround(on.front() / two));
+            for (size_t k = 0; k < on.size() && k < 4; ++k) onGrid &= std::fabs(on[k] - (firstBeat + int(k)) * two) < 150;
+            CHECK(onGrid, qPrintable(QString("M35 engine: the 87 BPM source follows every beat of the 172 BPM project (onsets at %1, %2, %3; one beat = %4)")
                                      .arg(on.size() > 0 ? on[0] : -1).arg(on.size() > 1 ? on[1] : -1).arg(on.size() > 2 ? on[2] : -1).arg(two, 0, 'f', 0)));
         }
         // the Clip View says what it found and how the clip sits against the set's tempo
@@ -5955,11 +5962,11 @@ int main(int argc, char** argv) {
             view.setClip(c);
             QApplication::processEvents();
             QLabel* info = nullptr;
-            for (QLabel* l : view.findChildren<QLabel*>()) if (l->text().startsWith("found ")) info = l;
+            info = view.findChild<QLabel*>("sourceTempoInfo");
             QPushButton* sync = view.findChild<QPushButton*>("syncTempo");
             QPushButton* warp = view.findChild<QPushButton*>("warpOn");
-            CHECK((info && info->text().contains("plays at") && sync && warp && warp->isChecked()),
-                  qPrintable("M18 Clip View: the Sample box shows the found tempo and the tempo the clip plays at, with Warp (on) and Sync: " + (info ? info->text() : QString("(no label)"))));
+            CHECK((info && info->text().contains("172") && sync && warp && warp->isChecked()),
+                  qPrintable("M35 Clip View: the Sample box distinguishes source BPM and project playback BPM, with Warp and Sync: " + (info ? info->text() : QString("(no label)"))));
         }
     }
 
@@ -7096,6 +7103,7 @@ int main(int argc, char** argv) {
             auto stretched = [&](WarpMode mode, double tempo, int transpose, double formants = 0) {
                 Project p; ClipPtr c = audioProject(p, sineWav);
                 c->length = 4; c->loop = false; c->warpMarkers = {{0, 0}, {4, 2}}; c->detectedBpm = 0;
+                c->warp = true;   // this test supplies an explicit source grid; pure tones import unwarped
                 c->warpMode = mode; c->transpose = transpose; c->formants = formants;
                 p.tracks[0].arrangement[0].length = 8;
                 p.setTempo(tempo);
@@ -7122,6 +7130,7 @@ int main(int argc, char** argv) {
             // the Clip View offers the six, with each mode's own settings; sets keep them
             {
                 Project p; ClipPtr c = audioProject(p, sineWav);
+                c->warp = true;
                 audio::Engine e(&p);
                 Transport t(&p, &e);
                 ClipView cv(&p, &t);

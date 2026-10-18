@@ -121,7 +121,10 @@ public:
     bool    playing() const   { return m_fbPlaying.load(std::memory_order_acquire); }   // also while counting in
     double  countInLeft() const { return m_fbCountIn.load(std::memory_order_acquire); }  // beats of count-in to go, 0 = none
     quint64 doneSeq() const   { return m_doneSeq.load(std::memory_order_acquire); }
-    struct TrackStatus { int playingSlot, queuedSlot; double slotStart, queuedAt; bool overridden; };
+    struct TrackStatus {
+        int playingSlot, queuedSlot; double slotStart, queuedAt; bool overridden;
+        double clipBeat = -1; int clipPass = 0;
+    };
     TrackStatus trackStatus(int trackIndex) const;
     float   takeTrackPeak(int trackIndex);     // peak since the last call
     float   takeReturnPeak(int ret);
@@ -182,6 +185,7 @@ private:
         int    playingSlot = -1, playingClip = 0;   // slot index + clip id (the id survives scene moves)
         int    queuedSlot = -2, queuedClip = 0;     // -2 none, -1 stop, >=0 launch
         double slotStart = 0, queuedAt = 0;
+        double audioStartSeconds = 0;              // unwarped Session clip: origin on the physical playback clock
         bool   overridden = false;
         bool   pendingAllOff = false;
         bool   followDone = false;                  // this launch's follow action has fired
@@ -193,7 +197,12 @@ private:
     struct Live { int track; int pitch; float velocity; bool off; int duration; };
     // Audio tracks: the stretches of audio clips under the playhead in this block.
     // start: the clip beat the first pass begins at (Clip::start for a launched clip, a placement's offset)
-    struct AudioSeg { const ClipData* clip; double origin, start, lo, hi, from, to; double fadeIn = 0, fadeOut = 0, inCurve = 0.5, outCurve = 0.5; };
+    struct AudioSeg {
+        const ClipData* clip; double origin, start, lo, hi, from, to;
+        double fadeIn = 0, fadeOut = 0, inCurve = 0.5, outCurve = 0.5;
+        bool natural = false;
+        double naturalAtFrom = 0;                  // source seconds before loop wrapping, at `from`
+    };
 
     void scheduleRepublish();
     void adopt(RenderState* s);
@@ -201,22 +210,24 @@ private:
     void apply(const Command& c);
     void renderBlock(float* out, int n, const float* in);
     void pullInput(int frames);
-    void scheduleTrack(const TrackData& td, PlayState& ps, double b0, double b1, double bps, int n, EventList& ev);
+    void scheduleTrack(const TrackData& td, PlayState& ps, double from, double b0, double b1, double bps, int n, EventList& ev);
     void emitSource(const TrackData& td, PlayState& ps, double from, double to, double b0, double bps, int n, EventList& ev);
     int  followTarget(const TrackData& td, int current, int action);
     void allNotesOff();
     void addSegment(const ClipData& c, double origin, double start, double lo, double hi, double from, double to,
                     double fadeIn = 0, double fadeOut = 0, double inCurve = 0.5, double outCurve = 0.5);   // the fades: a placement's (Session clips have none)
-    void renderAudio(double b0, double bps, double tempo, int n, float* L, float* R);
+    void renderAudio(int trackId, double b0, double bps, double tempo, int n, float* L, float* R);
     void renderComp(const ClipData& c, double local, double fade, double secPerBeat, float& L, float& R) const;   // a comped clip's sample at a clip beat
     // Tones / Texture / Complex / Complex Pro: a Stretcher per playing placement (by clip id and
     // placement origin), kept between blocks while it plays; one not used in a block is free again.
-    static constexpr int kStretchVoices = 12;
-    struct StretchSlot { int clipId = 0; double origin = 0; int lastUse = -1; };
-    Stretcher*  stretchVoice(int clipId, double origin);
+    // Two placements per supported track can straddle a scheduling boundary without
+    // evicting the other tracks' active voices. All buffers are made on the UI thread.
+    static constexpr int kStretchVoices = 2 * kMaxTracks;
+    struct StretchSlot { int trackId = 0, clipId = 0; double origin = 0; quint64 lastUse = 0; double nextBeat = 0; };
+    Stretcher*  stretchVoice(int trackId, int clipId, double origin);
     Stretcher   m_stretch[kStretchVoices];
     StretchSlot m_stretchKey[kStretchVoices];
-    int         m_blockNo = 0;
+    quint64     m_blockNo = 0;
     void clipOverrides(const TrackData& td, const PlayState& ps, double b0);   // fills m_ov* from the playing clip's envelopes
     double quantized(double q) const;
 
@@ -255,6 +266,10 @@ private:
     // Count-in (Play with Command::a beats): only the click plays, the playhead waits, then playback starts.
     double m_countIn = 0, m_countTotal = 0;
     double m_beat = 0, m_freeBeat = 0, m_loopStart = 0, m_loopLen = 16;
+    double m_playSeconds = 0;                     // physical playback time; holds when paused and survives timeline loops
+    // Events at a fractional loop boundary land on the next output sample. Keep the
+    // tiny head interval for scheduling while the sample clock carries its remainder.
+    double m_eventStart = -1;
     quint64 m_lastSeq = 0;
     std::array<PlayState, kMaxTracks> m_play;
     std::array<PlayState, kMaxTracks> m_scratch;   // used while re-mapping tracks; no allocation
@@ -320,7 +335,8 @@ private:
     std::atomic<float>   m_cpu{0};
     struct AtomicStatus {
         std::atomic<int> playingSlot{-1}, queuedSlot{-2};
-        std::atomic<double> slotStart{0}, queuedAt{0};
+        std::atomic<double> slotStart{0}, queuedAt{0}, clipBeat{-1};
+        std::atomic<int> clipPass{0};
         std::atomic<bool> overridden{false};
     };
     std::array<AtomicStatus, kMaxTracks> m_status;
