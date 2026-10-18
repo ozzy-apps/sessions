@@ -14,4 +14,4 @@ Shift-click toggles nodes; dragging empty space selects a box. Selected nodes mo
 
 Dense curves round-trip in sets and user presets and use preallocated render storage with logarithmic segment lookup. Monolith retains its original 32-node limit and parameter layout. **Builds without these changes only read 32 nodes**. Reopen dense projects using a build that includes this branch.
 
-Development is isolated on `osmium-usability`, based on 0.31.0. This branch uses 0.31.1 to avoid colliding with the sampler worktree's 0.32.0. When integrating both branches, retain the newer release version.
+Developed on `osmium-usability`, based on 0.31.0, and integrated into `main` at the user’s request. Version 0.31.1 avoids colliding with the separate sampler worktree’s 0.32.0. When integrating the sampler later, retain the newer release version.

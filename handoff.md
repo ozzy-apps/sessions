@@ -1,5 +1,11 @@
 # Sessions — handoff
 
+## Main integration · 2026-10-18
+
+User explicitly requested pushing the Osmium work to main. Fetched origin; main was clean at `ec504a7` (0.31.0), so `osmium-usability` (`a53a78b`, 0.31.1) fast-forwarded without conflicts or code changes. The sampler branch/worktree was not merged or modified. The previously recorded five passing suites (including 70 Osmium checks) validate this exact application code; this integration only updates documentation. Stack remains native C++17 / Qt 6 Widgets, Project/EditScope undo, DeviceSpecs/SetFile persistence and shared Monolith/Osmium rendering.
+
+Built: enlarged controls, theme-accent dual rings, 257-node curve editing, precise/group manipulation, zoom and responsive canvases described below. Required work is complete; push this integration to origin/main and verify synchronization. Future sampler integration is separate: preserve its device changes, Osmium's curve stride/storage, both handoffs and the newer release version.
+
 ## Osmium usability · complete · 0.31.1 · 2026-10-18
 
 Isolated branch **`osmium-usability`**, worktree **`lattice-osmium`**, based on 0.31.0 (`ec504a7`). Claude owns the separate `sampler` worktree; it was not modified or merged. This branch uses **0.31.1** to avoid colliding with the sampler's **0.32.0**. Keep the newer version when integrating both branches later.
@@ -11,7 +17,7 @@ Isolated branch **`osmium-usability`**, worktree **`lattice-osmium`**, based on 
 5. **Verification:** all five CTest suites passed in **66.03s**, no reruns or weakened checks: **1024 smoke, 70 Osmium, 97 Drum Buss, 954 Drum Studio, 694 Osmium bank**. Osmium checks cover knob sizes, inner/outer/gap hits, custom accent and faded-track pixels, exact fields, 257-node save/load, legacy limit, dense stroke/group undo, zoom/pan endpoints, independent Y snap, marquee, axis constraints, select-all and off-center grabs. A real Engine test proves that nodes beyond 32 on Curve 2 reach audio with the correct stride. Final screenshot/export run also passed 70/70. Logs: /tmp/osmium-usability-ctest.log, /tmp/osmium-usability-final-ui.log, /tmp/osmium-usability-final-build.log.
 6. **Deliverables:** README, docs/osmium-editing.md, manual checklist and seven reviewed screenshots. Installer: `dist/sessions_0.31.1+20261018203142_amd64.deb` (~40MB, ignored). Extracted application reports Sessions 0.31.1; the focused executable copied beside it also passed 70/70 from the installed directory (/tmp/osmium-usability-installed.log).
 
-**Stack / next AI:** native C++17 / Qt 6 Widgets; OsmiumBody.cpp owns controls/plots/editor, DeviceBody/Project/EditScope own parameter and undo behavior, DeviceSpecs/SetFile own saved limits, Engine/Context and shared Monolith.cpp own rendering. Required implementation is complete. Next logical step is review/integration with the sampler branch when the user requests it: preserve the sampler device additions, explicit curve stride, latest release version and each branch's handoff notes. Do not merge automatically. Optional hardware audition and controller checks are in docs/test-checklist.md. No user work was reverted.
+**Stack / next AI:** native C++17 / Qt 6 Widgets; OsmiumBody.cpp owns controls/plots/editor, DeviceBody/Project/EditScope own parameter and undo behavior, DeviceSpecs/SetFile own saved limits, Engine/Context and shared Monolith.cpp own rendering. Required implementation is complete. The Osmium work was subsequently integrated into main at the user’s request (see above). Next logical step is review/integration with the sampler branch when the user requests it: preserve the sampler device additions, explicit curve stride, latest release version and each branch's handoff notes. Do not merge automatically. Optional hardware audition and controller checks are in docs/test-checklist.md. No user work was reverted.
 
 ## Milestone 31 · Drum Buss · 2026-10-18
 
