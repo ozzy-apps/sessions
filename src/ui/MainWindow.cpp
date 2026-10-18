@@ -201,6 +201,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     vsplit->setStretchFactor(0, 3);
     vsplit->setStretchFactor(1, 1);
     vsplit->setSizes({470, 300});
+    QTimer::singleShot(0, this, [this] { fitDetailPane(m_detailStack->currentIndex() == 0); });   // once the window has its size: the Clip View's pane just as high as its boxes (0.37)
     root->addWidget(vsplit, 1);
     // the strip at the bottom, a status bar: the clip and the device chain in miniature
     m_overview = new OverviewBar(m_project, m_transport, central);
@@ -729,10 +730,8 @@ void MainWindow::saveWindowState() const {
     s.setValue("window/sessionView", sessionViewShown());
     s.setValue("window/clipView", clipViewShown());
     s.setValue("window/browser", m_browser->isVisibleTo(this));
-    QVariantList sizes;
-    for (int v : m_vsplit->sizes()) sizes << v;
-    s.setValue("window/split", sizes);
-    s.setValue("window/clipPane", clipViewShown() && m_bottom->maximumHeight() == QWIDGETSIZE_MAX ? m_bottom->height() : m_clipPaneHeight);
+    s.remove("window/split");      // the vertical split isn't restored any more (0.37): the Clip View's pane starts tight
+    s.remove("window/clipPane");
     if (m_browser->isVisibleTo(this)) s.setValue("window/browserWidth", m_hsplit->sizes().value(0));
 }
 
@@ -742,11 +741,11 @@ void MainWindow::restoreWindowState() {
     showSession(s.value("window/sessionView", true).toBool());
     showClipView(s.value("window/clipView", true).toBool());
     m_browserAction->setChecked(s.value("window/browser", true).toBool());
-    const QVariantList sizes = s.value("window/split").toList();
-    m_clipPaneHeight = s.value("window/clipPane", 0).toInt();
-    if (m_clipPaneHeight <= 0 && sizes.size() == 2) m_clipPaneHeight = sizes[1].toInt();
-    if (sizes.size() == 2) m_vsplit->setSizes({sizes[0].toInt(), sizes[1].toInt()});
+    // The Clip View's pane starts tight, just as high as its boxes, every time (0.37): the height you drag it to is
+    // remembered for the session (Device View and back), not across starts, which is how the dividers came up wrong.
+    m_clipPaneHeight = 0;
     fitDetailPane(m_detailStack->currentIndex() == 0);
+    QTimer::singleShot(0, this, [this] { fitDetailPane(m_detailStack->currentIndex() == 0); });   // again once the window has its real size
     const int browserWidth = s.value("window/browserWidth", 0).toInt();
     if (browserWidth > 0) m_hsplit->setSizes({browserWidth, std::max(200, width() - browserWidth)});
 }
@@ -1499,8 +1498,13 @@ void MainWindow::showClipView(bool clip) {
     m_detailStack->setCurrentIndex(clip ? 0 : 1);
     m_clipTab->setChecked(clip);
     m_deviceTab->setChecked(!clip);
-    fitDetailPane(clip);
+    fitDetailPane(clip, wasClip != clip);   // the Clip View already showing keeps the height it has (0.37)
     updateDetailTitle();
+}
+
+int MainWindow::clipPaneMinHeight() const {
+    const int header = 22;
+    return header + (m_clipView ? m_clipView->minimumSizeHint().height() : 160);
 }
 
 // The detail pane's height: the Device View gets exactly what its devices need and its divider
@@ -1511,7 +1515,7 @@ int MainWindow::devicePaneHeight() const {
     return header + chainMargins + rackFrame + devui::kBodyHeight + 22 + scrollBar;
 }
 
-void MainWindow::fitDetailPane(bool clip) {
+void MainWindow::fitDetailPane(bool clip, bool resize) {
     if (!m_bottom || !m_vsplit) return;
     QSplitterHandle* handle = m_vsplit->handle(1);
     if (m_deviceView->editorExpanded() && !clip) {
@@ -1521,13 +1525,18 @@ void MainWindow::fitDetailPane(bool clip) {
         const int desired = std::clamp(total - 210, 300, 610);
         m_vsplit->setSizes({std::max(100, total - desired), desired});
     } else if (clip) {
-        m_bottom->setMinimumHeight(160);
+        // never squashed below its boxes (they'd overlap), always leaving the main view 120 px; a start is tight: just the boxes
+        const int minH = clipPaneMinHeight();
+        m_bottom->setMinimumHeight(minH);
         m_bottom->setMaximumHeight(QWIDGETSIZE_MAX);
         if (handle) { handle->setEnabled(true); handle->setCursor(Qt::SplitVCursor); }
-        if (m_clipPaneHeight > 0) {
-            const QList<int> sizes = m_vsplit->sizes();
-            const int total = sizes.value(0) + sizes.value(1);
-            if (total > 0) m_vsplit->setSizes({std::max(100, total - m_clipPaneHeight), m_clipPaneHeight});
+        const QList<int> sizes = m_vsplit->sizes();
+        const int total = sizes.value(0) + sizes.value(1);
+        if (resize && total > 0) {
+            const int want = std::clamp(m_clipPaneHeight > 0 ? m_clipPaneHeight : minH, minH, std::max(minH, total - 120));
+            m_vsplit->setSizes({total - want, want});
+        } else if (total > 0 && sizes.value(1) < minH) {
+            m_vsplit->setSizes({total - minH, minH});
         }
     } else {
         m_bottom->setFixedHeight(devicePaneHeight());

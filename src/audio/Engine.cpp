@@ -406,7 +406,7 @@ void Engine::publish() {
             d->grain = c->grain;
             d->beatsTail = std::clamp(c->beatsTail, 0, 2);
             d->gain = float(std::pow(10.0, c->gain / 20.0));
-            d->ratio = std::exp2(c->transpose / 12.0);
+            d->ratio = std::exp2((c->transpose + c->detune / 100.0) / 12.0);
             if (!c->takes.isEmpty()) {   // played from its takes: the comp's regions, the newest take in between
                 for (const Take& t : c->takes) { d->takeSamples.push_back(t.sample); d->takeStart.push_back(t.startBeat); }
                 const int newest = int(c->takes.size()) - 1;

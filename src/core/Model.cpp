@@ -30,7 +30,7 @@ static bool operator==(const Clip& a, const Clip& b) {
         && a.followChanceA == b.followChanceA && a.followTime == b.followTime
         && a.scaleOn == b.scaleOn && a.scaleRoot == b.scaleRoot && a.scale == b.scale
         && a.samplePath == b.samplePath && a.warpMode == b.warpMode && a.warpMarkers == b.warpMarkers
-        && a.gain == b.gain && a.transpose == b.transpose && a.reverse == b.reverse
+        && a.gain == b.gain && a.transpose == b.transpose && a.detune == b.detune && a.reverse == b.reverse
         && a.grainMs == b.grainMs && a.flux == b.flux && a.formants == b.formants
         && a.warp == b.warp && a.grain == b.grain && a.beatsTail == b.beatsTail && a.envelopes == b.envelopes && a.detectedBpm == b.detectedBpm;
 }

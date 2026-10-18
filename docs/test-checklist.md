@@ -1,5 +1,12 @@
 # Sessions — manual test checklist
 
+## 0.37 · The Clip View's pane and the Sample box
+
+1. Quit Sessions, start it again → the Clip View's pane at the bottom is just as high as its boxes (like the tidy Session screenshot), the Session grid or the timeline gets the rest; the same with a set that opens in the Arrangement.
+2. Drag the divider over the Clip View down → it stops where the boxes still fit; the Clip box's rows never overlap. Drag it up → a taller piano roll; click several clips → the height stays. Switch to the Device View and back → your height again.
+3. Select an audio clip → the Sample box: file name and format on top, Warp / mode / Source BPM / Sync / Reverse / Takes on the left, Transpose knob, Detune and the Gain fader on the right. Drag the knob → the field under it follows (and the other way round); Delete on either resets. Detune +50 ct → the pitch rises a quarter tone; Re-Pitch mode → Transpose and Detune grey out.
+4. Drag the gain fader → the dB field follows; type -inf or +24 into the field → the fader sits at its end. Save and reopen the set → transpose, detune and gain come back.
+
 ## 0.36 · Source tempo, live synchronization and warp quality
 
 1. Import a known 176 BPM, four-bar drum loop into a 120 BPM project. Source BPM must show 176, the loop stays 16 beats, and each source beat lands on the project grid. Repeat with 44.1, 48 and 96 kHz files. Test the provided long drum stem separately: its measured tempo is approximately 172 BPM.

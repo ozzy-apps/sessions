@@ -177,6 +177,7 @@ struct Clip {
     QVector<WarpMarker> warpMarkers; // sorted by beat, at least two
     double    gain      = 0;         // dB
     int       transpose = 0;         // semitones (every mode but Re-Pitch, where the tempo sets the pitch)
+    double    detune    = 0;         // cents, -50 .. 50, on top of Transpose (0.37)
     bool      reverse   = false;     // plays the sample backwards; the markers refer to the reversed audio
     bool      warp      = true;      // off: plays at the file's own speed, ignoring the tempo
     double    grain     = 0;         // Beats mode slices: 0 = at transients, else a grid in beats (0.25 = 1/16)

@@ -134,6 +134,7 @@ QJsonObject writeClip(const Clip& c, const QString& baseDir) {
         audio.insert("markers", markers);
         audio.insert("gain", c.gain);
         audio.insert("transpose", c.transpose);
+        if (c.detune != 0) audio.insert("detune", c.detune);
         audio.insert("reverse", c.reverse);
         audio.insert("warp", c.warp);
         audio.insert("grain", c.grain);
@@ -295,6 +296,7 @@ Clip readClip(const QJsonObject& o, const QString& baseDir) {
         c.warpMode = WarpMode(wordIndex(kWarps, audio.value("warpMode"), 0));
         c.gain = std::clamp(num(audio, "gain", 0), -70.0, 24.0);
         c.transpose = std::clamp(integer(audio, "transpose", 0), -48, 48);
+        c.detune = std::clamp(num(audio, "detune", 0), -50.0, 50.0);
         c.reverse = flag(audio, "reverse", false);
         c.warp = flag(audio, "warp", true);
         c.grain = num(audio, "grain", 0.25);   // sets from before transient slicing used a 1/16 grid

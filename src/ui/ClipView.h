@@ -33,6 +33,8 @@ class SampleEditor;
 class TakesEditor;
 class EnvelopeEditor;
 class DragValue;
+class Knob;
+class Fader;
 class ClipOverview;
 struct Clip;
 struct Note;
@@ -129,7 +131,11 @@ private:
     DragValue* m_bpm;
     QLabel*    m_tempoInfo = nullptr;   // the tempo found in the audio and how the clip sits against the set's
     DragValue* m_gain;
+    Fader*     m_gainFader = nullptr;    // the gain as a vertical fader beside the field (0.37)
     DragValue* m_transpose;
+    Knob*      m_transposeKnob = nullptr;   // the transpose knob over the field (0.37)
+    DragValue* m_detune = nullptr;          // cents
+    QLabel*    m_format = nullptr;          // "48.0 kHz · 2 ch · 4.00 s" under the file name
     QPushButton* m_reverse;
     QPushButton* m_takesShow;
     // Envelopes tab

@@ -190,7 +190,11 @@ private:
     QSplitter*      m_hsplit = nullptr;    // the browser beside the main views (drag the divider for a wider browser)
     QWidget*        m_bottom = nullptr;    // the detail pane: Info View, and the Clip View or the Device View
     int             m_clipPaneHeight = 0;  // the Clip View's pane height (the Device View's is fixed: just what the devices need)
-    void            fitDetailPane(bool clip);
+    // The detail pane's height (0.37): the Device View's is fixed; the Clip View's is at least what its boxes need
+    // (clipPaneMinHeight) and otherwise the height you dragged it to, applied when the pane switches to it
+    // (`resize`), never while it already shows (selecting another clip leaves your drag alone).
+    void            fitDetailPane(bool clip, bool resize = true);
+    int             clipPaneMinHeight() const;
     int             devicePaneHeight() const;
     std::shared_ptr<struct Clip> m_clipboard;
     bool            m_midiKeys = false;

@@ -10,6 +10,8 @@
 #include "core/Scales.h"
 #include "core/Theme.h"
 #include "widgets/DragValue.h"
+#include "widgets/Knob.h"
+#include "widgets/Fader.h"
 #include <QHBoxLayout>
 #include <QVBoxLayout>
 #include <QFormLayout>
@@ -34,6 +36,7 @@ namespace sessions {
 namespace {
 
 constexpr int kBoxWidth = 132;   // the clip boxes are narrow: small fields, short labels
+constexpr int kSampleBoxWidth = 296, kWarpColumnWidth = 176;   // the Sample box (0.37): the warp column and the pitch / gain column
 
 const double kQuantBeats[] = {-1, 0, 16, 8, 4, 2, 1, 0.5, 0.25};
 const char*  kQuantNames[] = {"Global", "None", "4 Bars", "2 Bars", "1 Bar", "1/2", "1/4", "1/8", "1/16"};
@@ -149,7 +152,7 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
     m_launchBox = box("Launch", buildLaunchTab(), "How the clip behaves when launched from the Session View: mode, legato, quantization, follow actions.");
     m_notesBox = box("Notes", buildNotesTab(), "Note tools and the clip's scale.");
     m_sampleBox = box("Sample", buildSampleTab(), "The clip's sample: warp mode, original tempo, gain, transpose, reverse.");
-    m_sampleBox->setFixedWidth(176); // source BPM plus half/double controls must remain legible
+    m_sampleBox->setFixedWidth(kSampleBoxWidth);   // the warp column plus the pitch and gain column (0.37)
     m_envBox = box("Envelopes", buildEnvelopeTab(), "Clip envelopes: a parameter's line that plays with the clip and loops with it.");
     lay->addWidget(m_props);
     // the editor column: the clip in miniature on top (what's on screen outlined; drag it sideways to scroll,
@@ -452,16 +455,35 @@ QWidget* ClipView::buildNotesTab() {
     return w;
 }
 
+// The Sample box (reworked in 0.37 after the classic clip panel): the file and its format on top; under
+// them two columns: the warp column (Warp and its mode, the mode's own row, the source tempo with :2 / x2,
+// Sync, Reverse and Takes) and the pitch / gain column (a Transpose knob over its field, Detune in cents,
+// a Gain fader over its field).
 QWidget* ClipView::buildSampleTab() {
     auto* w = new QWidget(m_props);
     auto* l = new QVBoxLayout(w);
     l->setContentsMargins(0, 0, 0, 0);
-    l->setSpacing(4);
+    l->setSpacing(3);
     m_file = new QLabel(w);
     m_file->setObjectName("dimLabel");
     m_file->setWordWrap(false);
     InfoView::attach(m_file, "Sample", "The audio file this clip plays.");
     l->addWidget(m_file);
+    m_format = new QLabel(w);
+    m_format->setObjectName("dimLabel");
+    m_format->setWordWrap(false);
+    InfoView::attach(m_format, "Sample Format", "The file's sample rate, channels and length.");
+    l->addWidget(m_format);
+    auto* columns = new QHBoxLayout;
+    columns->setContentsMargins(0, 0, 0, 0);
+    columns->setSpacing(8);
+    auto* leftW = new QWidget(w);
+    leftW->setFixedWidth(kWarpColumnWidth);
+    auto* left = new QVBoxLayout(leftW);
+    left->setContentsMargins(0, 0, 0, 0);
+    left->setSpacing(4);
+    columns->addWidget(leftW, 0);
+    l->addLayout(columns, 1);
 
     auto* form = new QFormLayout;
     form->setContentsMargins(0, 0, 0, 0);
@@ -574,28 +596,78 @@ QWidget* ClipView::buildSampleTab() {
     auto* tempoRow = new QHBoxLayout; tempoRow->setSpacing(3);
     tempoRow->addWidget(m_tempoInfo, 1); tempoRow->addWidget(sync, 0, Qt::AlignTop);
     form->addRow(dimLabel("Tempo", w), tempoRow);
+    left->addLayout(form);
 
-    m_gain = new DragValue(w);
-    m_gain->setRange(-70, 24);
-    m_gain->setDefault(0);
-    m_gain->setDragSensitivity(300);
-    m_gain->setMinimumChars(7);
-    m_gain->setFormatter([](double v) { return v <= -69.9 ? QString("-inf dB") : QString("%1%2 dB").arg(v > 0.05 ? "+" : "").arg(v, 0, 'f', 1); });
-    InfoView::attach(m_gain, "Clip Gain", "How loud the clip plays, before the track's devices and fader.");
-    connect(m_gain, &DragValue::valueEdited, this, [this](double v) { editClip("Clip Gain", 6, [v](Clip& c) { c.gain = v <= -69.9 ? -70 : v; }); });
-    form->addRow(dimLabel("Gain", w), m_gain);
-
+    // ---- the pitch and gain column
+    auto* right = new QGridLayout;
+    right->setContentsMargins(0, 0, 0, 0);
+    right->setHorizontalSpacing(6);
+    right->setVerticalSpacing(2);
+    auto* pitchLabel = dimLabel("Transpose", w);
+    pitchLabel->setAlignment(Qt::AlignHCenter);
+    right->addWidget(pitchLabel, 0, 0);
+    m_transposeKnob = new Knob(w, 30);
+    m_transposeKnob->setObjectName("clipTransposeKnob");
+    m_transposeKnob->setRange(-48, 48);
+    m_transposeKnob->setStep(1);
+    m_transposeKnob->setDefault(0);
+    m_transposeKnob->setBipolar(true);
+    m_transposeKnob->setDragSensitivity(240);
+    const QString transposeHelp = "Shifts the clip's pitch in semitones (every warp mode but Re-Pitch, where the tempo sets the pitch). Drag the knob or the field; Delete resets it.";
+    InfoView::attach(m_transposeKnob, "Transpose", transposeHelp);
+    connect(m_transposeKnob, &DragValue::valueEdited, this, [this](double v) { editClip("Transpose", 7, [v](Clip& c) { c.transpose = int(std::lround(v)); }); });
+    right->addWidget(m_transposeKnob, 1, 0, Qt::AlignHCenter);
     m_transpose = new DragValue(w);
+    m_transpose->setObjectName("clipTranspose");
     m_transpose->setRange(-48, 48);
     m_transpose->setStep(1);
     m_transpose->setDefault(0);
     m_transpose->setDragSensitivity(200);
-    m_transpose->setMinimumChars(6);
+    m_transpose->setMinimumChars(5);
     m_transpose->setFormatter([](double v) { const int st = int(std::lround(v)); return st == 0 ? QString("0 st") : QString("%1%2 st").arg(st > 0 ? "+" : "").arg(st); });
-    InfoView::attach(m_transpose, "Transpose", "Shifts the pitch in semitones (Beats mode; in Re-Pitch the tempo sets the pitch).");
+    InfoView::attach(m_transpose, "Transpose", transposeHelp);
     connect(m_transpose, &DragValue::valueEdited, this, [this](double v) { editClip("Transpose", 7, [v](Clip& c) { c.transpose = int(std::lround(v)); }); });
-    form->addRow(dimLabel("Transp.", w), m_transpose);
-    l->addLayout(form);
+    right->addWidget(m_transpose, 2, 0);
+    auto* detuneLabel = dimLabel("Detune", w);
+    detuneLabel->setAlignment(Qt::AlignHCenter);
+    right->addWidget(detuneLabel, 3, 0);
+    m_detune = new DragValue(w);
+    m_detune->setObjectName("clipDetune");
+    m_detune->setRange(-50, 50);
+    m_detune->setStep(1);
+    m_detune->setDefault(0);
+    m_detune->setDragSensitivity(200);
+    m_detune->setMinimumChars(5);
+    m_detune->setFormatter([](double v) { const int ct = int(std::lround(v)); return QString("%1%2 ct").arg(ct > 0 ? "+" : "").arg(ct); });
+    InfoView::attach(m_detune, "Detune", "Fine tuning in cents, on top of Transpose (a hundredth of a semitone each).");
+    connect(m_detune, &DragValue::valueEdited, this, [this](double v) { editClip("Detune", 8, [v](Clip& c) { c.detune = std::clamp(std::round(v), -50.0, 50.0); }); });
+    right->addWidget(m_detune, 4, 0);
+
+    auto* gainLabel = dimLabel("Gain", w);
+    gainLabel->setAlignment(Qt::AlignHCenter);
+    right->addWidget(gainLabel, 0, 1);
+    m_gainFader = new Fader(w);
+    m_gainFader->setObjectName("clipGainFader");
+    m_gainFader->setRange(-36, 12);   // 0 dB at the fader's tick (three quarters up); the field below reaches further
+    m_gainFader->setDefault(0);
+    m_gainFader->setDragSensitivity(240);
+    m_gainFader->setFixedSize(24, 66);
+    const QString gainHelp = "How loud the clip plays, before the track's devices and fader. Drag the fader or the field (down to -inf, up to +24 dB); Delete resets it.";
+    InfoView::attach(m_gainFader, "Clip Gain", gainHelp);
+    connect(m_gainFader, &DragValue::valueEdited, this, [this](double v) { editClip("Clip Gain", 6, [v](Clip& c) { c.gain = v; }); });
+    right->addWidget(m_gainFader, 1, 1, 3, 1, Qt::AlignHCenter);
+    m_gain = new DragValue(w);
+    m_gain->setObjectName("clipGain");
+    m_gain->setRange(-70, 24);
+    m_gain->setDefault(0);
+    m_gain->setDragSensitivity(300);
+    m_gain->setMinimumChars(6);
+    m_gain->setFormatter([](double v) { return v <= -69.9 ? QString("-inf dB") : QString("%1%2 dB").arg(v > 0.05 ? "+" : "").arg(v, 0, 'f', 1); });
+    InfoView::attach(m_gain, "Clip Gain", gainHelp);
+    connect(m_gain, &DragValue::valueEdited, this, [this](double v) { editClip("Clip Gain", 6, [v](Clip& c) { c.gain = v <= -69.9 ? -70 : v; }); });
+    right->addWidget(m_gain, 4, 1);
+    right->setRowStretch(5, 1);
+    columns->addLayout(right, 1);
 
     m_reverse = toolButton("Reverse", "Reverse", "Plays the sample backwards. The warp markers flip with it.", w, true);
     connect(m_reverse, &QPushButton::clicked, this, [this](bool on) {
@@ -617,8 +689,8 @@ QWidget* ClipView::buildSampleTab() {
     m_takesShow->setObjectName("takesShow");
     connect(m_takesShow, &QPushButton::clicked, this, [this](bool on) { showTakes(on); });
     auto* bottom = new QHBoxLayout; bottom->setSpacing(4); bottom->addWidget(m_reverse); bottom->addWidget(m_takesShow);
-    l->addLayout(bottom);
-    l->addStretch(1);
+    left->addLayout(bottom);
+    left->addStretch(1);
     return w;
 }
 
@@ -826,7 +898,8 @@ void ClipView::refresh() {
         QSignalBlocker b7(m_warp);
         const QFileInfo fi(m_clip->samplePath);
         const QString takes = m_clip->takes.isEmpty() ? QString() : QString("%1 takes · ").arg(m_clip->takes.size());
-        m_file->setText(m_file->fontMetrics().elidedText(takes + (m_clip->sample ? "" : "Missing: ") + fi.fileName(), Qt::ElideMiddle, kBoxWidth - 10));
+        m_file->setText(m_file->fontMetrics().elidedText(takes + (m_clip->sample ? "" : "Missing: ") + fi.fileName(), Qt::ElideMiddle, kSampleBoxWidth - 12));
+        m_format->setText(m_clip->sample ? QString("%1 kHz · %2 ch · %3 s").arg(m_clip->sample->rate / 1000.0, 0, 'f', 1).arg(m_clip->sample->channels).arg(m_clip->sample->seconds(), 0, 'f', 2) : QString());
         m_takesShow->setEnabled(!m_clip->takes.isEmpty());
         m_takesShow->setText(m_clip->takes.isEmpty() ? "Takes" : QString("Takes (%1)").arg(m_clip->takes.size()));
         m_reverse->setEnabled(m_clip->takes.isEmpty());   // takes play forwards
@@ -871,8 +944,14 @@ void ClipView::refresh() {
             m_tempoInfo->setToolTip(m_clip->sample ? "No steady source tempo was found. Set Source BPM to the tempo of the original recording to enable Warp." : QString());
         }
         m_gain->setValue(m_clip->gain, false);
+        m_gainFader->setValue(m_clip->gain, false);
         m_transpose->setValue(m_clip->transpose, false);
-        m_transpose->setEnabled(m_clip->warp && m_clip->warpMode != WarpMode::Repitch);
+        m_transposeKnob->setValue(m_clip->transpose, false);
+        m_detune->setValue(m_clip->detune, false);
+        const bool pitched = m_clip->warp && m_clip->warpMode != WarpMode::Repitch;
+        m_transpose->setEnabled(pitched);
+        m_transposeKnob->setEnabled(pitched);
+        m_detune->setEnabled(pitched);
         m_reverse->setChecked(m_clip->reverse);
     }
     m_loop->setChecked(m_clip->loop);

@@ -28,6 +28,7 @@
 #include "ui/MainWindow.h"
 #include "ui/ControlBar.h"
 #include "widgets/Knob.h"
+#include "widgets/Fader.h"
 #include "widgets/LevelFader.h"
 #include "ui/devices/DeviceBody.h"
 #include "ui/DeviceView.h"
@@ -8670,6 +8671,94 @@ int main(int argc, char** argv) {
         int textRows = 0;
         for (int y = 0; y < grabbed.height(); ++y) if (grabbed.pixelColor(play->x() + 15, y) != grabbed.pixelColor(2, 2)) ++textRows;
         CHECK(textRows >= 20 && textRows <= 26, "M35 bar: the play button spans 24 rows of the 34 px bar, centred");
+    }
+
+
+    // ---- Milestone 37: the Clip View's pane sizes itself to its boxes; the Sample box with a transpose knob, detune and a gain fader
+    {
+        {   // the pane: as high as the boxes at a first start, never squashed below them, a drag kept when another clip is picked
+            MainWindow w;
+            w.resize(1800, 1000);
+            w.show();
+            QApplication::processEvents();
+            QApplication::processEvents();   // the deferred fit
+            QWidget* bottom = w.findChild<QWidget*>("bottomPanel");
+            auto* vsplit = bottom ? qobject_cast<QSplitter*>(bottom->parentWidget()) : nullptr;
+            ClipView* cv = w.findChild<ClipView*>();
+            const int minH = 22 + (cv ? cv->minimumSizeHint().height() : 0);
+            CHECK(bottom && vsplit && cv && minH > 180 && bottom->minimumHeight() == minH && bottom->height() == minH,
+                  "M37 window: at a first start the Clip View's pane is exactly as high as its boxes (tight but legible)");
+            const int total = vsplit->sizes().value(0) + vsplit->sizes().value(1);
+            vsplit->setSizes({total - 40, 40});
+            QApplication::processEvents();
+            CHECK(bottom->height() >= minH, "M37 window: the pane can't be squashed below its boxes (they used to overlap)");
+            vsplit->setSizes({total - 420, 420});
+            QApplication::processEvents();
+            Project* proj = w.project();
+            ClipGrid* g = w.sessionView()->grid();
+            auto slotOf = [&](int track) { QRect r; for (const auto& c : g->mapCells()) if (c.second == QString("slot:%1:0").arg(proj->tracks[track].id)) r = c.first; return r; };
+            QTest::mouseClick(g, Qt::LeftButton, Qt::NoModifier, slotOf(0).center() + QPoint(30, 0));
+            QApplication::processEvents();
+            QTest::mouseClick(g, Qt::LeftButton, Qt::NoModifier, slotOf(1).center() + QPoint(30, 0));
+            QApplication::processEvents();
+            CHECK(bottom->height() == 420, "M37 window: picking clips leaves the height you dragged the pane to (it used to snap back)");
+            QToolButton* clipTab = nullptr; QToolButton* deviceTab = nullptr;
+            for (QToolButton* b : w.findChildren<QToolButton*>()) { if (b->text() == "Clip") clipTab = b; if (b->text() == "Device") deviceTab = b; }
+            QTest::mouseClick(deviceTab, Qt::LeftButton); QApplication::processEvents();
+            QTest::mouseClick(clipTab, Qt::LeftButton); QApplication::processEvents();
+            CHECK(bottom->height() == 420, "M37 window: Device View and back brings the dragged height back");
+        }
+        {   // the Sample box: the knob and the field agree, detune in cents, the gain fader
+            const QString toneWav = audioDir.filePath("tone 2s.wav");
+            Project p; audioProject(p, toneWav);
+            ClipPtr clip = p.tracks[0].clipSlots[0];
+            clip->warp = true;   // a tone has no beat to find, so it came in unwarped; Transpose and Detune need Warp on (Re-Pitch aside)
+            audio::Engine e(&p);
+            Transport t(&p, &e);
+            ClipView view(&p, &t);
+            view.resize(1300, 220); view.show();
+            QApplication::processEvents();
+            view.setClip(clip);
+            QApplication::processEvents();
+            auto* knob = view.findChild<Knob*>("clipTransposeKnob");
+            auto* field = view.findChild<DragValue*>("clipTranspose");
+            auto* detune = view.findChild<DragValue*>("clipDetune");
+            auto* fader = view.findChild<Fader*>("clipGainFader");
+            auto* gain = view.findChild<DragValue*>("clipGain");
+            CHECK(knob && field && detune && fader && gain && knob->width() >= 30 && fader->height() >= 60 && view.minimumSizeHint().height() <= 200,
+                  "M37 clip: the Sample box has a transpose knob over its field, a detune field and a gain fader, within the pane's height");
+            QTest::mousePress(knob, Qt::LeftButton, Qt::NoModifier, QPoint(15, 15));
+            QTest::mouseMove(knob, QPoint(15, -15));
+            QTest::mouseRelease(knob, Qt::LeftButton, Qt::NoModifier, QPoint(15, -15));
+            QApplication::processEvents();
+            CHECK(clip->transpose > 0 && std::abs(field->value() - clip->transpose) < 1e-9 && std::abs(knob->value() - clip->transpose) < 1e-9,
+                  "M37 clip: dragging the knob up transposes the clip, and the field follows");
+            QTest::mousePress(detune, Qt::LeftButton, Qt::NoModifier, QPoint(20, 8));
+            QTest::mouseMove(detune, QPoint(20, -32));
+            QTest::mouseRelease(detune, Qt::LeftButton, Qt::NoModifier, QPoint(20, -32));
+            QApplication::processEvents();
+            QTest::mousePress(fader, Qt::LeftButton, Qt::NoModifier, QPoint(12, 33));
+            QTest::mouseMove(fader, QPoint(12, 60));
+            QTest::mouseRelease(fader, Qt::LeftButton, Qt::NoModifier, QPoint(12, 60));
+            QApplication::processEvents();
+            CHECK(clip->detune > 0 && clip->detune <= 50 && clip->gain < -1 && std::abs(gain->value() - clip->gain) < 1e-9,
+                  "M37 clip: the detune field and the gain fader set the clip, the gain field following the fader");
+            // detune is heard and saved: +50 cents raises a 440 Hz tone by about 3 %
+            clip->transpose = 0; clip->detune = 50; clip->gain = 0;
+            const std::vector<float> up = playArrangement(p, 48000);
+            clip->detune = 0;
+            const std::vector<float> flat = playArrangement(p, 48000);
+            auto crossings = [](const std::vector<float>& v, size_t a, size_t b) { int c = 0; for (size_t i = a + 1; i < b && i < v.size(); i += 2) if ((v[i - 2] < 0) != (v[i] < 0)) ++c; return c; };
+            const int cu = crossings(up, 9600, 86400), cf = crossings(flat, 9600, 86400);
+            CHECK(cf > 600 && cu > cf * 1.02 && cu < cf * 1.04, "M37 clip: +50 cents of detune plays the clip about 3 % higher");
+            clip->detune = -12.5;
+            const QString setPath = audioDir.filePath("fades/detune.sessions");
+            setfile::Extras x, y;
+            Project q;
+            CHECK(setfile::save(setPath, p, x) && setfile::load(setPath, q, y) && q.tracks[0].clipSlots[0] && q.tracks[0].clipSlots[0]->detune == -12.5
+                  && q.captureEditState() == p.captureEditState(),
+                  "M37 sets: a clip's detune round-trips (captureEditState ==)");
+        }
     }
 
     std::printf("%d failure(s)\n", failures);
