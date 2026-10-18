@@ -14,6 +14,7 @@ std::shared_ptr<DeviceProcessor> createGuitar(DeviceType type, float sampleRate)
 std::shared_ptr<DeviceProcessor> createMonolith(float sampleRate);                   // Monolith.cpp
 std::shared_ptr<DeviceProcessor> createOsmium(float sampleRate);                     // Monolith.cpp, independent envelope segments
 std::shared_ptr<DeviceProcessor> createNam(float sampleRate);                        // Nam.cpp
+std::shared_ptr<DeviceProcessor> createDrumBuss(float sampleRate);                    // DrumBuss.cpp
 std::shared_ptr<DeviceProcessor> createDrumStudio(float sampleRate);                 // DrumStudio.cpp
 
 namespace kit {

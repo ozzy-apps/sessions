@@ -621,6 +621,7 @@ float eqResponseDb(const float* params, float freq, float sampleRate) {
 
 std::shared_ptr<DeviceProcessor> createEffect(DeviceType type, float sr) {
     switch (type) {
+    case T::DrumBuss:   return createDrumBuss(sr);
     case T::EQ:         return std::make_shared<Eq>(sr);
     case T::Compressor: return std::make_shared<Compressor>(sr);
     case T::Saturator:  return std::make_shared<Saturator>(sr);

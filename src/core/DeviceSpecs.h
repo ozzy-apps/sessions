@@ -29,7 +29,15 @@ enum class DeviceType {
     // MIDI effects
     Arpeggiator, Chord, Scale, Velocity, MidiEffectRack,
     Osmium,
+    DrumBuss, // appended: existing device enum values remain stable
 };
+
+// Drum Buss: fixed indices shared by the processor and compact panel.
+namespace drumbuss {
+enum Param { Trim, Comp, Drive, Type, Crunch, Damp, Transients, Boom, Frequency, Decay, ForceNote, BassSolo, Output, Mix, kParams };
+// Round the resonator to the nearest equal-tempered MIDI note when ForceNote is enabled.
+double tunedFrequency(double hz, bool forceNote);
+}
 
 // Drum Rack: Volume and Velocity, then five knobs per pad. Pad k plays on MIDI note 36 + k
 // (C1 up to D#2) and holds a sample (Device::pads). A pad can also hold a chain of devices

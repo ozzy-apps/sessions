@@ -1,5 +1,14 @@
 # Sessions 0.23 — things to try by hand
 
+## 0.31 · Drum Buss
+
+1. Browser → Audio Effects → Drum Buss, after Drum Studio or on a group/audio track. Check the compact panel in Dark/Light and custom themes, all controls at 100/150% UI scale, and the Bass/Out meters during playback.
+2. Drive: compare Soft, Medium and Hard at 20–80%. Hard emphasizes bass; Medium limits peaks; Soft rounds them. Turn Comp on and compare loud/soft hits. Try Trim before Drive, and match level with Output.
+3. Crunch adds mid-high texture; Damp removes harshness. Set Transients positive for fuller hits, negative to tighten room/rattle. The low bass should remain while the high-band envelope changes.
+4. Increase Boom on a kick loop. Try Freq 40/55/80Hz, short/long Decay, and Bass Solo. Force to Note snaps the resonator; the displayed pitch/frequency follow. With Boom at 0, shorter Decay still tightens the incoming low end. Silence should not excite the resonator.
+5. Use Dry/Wet for parallel processing and Output to leave headroom. Type +6 into Trim (it means +6dB), -6 into Output, 50 into Dry/Wet (it means 50%). Delete resets each field. Try undo/redo and MIDI mapping/automation for knobs, type buttons and switches.
+6. Save/reopen a set and an effect preset with nondefault tuning/solo/mix. Controls and sound return. Bypass, stop/panic, and change buffer/sample rate; check for switching clicks or remaining resonator tails after a panic.
+
 ## 0.30 · Recorded Drum Studio and embedded instruments
 
 1. Browser → Drums → Drum Studio → **Expand**. The editor opens inside the bottom device pane; drag its divider. **Device chain ▾** returns to the compact rack. Check both instruments at a smaller window size and in Dark / Light / custom themes.

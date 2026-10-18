@@ -1633,7 +1633,7 @@ int main(int argc, char** argv) {
         QStringList top;
         for (int i = 0; i < std::min<qsizetype>(4, timings.size()); ++i) top << QString("%1 %2 ms").arg(timings[i].second).arg(timings[i].first, 0, 'f', 1);
         std::printf("      heaviest devices (1 s of audio): %s\n", qPrintable(top.join(", ")));
-        CHECK(devices == 50, "M6 devices: 50 devices (15 instruments including Osmium, 30 audio effects, 5 MIDI effects)");
+        CHECK(devices == 51, "M6 devices: 51 devices (15 instruments, 31 audio effects including Drum Buss, 5 MIDI effects)");
         CHECK(badDefaults == 0, "M6 devices: every device's defaults give finite, sane output");
         CHECK(silentInstruments == 0, "M6 devices: every instrument makes a sound");
         CHECK(badFuzz == 0, "M6 devices: random knob settings never blow up (finite, bounded)");

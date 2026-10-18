@@ -508,6 +508,14 @@ std::vector<DeviceSpec> build() {
             expo("Key HP", 20, 2000, 0, U::Hz), expo("Key LP", 1000, 20000, 1, U::Hz), onOff("Listen", false)},
          "Turns down whatever goes over the threshold, by the ratio. The meter shows how much it's taking off. "
          "Sidechain: key it from another track (a kick ducking the bass), shape the key, Listen to it."},
+        {"Drum Buss", T::DrumBuss, K::AudioEffect, {
+            lin("Trim", -24, 24, 0.5, U::Db), onOff("Comp", false), pct("Drive", 0.2), pick("Type", {"Soft", "Medium", "Hard"}, 0),
+            pct("Crunch", 0), expo("Damp", 1000, 20000, ne(9200, 1000, 20000), U::Hz), lin("Transients", -1, 1, 0.5, U::None),
+            pct("Boom", 0), expo("Frequency", 30, 120, ne(50, 30, 120), U::Hz), pct("Decay", 1),
+            onOff("Force To Note", false), onOff("Bass Solo", false), lin("Output", -24, 12, nl(0, -24, 12), U::Db), pct("Dry/Wet", 1)},
+         "Drum compression, three drive characters, mid-high crunch, damping and transient shaping above 100 Hz. "
+         "Boom adds a resonant mono bass tail; Frequency and Decay tune it, Force To Note snaps to the nearest note. "
+         "Bass Solo auditions the added low end. Trim, Output and Dry/Wet control levels and parallel processing."},
         {"Saturator", T::Saturator, K::AudioEffect, {
             lin("Drive", 0, 24, 0.3, U::Db), expo("Tone", 800, 20000, 0.6, U::Hz), pct("Dry/Wet", 0.6), lin("Output", -12, 12, 0.5, U::Db),
             pick("Type", {"Analog", "Soft Sine", "Hard Clip", "Fold", "Digital"}, 0)},
@@ -760,6 +768,13 @@ int base(DeviceType type) {
     }
 }
 }
+double drumbuss::tunedFrequency(double hz, bool forceNote) {
+    hz = std::clamp(hz, 30.0, 120.0);
+    if (!forceNote) return hz;
+    const double note = std::round(69.0 + 12.0 * std::log2(hz / 440.0));
+    return 440.0 * std::exp2((note - 69.0) / 12.0);
+}
+
 bool isGuitarType(DeviceType type) { return type >= DeviceType::Tuner && type <= DeviceType::Cabinet; }
 bool holdsIr(DeviceType type) { return type == DeviceType::GuitarAmp || type == DeviceType::Nam || type == DeviceType::Cabinet; }
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.30.0 LANGUAGES CXX)
+project(Sessions VERSION 0.31.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -37,6 +37,7 @@ set(SESSIONS_SOURCES
     src/audio/Devices.cpp
     src/audio/Instruments.cpp
     src/audio/Monolith.cpp
+    src/audio/DrumBuss.cpp
     src/audio/DrumStudio.cpp
     src/audio/DrumSamples.cpp
     src/audio/Effects.cpp
@@ -117,6 +118,10 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     target_link_libraries(sessions_osmium PRIVATE sessions_core Qt6::Test)
     add_test(NAME osmium COMMAND sessions_osmium)
     set_tests_properties(osmium PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(sessions_drum_buss tests/drum_buss.cpp)
+    target_link_libraries(sessions_drum_buss PRIVATE sessions_core Qt6::Test)
+    add_test(NAME drum_buss COMMAND sessions_drum_buss)
+    set_tests_properties(drum_buss PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(sessions_drum_studio tests/drum_studio.cpp)
     target_link_libraries(sessions_drum_studio PRIVATE sessions_core Qt6::Test)
     add_test(NAME drum_studio COMMAND sessions_drum_studio)

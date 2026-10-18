@@ -4,6 +4,7 @@
 #include "audio/Devices.h"
 #include "audio/Dsp.h"
 #include "core/Model.h"
+#include "core/Scales.h"
 #include "ui/InfoView.h"
 #include "widgets/DragValue.h"
 #include <QGridLayout>
@@ -1211,10 +1212,105 @@ public:
     }
 };
 
+// ============================================================================ Drum Buss
+class DrumBussMeters : public Display {
+public:
+    explicit DrumBussMeters(DeviceBody* b) : Display(b, 112, 130) {
+        setObjectName("drumBussMeters");
+        InfoView::attach(this, "Bass / Out", "Bass shows only the added Boom signal; Out shows the final mixed output. The scale is -60 to 0 dBFS; red indicates clipping.");
+    }
+    void tick() override {
+        for (int c = 0; c < 2; ++c) m_peak[c] = std::max(m_body->meter(c), m_peak[c] * .88f);
+        m_reduction = m_body->scope(0); update();
+    }
+    void draw(QPainter& p, const QRectF& r) override {
+        QFont f = p.font(); f.setPixelSize(9); p.setFont(f);
+        for (int c = 0; c < 2; ++c) {
+            const QRectF column(r.left() + c * r.width() * .5, r.top(), r.width() * .5, r.height());
+            p.setPen(col::label); p.drawText(column.adjusted(0, 1, 0, -column.height() + 13), Qt::AlignCenter, c ? "Out" : "Bass");
+            const QRectF meter(column.center().x() - 6, column.top() + 17, 12, column.height() - 35);
+            p.setPen(QPen(col::gridStrong, 1)); p.setBrush(Qt::NoBrush); p.drawRect(meter);
+            for (int db = 0; db <= 48; db += 12) {
+                const double y = meter.top() + meter.height() * db / 60;
+                p.setPen(col::gridStrong); p.drawLine(QPointF(meter.left() - 3, y), QPointF(meter.right() + 3, y));
+            }
+            const double db = dsp::gainToDb(m_peak[c]), level = std::clamp((db + 60) / 60, 0., 1.);
+            p.fillRect(QRectF(meter.left() + 2, meter.bottom() - level * (meter.height() - 2), meter.width() - 4, level * (meter.height() - 2)), m_peak[c] >= 1 ? theme::record : c ? col::curve : col::cyan);
+            p.setPen(col::value); p.drawText(QRectF(column.left(), column.bottom() - 14, column.width(), 12), Qt::AlignCenter, m_peak[c] < .00001f ? "-inf" : QString::number(db, 'f', 1));
+        }
+    }
+private: float m_peak[2]{}; float m_reduction = 0;
+};
+
+class DrumBussBody : public DeviceBody {
+public:
+    DrumBussBody(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
+        namespace db = drumbuss;
+        setObjectName("drumBussBody"); auto* root = rootRow(this, 6);
+        auto* drive = vbox(1);
+        drive->addWidget(knob(db::Drive, 24));
+        for (int k = 0; k < 3; ++k) {
+            auto* mode = new QToolButton(this); mode->setObjectName(QString("drumBussType%1").arg(k));
+            mode->setText(QStringList{"Soft", "Medium", "Hard"}[k]); mode->setCheckable(true); mode->setFixedSize(68, 15);
+            mode->setProperty("mapTarget", target(db::Type));
+            mode->setStyleSheet(QString("QToolButton{background:%1;color:%2;border:1px solid %3;border-radius:1px;padding:0;min-height:0;font-size:9px;} QToolButton:checked{background:%4;color:%5;}")
+                .arg(col::button.name(), col::buttonText.name(), col::separator.name(), col::buttonOn.name(), col::buttonOnText.name()));
+            connect(mode, &QToolButton::clicked, this, [this, k] { edit(db::Type, choicePosition(k, 3)); });
+            m_refreshers.push_back([this, mode, k] { mode->setChecked(pick(db::Type) == k); }); drive->addWidget(mode);
+            InfoView::attach(mode, "Drive character", "Soft shapes the waveform; Medium uses a stereo-linked limiter; Hard clips and emphasizes bass. Changes crossfade to avoid switching clicks.");
+        }
+        drive->addWidget(section("Trim")); drive->addWidget(valueField(db::Trim, 68)); drive->addWidget(toggle(db::Comp, "Comp", 68));
+        m_gr = new QLabel(this); m_gr->setAlignment(Qt::AlignCenter); m_gr->setStyleSheet(QString("color:%1;font-size:9px;background:transparent;border:0;").arg(col::label.name())); drive->addWidget(m_gr); drive->addStretch(); root->addLayout(drive);
+        root->addWidget(vline(this));
+        auto* mids = vbox(2); mids->addWidget(knob(db::Crunch, 26)); mids->addWidget(knob(db::Damp, 26)); mids->addWidget(knob(db::Transients, 26, "Transients", true)); mids->addStretch(); root->addLayout(mids);
+        root->addWidget(vline(this));
+        auto* bass = vbox(1); bass->addWidget(knob(db::Boom, 22)); auto* frequency = knob(db::Frequency, 22, "Freq"); bass->addWidget(frequency); bass->addWidget(knob(db::Decay, 22));
+        auto* note = new QLabel(this); note->setObjectName("drumBussNote"); note->setAlignment(Qt::AlignCenter); note->setFixedWidth(76); note->setStyleSheet(QString("color:%1;font-size:9px;background:transparent;border:0;").arg(col::value.name())); bass->addWidget(note);
+        bass->addWidget(toggle(db::ForceNote, "Force to Note", 76)); bass->addStretch(); root->addLayout(bass);
+        m_refreshers.push_back([this, note, frequency] {
+            const double hz = drumbuss::tunedFrequency(real(db::Frequency), on(db::ForceNote)); const double midi = 69 + 12 * std::log2(hz / 440);
+            const int n = int(std::lround(midi)); const double cents = (midi - n) * 100;
+            note->setText(QString("%1%2%3").arg(noteName(n)).arg(n / 12 - 2).arg(on(db::ForceNote) ? "" : QString(" %1%2ct").arg(cents >= 0 ? "+" : "").arg(int(std::lround(cents)))));
+            const auto labels = frequency->findChildren<QLabel*>(); if (!labels.isEmpty()) labels.last()->setText(paramText(ctx().type, db::Frequency, posFor(db::Frequency, hz)));
+        });
+        root->addWidget(vline(this)); auto* output = vbox(2); auto* meters = new DrumBussMeters(this); animate(meters); output->addWidget(meters);
+        auto* gain = hbox(2); gain->addWidget(toggle(db::BassSolo, "Bass Solo", 56)); gain->addWidget(valueField(db::Output, 54)); output->addLayout(gain);
+        auto* mix = hbox(2); mix->addWidget(section("Dry/Wet")); mix->addWidget(valueField(db::Mix, 54)); output->addLayout(mix); output->addStretch(); root->addLayout(output);
+        // Attach specific processing help to the mapped knobs as well as their labels.
+        const std::vector<std::pair<int, const char*>> help{
+            {db::Drive, "Drive into the selected distortion character; saturation runs at four times the sample rate."},
+            {db::Trim, "Input gain before compression and drive. The unprocessed side of Dry/Wet keeps its original input level."},
+            {db::Comp, "Fixed stereo-linked drum compressor: 3:1 ratio, 2 ms attack, 85 ms release, soft knee and 3 dB makeup."},
+            {db::Crunch, "Sine-shaped distortion on the mid-high band above 350 Hz."}, {db::Damp, "Low-pass after distortion; fully clockwise opens the filter."},
+            {db::Transients, "Shapes frequencies above 100 Hz. Positive adds attack and sustain; negative tightens the sustain while retaining attack."},
+            {db::Boom, "Amount of added resonant mono bass. Bass Solo auditions this signal alone."},
+            {db::Frequency, "Tune the bass resonator from 30 to 120 Hz. Force to Note snaps the effective frequency to the nearest musical note."},
+            {db::Decay, "Shortens or sustains the low end. Also sets the resonator tail, from 40 ms to 2 s."},
+            {db::ForceNote, "Snap the low-end resonator to the nearest MIDI note. The note display and frequency show the effective tuning."},
+            {db::Output, "Final output gain, including the mixed dry signal. Use it to match loudness or leave headroom."},
+            {db::Mix, "Parallel mix between the processed signal and the original input, with both paths aligned."}};
+        for (const auto& [param, text] : help) for (auto* w : findChildren<QWidget*>()) if (w->property("mapTarget").toString() == target(param)) InfoView::attach(w, name(param), text);
+        setFixedWidth(358); refresh(); tick();
+    }
+    void tick() override { DeviceBody::tick(); m_gr->setText(QString("GR %1 dB").arg(scope(0), 0, 'f', 1)); }
+private:
+    QWidget* valueField(int param, int width) {
+        const auto& spec = specOf(ctx().type)->params[size_t(param)]; const double scale = spec.unit == Unit::Percent ? 100 : 1;
+        auto* value = new DragValue(this); value->setObjectName(QString("drumBussValue%1").arg(param));
+        value->setRange(spec.lo * scale, spec.hi * scale); value->setDefault(paramValue(ctx().type, param, spec.def) * scale);
+        value->setValue(real(param) * scale, false); value->setFixedSize(width, 16); value->setProperty("mapTarget", target(param));
+        value->setFormatter([this, param, scale](double v) { return paramText(ctx().type, param, posFor(param, v / scale)); });
+        connect(value, &DragValue::valueEdited, this, [this, param, scale](double v) { edit(param, posFor(param, v / scale)); });
+        m_refreshers.push_back([this, value, param, scale] { value->setValue(real(param) * scale, false); }); return value;
+    }
+    QLabel* m_gr = nullptr;
+};
+
 } // namespace
 
 DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent) {
     switch (ctx.type) {
+    case T::DrumBuss:   return new DrumBussBody(ctx, parent);
     case T::Macros:     return new MacrosBody(ctx, parent);
     case T::EQ:         return new EqBody(ctx, parent);
     case T::Compressor: return new CompressorBody(ctx, parent);
