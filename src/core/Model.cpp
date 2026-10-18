@@ -54,7 +54,9 @@ static bool operator==(const EditState::TrackState& a, const EditState::TrackSta
     return a.id == b.id && a.name == b.name && a.color == b.color && a.volume == b.volume && a.pan == b.pan
         && a.sends == b.sends && a.active == b.active && a.preFader == b.preFader && a.slotClips == b.slotClips
         && a.arrangement == b.arrangement && a.devices == b.devices && a.automation == b.automation && a.type == b.type
-        && a.monitor == b.monitor && a.inputChannel == b.inputChannel && a.groupId == b.groupId;
+        && a.monitor == b.monitor && a.inputChannel == b.inputChannel && a.groupId == b.groupId
+        && a.groupFadeIn == b.groupFadeIn && a.groupFadeOut == b.groupFadeOut
+        && a.groupFadeInCurve == b.groupFadeInCurve && a.groupFadeOutCurve == b.groupFadeOutCurve;
 }
 bool operator==(const EditState& a, const EditState& b) {
     return a.clips == b.clips && a.tracks == b.tracks && a.returns == b.returns && a.master.devices == b.master.devices && a.master.automation == b.master.automation && a.scenes == b.scenes
@@ -1353,6 +1355,23 @@ QList<int> Project::membersOf(int groupIndex) const {
     return out;
 }
 
+ArrangementSpan Project::groupArrangementSpan(int groupIndex) const {
+    ArrangementSpan span;
+    if (groupIndex < 0 || groupIndex >= tracks.size() || !tracks[groupIndex].isGroup()) return span;
+    const int id = tracks[groupIndex].id;
+    bool found = false;
+    for (const Track& t : tracks) {
+        if (t.groupId != id) continue;
+        for (const ArrangementClip& a : t.arrangement) {
+            if (!a.clip || a.length <= 0) continue;
+            span.start = found ? std::min(span.start, a.start) : a.start;
+            span.end = found ? std::max(span.end, a.start + a.length) : a.start + a.length;
+            found = true;
+        }
+    }
+    return span;
+}
+
 bool Project::hiddenByFold(int index) const {
     const int g = groupOf(index);
     return g >= 0 && tracks[g].folded;
@@ -1703,6 +1722,8 @@ EditState Project::captureEditState() const {
     auto capture = [&](const Track& t) {
         EditState::TrackState ts{t.id, t.name, t.color, t.volume, t.pan, t.sends, t.active, t.preFader, {}, {}, t.devices, t.automation, t.type,
                                  t.monitor, t.inputChannel, t.groupId};
+        ts.groupFadeIn = t.groupFadeIn; ts.groupFadeOut = t.groupFadeOut;
+        ts.groupFadeInCurve = t.groupFadeInCurve; ts.groupFadeOutCurve = t.groupFadeOutCurve;
         for (const ClipPtr& c : t.clipSlots) ts.slotClips.push_back(keep(c));
         for (const ArrangementClip& a : t.arrangement) ts.arrangement.push_back({a.start, a.length, a.offset, keep(a.clip), a.fadeIn, a.fadeOut, a.fadeInCurve, a.fadeOutCurve});
         return ts;
@@ -1736,6 +1757,8 @@ void Project::restoreEditState(const EditState& s) {
             t.id = ts.id; t.type = ts.type; t.name = ts.name; t.color = ts.color;
             t.volume = ts.volume; t.pan = ts.pan; t.sends = ts.sends; t.active = ts.active; t.preFader = ts.preFader;
             t.monitor = ts.monitor; t.inputChannel = ts.inputChannel; t.groupId = ts.groupId;
+            t.groupFadeIn = ts.groupFadeIn; t.groupFadeOut = ts.groupFadeOut;
+            t.groupFadeInCurve = ts.groupFadeInCurve; t.groupFadeOutCurve = ts.groupFadeOutCurve;
             t.clipSlots.clear();
             for (int id : ts.slotClips) t.clipSlots.push_back(live.value(id));
             t.arrangement.clear();

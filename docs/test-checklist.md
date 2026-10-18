@@ -1,5 +1,15 @@
 # Sessions — manual test checklist
 
+## 0.38 · Arrangement, groups and live controls
+
+1. Arrangement loop/start/end flags match the waveform and MIDI editors. Compare Dark, Mid and Light with strongly colored clips: markers remain neutral and legible. Drag the start flag, end flag, either loop edge and the brace body; grid snapping/Alt and transport loop values remain correct.
+2. Zoom into a long audio clip/pattern and play past the right edge, through a loop and from a late start marker. Clip Follow pages without changing zoom, using the actual clip position. Turn it off and pan manually: the viewport stays fixed. Repeat in the Arrangement; its header and toolbar Follow buttons mirror each other, independently of Clip Follow. Preferences survive restart.
+3. Ctrl/Shift-select track titles → Ctrl+G (or header menu Group Tracks). Add an audio effect to the group: every member passes through it. Fold/unfold, mute/solo, reorder and undo. Drag the group's fade squares and curve nodes: all member output fades, including group effects. Reset Group Fades, undo, save/reopen. Session takeovers and monitored input remain audible independently of the Arrangement fade.
+4. With few tracks, returns and Master stay at the bottom with blank space above. With many tracks, scroll them without moving the buses. With eight returns, a small window and automation mode, verify every return remains reachable and Master stays visible. Click, edit automation and drop devices on pinned lanes; the blank gap never selects or changes a bus.
+5. First ten Session scenes: number-row 1–9/0 launches the corresponding row on the existing quantization. Key repeat, Ctrl/Alt/Shift and keypad digits do not launch defaults. Typing clip names, tempo or text leaves playback unchanged. Explicit Key Map assignments override defaults; learning a key does not launch a scene.
+6. Follow [Nektar setup](nektar-impact.md): with a connected LX49+/61+, User Preset 2 and Global channel16, check all eight volumes/pans/mutes, bank switching, Master and pickup. Test an unrelated MIDI keyboard concurrently: it plays instruments without moving the mixer. Explicit input choice and Off persist. Custom MIDI Maps win. Check MMC Play/Stop/Record/Rewind/Forward, ordinary pads, mod wheel and sustain. Hardware verification remains required; tests use injected input.
+7. Reopen a 0.37 set: pane sizing, transpose/detune and all prior instruments/warp controls remain intact. Save a group-faded set and compare export to playback. Check marker/follow buttons at 100/125/200% UI zoom.
+
 ## 0.37 · The Clip View's pane and the Sample box
 
 1. Quit Sessions, start it again → the Clip View's pane at the bottom is just as high as its boxes (like the tidy Session screenshot), the Session grid or the timeline gets the rest; the same with a set that opens in the Arrangement.

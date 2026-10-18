@@ -29,6 +29,7 @@ public:
     bool midiKeyboard() const;
     void setMidiKeyboard(bool on);
     void setMidiKeyboardInfo(const QString& text);   // octave / velocity, shown on hover
+    void setFollow(bool on);
 
 signals:
     void viewRequested(bool session);     // true = Session, false = Arrangement

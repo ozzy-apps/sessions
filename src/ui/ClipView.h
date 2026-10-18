@@ -55,6 +55,8 @@ public:
     // overviews to outline and drag; false while another editor (envelopes, takes) shows.
     bool editorViewport(double& first, double& last) const;
     void setEditorViewport(double first, double last);
+    void setFollow(bool on);
+    bool follow() const;
     ClipOverview* overviewStrip() const { return m_strip; }   // the clip in miniature over the editor (0.21): drag to scroll / zoom, click to centre
 
 signals:
@@ -82,6 +84,7 @@ private:
     EnvelopeEditor* m_envEditor;
     QStackedWidget* m_editors;
     ClipOverview* m_strip = nullptr;
+    QToolButton* m_playheadFollow = nullptr;
     QWidget*   m_props;
     QWidget*   m_launchBox = nullptr;
     QWidget*   m_notesBox = nullptr;   // shown for MIDI clips

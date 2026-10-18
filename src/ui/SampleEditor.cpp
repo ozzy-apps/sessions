@@ -39,7 +39,10 @@ SampleEditor::SampleEditor(Project* project, Transport* transport, QWidget* pare
         "Drag the ▶ start marker along the audio, the ◀ end marker for the length, the loop brace to slide the loop. "
         "Warp markers (yellow) pin the audio to beats: drag one (or a grey transient tick), double-click to add or remove one. "
         "Shift+drag slides the audio under the grid, the middle button drags the view, drag the ruler up / down to zoom. Right-click for the warp commands.");
-    connect(transport, &Transport::tick, this, [this] { if (m_clip && (m_transport->playing() || m_transport->livePeaksFor(m_clip))) update(); });
+    connect(transport, &Transport::tick, this, [this] {
+        followPlayhead();
+        if (m_clip && (m_transport->playing() || m_transport->livePeaksFor(m_clip))) update();
+    });
     connect(project, &Project::clipChanged, this, qOverload<>(&QWidget::update));
     connect(project, &Project::restored, this, [this] { m_sel = -1; m_drag = Drag::None; m_editOpen = false; m_rangeOn = false; update(); });
 }
@@ -97,6 +100,29 @@ void SampleEditor::setViewport(double first, double last) {
     m_offset = first;
     clampView();
     update();
+}
+
+void SampleEditor::setFollow(bool on) {
+    m_follow = on;
+    followPlayhead();
+    update();
+}
+
+void SampleEditor::followPlayhead() {
+    if (!m_follow || m_drag != Drag::None) return;
+    const double beat = playheadBeat();
+    if (beat < 0 || width() <= kLeft) return;
+    const double span = (width() - kLeft) / m_zoom;
+    // Leave a little room ahead of the cursor and retain context after a page turn.
+    // Project::clipPosition also supplies the native audio clock when Warp is off.
+    if (beat < m_offset || beat >= m_offset + span - std::min(12.0 / m_zoom, span * 0.1)) {
+        double first, last;
+        extent(first, last);
+        // A loop return opens the whole first page instead of hiding its opening
+        // fraction behind the generic page padding.
+        m_offset = beat < m_offset && beat < first + span * 0.9 ? first : beat - span * 0.08;
+        clampView();
+    }
 }
 
 double SampleEditor::snap(double beat, bool free) const {
@@ -158,8 +184,7 @@ void SampleEditor::paintEvent(QPaintEvent*) {
         p.drawText(rect(), Qt::AlignCenter, "No audio clip");
         return;
     }
-    const int owner = m_project->trackOfClip(m_clip);
-    const QColor col = owner >= 0 ? m_project->clipColor(m_clip) : theme::accent;   // the clip's colour marks the loop and the length; the waveform has its own
+    const QColor marker = theme::text;   // neutral markers stay distinct from clip and warp colours
     const int top = kTop, h = H - kTop, mid = top + h / 2;
     const bool recording = !m_clip->sample && m_transport->livePeaksFor(m_clip);
 
@@ -186,15 +211,14 @@ void SampleEditor::paintEvent(QPaintEvent*) {
     }
     // the loop brace: the loop, with a handle at either end (faded with Loop off)
     {
-        QColor brace = col;
-        if (!m_clip->loop) brace.setAlphaF(0.45);
+        const QColor brace = m_clip->loop ? marker : theme::withAlpha(marker, 115);
         p.fillRect(QRectF(xl, kBraceY + 2, xEnd - xl, kBraceH - 4), brace);
-        p.fillRect(QRectF(xl, kBraceY + 1, 2, kBraceH - 2), col);
-        p.fillRect(QRectF(xEnd - 2, kBraceY + 1, 2, kBraceH - 2), col);
+        p.fillRect(QRectF(xl, kBraceY + 1, 2, kBraceH - 2), marker);
+        p.fillRect(QRectF(xEnd - 2, kBraceY + 1, 2, kBraceH - 2), marker);
     }
     // the start (▶) and end (◀) markers
     p.setRenderHint(QPainter::Antialiasing, true);
-    p.setPen(Qt::NoPen); p.setBrush(col);
+    p.setPen(Qt::NoPen); p.setBrush(marker);
     {
         QPolygonF startTri; startTri << QPointF(xs, kMarkY + 1) << QPointF(xs + 7, kMarkY + kMarkH / 2.0) << QPointF(xs, kMarkY + kMarkH - 1);
         QPolygonF endTri; endTri << QPointF(xEnd, kMarkY + 1) << QPointF(xEnd - 7, kMarkY + kMarkH / 2.0) << QPointF(xEnd, kMarkY + kMarkH - 1);
@@ -202,9 +226,9 @@ void SampleEditor::paintEvent(QPaintEvent*) {
         p.drawPolygon(endTri);
     }
     p.setRenderHint(QPainter::Antialiasing, false);
-    p.fillRect(QRectF(xs, kMarkY, 1, kMarkH + kStripH), theme::withAlpha(col, 140));
-    p.fillRect(QRectF(xEnd, kMarkY, 1, kMarkH + kStripH), theme::withAlpha(col, 140));
-    if (xl != xs) p.fillRect(QRectF(xl, kBraceY, 1, kBraceH + kMarkH + kStripH), theme::withAlpha(col, 70));
+    p.fillRect(QRectF(xs, kMarkY, 1, kMarkH + kStripH), theme::withAlpha(marker, 140));
+    p.fillRect(QRectF(xEnd, kMarkY, 1, kMarkH + kStripH), theme::withAlpha(marker, 140));
+    if (xl != xs) p.fillRect(QRectF(xl, kBraceY, 1, kBraceH + kMarkH + kStripH), theme::withAlpha(marker, 70));
 
     // waveform through the warp map, one lane per channel; past the clip's end it's dimmed
     const SamplePtr smp = m_clip->reverse ? samples::reversed(m_clip->sample) : m_clip->sample;

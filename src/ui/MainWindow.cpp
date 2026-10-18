@@ -15,6 +15,7 @@
 #include "InfoView.h"
 #include "core/Model.h"
 #include "core/Transport.h"
+#include "core/ControlSurface.h"
 #include "core/Theme.h"
 #include "core/Scales.h"
 #include "core/DeviceSpecs.h"
@@ -115,6 +116,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_transport = new Transport(m_project, m_engine, this);
     m_mapper = new Mapper(m_project, m_transport, this);
     m_midi = new audio::MidiInput(this);
+    m_surface = new ControlSurface(m_project, m_transport, m_mapper, this);
 
     auto* central = new QWidget(this);
     auto* root = new QVBoxLayout(central);
@@ -232,6 +234,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_controlBar, &ControlBar::drawModeChanged, m_clipView->pianoRoll(), &PianoRoll::setDrawMode);
     connect(m_controlBar, &ControlBar::midiKeyboardToggled, this, &MainWindow::setMidiKeyboard);
     connect(m_controlBar, &ControlBar::followToggled, m_arrangement, &ArrangementView::setFollow);
+    connect(m_arrangement, &ArrangementView::followChanged, m_controlBar, &ControlBar::setFollow);
+    m_controlBar->setFollow(m_arrangement->follow());
     connect(m_controlBar, &ControlBar::keyMapToggled, this, [this](bool on) { setMapMode(on ? Mapper::Mode::Key : Mapper::Mode::Off); });
     connect(m_controlBar, &ControlBar::midiMapToggled, this, [this](bool on) { setMapMode(on ? Mapper::Mode::Midi : Mapper::Mode::Off); });
     connect(m_midi, &audio::MidiInput::noteOn, this, &MainWindow::midiNoteOn);
@@ -240,6 +244,9 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_midi, &audio::MidiInput::pitchBend, this, &MainWindow::midiPitchBend);
     connect(m_midi, &audio::MidiInput::channelPressure, this, &MainWindow::midiPressure);
     connect(m_midi, &audio::MidiInput::activity, m_controlBar, &ControlBar::flashMidiIn);
+    connect(m_midi, &audio::MidiInput::machineControl, this, [this](const QString& source, int command) {
+        if (m_mapper->mode() == Mapper::Mode::Off) m_surface->machineControl(source, command);
+    });
     connect(m_clipTab, &QToolButton::clicked, this, [this] { showClipView(true); });
     connect(m_deviceTab, &QToolButton::clicked, this, [this] { showClipView(false); });
 
@@ -761,6 +768,7 @@ void MainWindow::openStartupSet() {
 
 void MainWindow::showPreferences() {
     PreferencesDialog dlg(m_engine, m_midi, [this] { restartReopeningSet(); }, this);
+    connect(&dlg, &PreferencesDialog::midiControllerSettingsChanged, m_surface, &ControlSurface::reloadSettings);
     dlg.exec();
     m_transport->setCountInBars(PreferencesDialog::countInBars());
 }
@@ -769,6 +777,7 @@ void MainWindow::showShortcuts() {
     static const char* rows[][2] = {
         {"Tab / Shift+Tab", "Session ↔ Arrangement / Clip View ↔ Device View"},
         {"Space / Shift+Space", "Play from the start marker or stop / play on from where it stopped"},
+        {"1 2 3 4 5 6 7 8 9 0", "Launch Session scenes 1–10 (number row; typing and custom Key Maps take priority)"},
         {"Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S", "New set / Open / Save / Save As"},
         {"Ctrl+Shift+R", "Export Audio"},
         {"Ctrl+Z / Ctrl+Shift+Z", "Undo / Redo"},
@@ -1185,7 +1194,8 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
         bool chord = k->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier);
         bool shift = k->modifiers() & Qt::ShiftModifier;
         QWidget* f = QApplication::focusWidget();
-        const bool typing = f && (f->inherits("QLineEdit") || f->inherits("QComboBox"));
+        const bool typing = f && (f->inherits("QLineEdit") || f->inherits("QComboBox") || f->inherits("QAbstractSpinBox")
+                                  || f->inherits("QTextEdit") || f->inherits("QPlainTextEdit"));
         const bool modifierKey = k->key() == Qt::Key_Shift || k->key() == Qt::Key_Control || k->key() == Qt::Key_Alt || k->key() == Qt::Key_Meta;
         if (press && !chord && (k->key() == Qt::Key_Backtab || (k->key() == Qt::Key_Tab && shift))) { showClipView(!clipViewShown()); return true; }
         if (press && !chord && k->key() == Qt::Key_Tab) { showSession(!sessionViewShown()); return true; }
@@ -1199,6 +1209,13 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
             if (m_mapper->mode() == Mapper::Mode::Key && !k->isAutoRepeat() && !modifierKey && !typing) { m_mapper->key(k->key(), true); return true; }
         }
         if (!mapping && !chord && !typing && !k->isAutoRepeat() && !modifierKey && m_mapper->key(k->key(), press)) return true;   // Key Map
+        if (!mapping && !typing && k->modifiers() == Qt::NoModifier && k->key() >= Qt::Key_0 && k->key() <= Qt::Key_9) {
+            const int scene = k->key() == Qt::Key_0 ? 9 : k->key() - Qt::Key_1;
+            if (scene < m_project->scenes.size()) {
+                if (press && !k->isAutoRepeat()) { m_transport->launchScene(scene); m_session->grid()->ensureVisible(scene); }
+                return true;
+            }
+        }
         if (m_midiKeys && !chord && midiKey(k, press)) return true;
     }
     return QMainWindow::eventFilter(obj, ev);
@@ -1237,6 +1254,7 @@ void MainWindow::midiPressure(int, int value) {
 
 void MainWindow::midiControl(int channel, int controller, int value) {
     if (m_mapper->controlChange(channel, controller, value)) return;
+    if (m_mapper->mode() == Mapper::Mode::Off && m_surface->controlChange(m_midi->sourceName(), channel, controller, value)) return;
     if (controller == 1) for (int t : keyboardTargets()) m_transport->perform(t, 1, value / 127.0);   // the mod wheel
     if (controller == 64) {   // sustain pedal
         m_sustain = value >= 64;

@@ -41,6 +41,7 @@
 #include "core/Transport.h"
 
 class QToolButton;
+class QScrollBar;
 
 namespace sessions {
 
@@ -63,7 +64,8 @@ public:
     void zoomToFit();
     void fitSong();   // a new set: fit the song and keep fitting until you zoom or scroll
     void jumpTo(double beat);   // start marker there; a playing song jumps too
-    void setFollow(bool on) { m_follow = on; }   // scroll a page on when the playhead leaves the view
+    void setFollow(bool on);   // scroll a page on when the playhead leaves the view
+    bool follow() const { return m_follow; }
     void loopSelection();        // Ctrl+L
     void splitAtSelection();     // Ctrl+E
     void consolidateSelection(); // Ctrl+J
@@ -121,6 +123,7 @@ signals:
     void commandRequested(const QString& command);
     void openDeviceView(int track);
     void automationModeChanged(bool on);
+    void followChanged(bool on);
 
 protected:
     void paintEvent(QPaintEvent*) override;
@@ -142,6 +145,8 @@ private:
     // body where each fade ends (at the corner with no fade), the circles half-way along each curve.
     struct FadeHandles { QPointF inSq, outSq, inCircle, outCircle; };
     FadeHandles fadeHandles(const ArrangementClip& a, int lane) const;
+    ArrangementClip groupFadePlacement(int lane) const;
+    void   drawGroupFades(QPainter& p, int lane);
     bool   hovered(const ArrangementClip& a) const;   // the clip under the mouse (its handles show)
     int    laneWidth() const { return width() - m_headerW; }
     int    trackAt(int y) const;      // lane index (tracks then returns), -1 outside
@@ -151,6 +156,9 @@ private:
     void   drawTake(QPainter& p, const Transport::Take& take);   // a recording in progress: solid, with its waveform / notes so far
     void   drawEnvelope(QPainter& p, int lane);
     void   fitLanes();
+    int    returnsTop() const;
+    QRect  laneViewport(int lane) const;
+    void   layoutControls();
     double grid() const;              // snap step for the current zoom
     double snap(double beat, bool fine) const;
     QString autoTarget(int lane) const;
@@ -181,21 +189,26 @@ private:
     Transport* m_transport;
     QToolButton* m_backToArr;
     QToolButton* m_autoButton;
+    QToolButton* m_followButton;
+    QScrollBar* m_verticalScroll;
+    QScrollBar* m_returnScroll;
 
     double m_zoom = 12.0;    // pixels per beat
     double m_offset = 0.0;   // first visible beat
     double m_offset0 = 0.0, m_overK = 1.0;   // Drag::Overview: the offset at the press, the overview's pixels per beat
     bool   m_userZoomed = false;   // until you zoom or scroll, the view keeps fitting the song
     bool   m_follow = true;
+    qint64 m_followResumeAt = 0;   // finish a manual wheel gesture before following again
     bool   m_lastOverridden = false;   // whether any track was overridden at the last tick (a change repaints)
     int    m_dropLane = -2;        // a file drag hovers this lane (-1: below the tracks), -2: none
     int    m_deviceLane = -2;      // a device drag hovers this lane (-1: a new track), -2: none
     int    m_deviceAfter = -1;     // with m_deviceLane -1: the new track goes right after this lane (an instrument over an audio track with clips)
     int    deviceLaneAt(int y) const;   // where a device dropped at y goes: a lane, -1 a new track, -2 nowhere
     double m_dropBeat = 0;
-    static constexpr int kOverH = 22, kLocY = kOverH, kLocH = 14, kBraceY = kLocY + kLocH, kBraceH = 6, kRulerH = 16;
-    static constexpr int kTopH = kBraceY + kBraceH + kRulerH, kTimeH = 16, kNameW = 112;
-    int    m_trackH = 56, m_returnH = 40, m_headerW = 236;
+    static constexpr int kOverH = 22, kLocY = kOverH, kLocH = 14, kRulerY = kLocY + kLocH, kRulerH = 16;
+    static constexpr int kBraceY = kRulerY + kRulerH, kBraceH = 8, kMarkY = kBraceY + kBraceH, kMarkH = 10;
+    static constexpr int kTopH = kMarkY + kMarkH, kTimeH = 16, kNameW = 112;
+    int    m_trackH = 56, m_returnH = 40, m_masterH = 40, m_returnViewportH = 0, m_headerW = 236;
     bool   m_autoMode = false;
     QHash<int, QString> m_autoTargets;   // track id -> parameter shown in automation mode
 
@@ -207,7 +220,7 @@ private:
     int    m_selLocator = -1;
 
     // interaction state
-    enum class Drag { None, Ruler, Move, Resize, ResizeLeft, Time, Point, Header, Locator, LoopMove, LoopStart, LoopEnd, Overview, Field, MoveRange,
+    enum class Drag { None, Ruler, StartMarker, Move, Resize, ResizeLeft, Time, Point, Header, Locator, LoopMove, LoopStart, LoopEnd, Overview, Field, MoveRange,
                       FadeIn, FadeOut, FadeInCurve, FadeOutCurve };
     int     m_hoverLane = -1, m_hoverIndex = -1;   // the clip under the mouse (lane, index in its arrangement)
     double  m_fieldWrap = 0;   // Drag::Field: pixels the endless drag has warped the pointer by (added to the drag's distance)

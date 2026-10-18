@@ -112,7 +112,9 @@ void MidiInput::setEnabled(const QString& portName, bool on) {
 
 void MidiInput::connectAll() {
 #ifdef SESSIONS_HAVE_ALSA
+    m_sourceNames.clear();
     for (const Port& p : ports()) {
+        m_sourceNames.insert(p.id, p.name);
         if (p.connected || !enabled(p.name)) continue;
         const QStringList cp = p.id.split(':');
         if (snd_seq_connect_from(m_seq, m_port, cp[0].toInt(), cp[1].toInt()) >= 0) m_connected.insert(p.id);
@@ -120,7 +122,8 @@ void MidiInput::connectAll() {
 #endif
 }
 
-void MidiInput::inject(int status, int d1, int d2) {
+void MidiInput::inject(int status, int d1, int d2, const QString& sourceName) {
+    m_sourceName = sourceName;
     const int type = status & 0xF0, channel = status & 0x0F;
     emit activity();
     if (type == 0x90 && d2 > 0) emit noteOn(channel, d1, d2);
@@ -130,33 +133,51 @@ void MidiInput::inject(int status, int d1, int d2) {
     else if (type == 0xD0) emit channelPressure(channel, d1 & 0x7F);
 }
 
+void MidiInput::injectSysEx(const QByteArray& message, const QString& sourceName) {
+    // Only a complete, parameter-free universal realtime MMC command is accepted.
+    // Manufacturer SysEx, malformed packets and all bulk data remain uninterpreted.
+    if (message.size() != 6 || uchar(message[0]) != 0xf0 || uchar(message[1]) != 0x7f
+        || uchar(message[2]) > 0x7f || uchar(message[3]) != 0x06
+        || uchar(message[4]) > 0x7f || uchar(message[5]) != 0xf7) return;
+    emit activity();
+    emit machineControl(sourceName, uchar(message[4]));
+}
+
 void MidiInput::readEvents() {
 #ifdef SESSIONS_HAVE_ALSA
     bool portsMoved = false;
     snd_seq_event_t* ev = nullptr;
     while (snd_seq_event_input(m_seq, &ev) >= 0 && ev) {
+        const QString source = m_sourceNames.value(QString("%1:%2").arg(ev->source.client).arg(ev->source.port));
         switch (ev->type) {
         case SND_SEQ_EVENT_NOTEON:
-            inject(ev->data.note.velocity ? 0x90 | ev->data.note.channel : 0x80 | ev->data.note.channel, ev->data.note.note, ev->data.note.velocity);
+            inject(ev->data.note.velocity ? 0x90 | ev->data.note.channel : 0x80 | ev->data.note.channel, ev->data.note.note, ev->data.note.velocity, source);
             break;
         case SND_SEQ_EVENT_NOTEOFF:
-            inject(0x80 | ev->data.note.channel, ev->data.note.note, 0);
+            inject(0x80 | ev->data.note.channel, ev->data.note.note, 0, source);
             break;
         case SND_SEQ_EVENT_CONTROLLER:
-            inject(0xB0 | ev->data.control.channel, int(ev->data.control.param), int(ev->data.control.value));
+            inject(0xB0 | ev->data.control.channel, int(ev->data.control.param), int(ev->data.control.value), source);
             break;
         case SND_SEQ_EVENT_PITCHBEND: {
             const int v = std::clamp(int(ev->data.control.value) + 8192, 0, 16383);
-            inject(0xE0 | ev->data.control.channel, v & 0x7F, v >> 7);
+            inject(0xE0 | ev->data.control.channel, v & 0x7F, v >> 7, source);
             break;
         }
         case SND_SEQ_EVENT_CHANPRESS:
-            inject(0xD0 | ev->data.control.channel, int(ev->data.control.value), 0);
+            inject(0xD0 | ev->data.control.channel, int(ev->data.control.value), 0, source);
+            break;
+        case SND_SEQ_EVENT_SYSEX:
+            if (ev->data.ext.ptr && ev->data.ext.len == 6)
+                injectSysEx(QByteArray(static_cast<const char*>(ev->data.ext.ptr), 6), source);
             break;
         case SND_SEQ_EVENT_PORT_START:
         case SND_SEQ_EVENT_PORT_EXIT:
+        case SND_SEQ_EVENT_PORT_CHANGE:
+        case SND_SEQ_EVENT_CLIENT_CHANGE:
         case SND_SEQ_EVENT_CLIENT_EXIT:
             portsMoved = true;
+            connectAll(); // refresh source identity before the next queued controller message
             break;
         case SND_SEQ_EVENT_PORT_UNSUBSCRIBED:
             m_connected.remove(QString("%1:%2").arg(ev->data.connect.sender.client).arg(ev->data.connect.sender.port));

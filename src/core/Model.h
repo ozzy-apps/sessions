@@ -351,6 +351,13 @@ struct ArrangementClip {
     }
 };
 
+// The outer edges of a group's Arrangement clips. Empty groups have no span;
+// moving or trimming a member updates the span without changing its fade lengths.
+struct ArrangementSpan {
+    double start = 0, end = 0;
+    bool empty() const { return end <= start; }
+};
+
 // MIDI tracks: notes -> instrument. Audio tracks: audio clips (and the audio input), audio
 // effects only. Group tracks: no clips of their own; the tracks in the group (Track::groupId)
 // play into the group's audio effects and mixer instead of the Main output.
@@ -375,6 +382,10 @@ struct Track {
     Monitor   monitor  = Monitor::Auto;   // audio tracks
     int       inputChannel = 0;           // audio tracks: 0 = inputs 1/2 (stereo), 1 = input 1, 2 = input 2 (mono)
     int       groupId  = 0;               // the group track this track plays into (0 = none, straight to Main)
+    // Group Arrangement fades, after the group's effects. Beat lengths are relative
+    // to groupArrangementSpan(); Session takeover and live input bypass these fades.
+    double groupFadeIn = 0, groupFadeOut = 0;
+    double groupFadeInCurve = 0.5, groupFadeOutCurve = 0.5;
 
     QVector<ClipPtr>         clipSlots;      // one per scene (nullptr = empty)
     QVector<ArrangementClip> arrangement;
@@ -415,6 +426,8 @@ struct EditState {
         QVector<Device> devices; QVector<Envelope> automation;
         TrackType type = TrackType::Midi;
         Monitor monitor = Monitor::Auto; int inputChannel = 0; int groupId = 0;
+        double groupFadeIn = 0, groupFadeOut = 0;
+        double groupFadeInCurve = 0.5, groupFadeOutCurve = 0.5;
     };
     QMap<int, Clip>     clips;   // by clip id
     QVector<TrackState> tracks, returns;
@@ -468,6 +481,7 @@ public:
     void ungroup(int groupIndex);                  // members go straight to Main again; the group track goes
     int  groupOf(int trackIndex) const;            // index of the group a track plays into, -1 if none
     QList<int> membersOf(int groupIndex) const;     // indexes of its tracks
+    ArrangementSpan groupArrangementSpan(int groupIndex) const; // aggregate member clips, including folded tracks
     bool hiddenByFold(int trackIndex) const;       // inside a folded group
     void setFolded(int groupIndex, bool folded);   // not undoable (a view setting); saved with the set
 

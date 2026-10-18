@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.37.0 LANGUAGES CXX)
+project(Sessions VERSION 0.38.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -27,6 +27,7 @@ set(SESSIONS_SOURCES
     src/core/Tempo.cpp
     src/core/Import.cpp
     src/core/Mapping.cpp
+    src/core/ControlSurface.cpp
     src/core/DeviceSpecs.cpp
     src/core/OsmiumPresets.cpp
     src/core/ArrangementOps.cpp
@@ -148,6 +149,15 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     add_executable(sessions_resample tests/resample.cpp)
     target_link_libraries(sessions_resample PRIVATE sessions_core)
     add_test(NAME resample COMMAND sessions_resample)
+    add_executable(sessions_group_fades tests/group_fades.cpp)
+    target_link_libraries(sessions_group_fades PRIVATE sessions_core)
+    add_test(NAME group_fades COMMAND sessions_group_fades)
+    foreach(workflow IN ITEMS arrangement_workflow clip_follow control_surface)
+        add_executable(sessions_${workflow} tests/${workflow}.cpp)
+        target_link_libraries(sessions_${workflow} PRIVATE sessions_core Qt6::Test)
+        add_test(NAME ${workflow} COMMAND sessions_${workflow})
+        set_tests_properties(${workflow} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endforeach()
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin)

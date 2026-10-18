@@ -156,6 +156,9 @@ struct TrackData {
     bool audio = false;   // an audio track: clips are audio, the chain holds audio effects
     bool group = false;   // a group track: plays its bus (its tracks), no clips
     int  bus = -1;        // group tracks: their bus; other tracks: their group's bus (-1 = Main)
+    ArrangementSpan groupSpan;
+    double groupFadeIn = 0, groupFadeOut = 0, groupFadeInCurve = 0.5, groupFadeOutCurve = 0.5;
+    std::vector<int> groupMembers; // resolved once on the UI thread, used for Session/input bypass
     bool soloed = false;  // heard while something is soloed (its own solo, its group's, or one of its tracks')
     bool keySource = false;   // some device takes its sidechain key from this track: its taps are copied each block
     bool armed = false;
@@ -561,6 +564,15 @@ void Engine::publish() {
         for (const ArrangementClip& a : t.arrangement) td.arrangement.push_back({a.start, a.length, a.offset, clipRef(a.clip), a.fadeIn, a.fadeOut, a.fadeInCurve, a.fadeOutCurve});
         std::sort(td.arrangement.begin(), td.arrangement.end(), [](const Placement& a, const Placement& b) { return a.start < b.start; });
         fill(t, td);
+        if (td.group) {
+            const int groupIndex = int(s->tracks.size());
+            td.groupSpan = m_project->groupArrangementSpan(groupIndex);
+            td.groupFadeIn = t.groupFadeIn;
+            td.groupFadeOut = t.groupFadeOut;
+            td.groupFadeInCurve = t.groupFadeInCurve;
+            td.groupFadeOutCurve = t.groupFadeOutCurve;
+            for (int member : m_project->membersOf(groupIndex)) td.groupMembers.push_back(member);
+        }
         s->tracks.push_back(std::move(td));
     }
     for (const Track& r : m_project->returns) {
@@ -1905,6 +1917,29 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             EventList* spare = &m_evB;
             ev->clear();
             runChain(td, ev, spare, m_trackL, m_trackR, ctx, false, false);
+            // Arrangement fades act on the complete group, including its effects.
+            // A Session takeover or monitored member is a live performance, with no
+            // Arrangement boundary: its group remains audible at every song beat.
+            bool fadeGroup = m_playing && !td.groupSpan.empty() && (td.groupFadeIn > 0 || td.groupFadeOut > 0);
+            for (int member : td.groupMembers) {
+                if (member < 0 || member >= nt) continue;
+                const TrackData& child = S->tracks[size_t(member)];
+                const bool monitored = inputLive && child.audio && (child.monitor == int(Monitor::In)
+                                      || (child.monitor == int(Monitor::Auto) && child.armed));
+                if (m_play[size_t(member)].overridden || monitored) { fadeGroup = false; break; }
+            }
+            if (fadeGroup) {
+                const double length = td.groupSpan.end - td.groupSpan.start;
+                const double in = std::min(td.groupFadeIn, length), out = std::min(td.groupFadeOut, length);
+                for (int sample = 0; sample < n; ++sample) {
+                    const double beat = b0 + sample * bps;
+                    double gain = 1;
+                    if (in > 0) gain *= fadeGain((beat - td.groupSpan.start) / in, td.groupFadeInCurve);
+                    if (out > 0) gain *= fadeGain((td.groupSpan.end - beat) / out, td.groupFadeOutCurve);
+                    m_trackL[sample] *= float(gain);
+                    m_trackR[sample] *= float(gain);
+                }
+            }
             mixTrack(td, ps, m_mainL, m_mainR, i);
         }
 

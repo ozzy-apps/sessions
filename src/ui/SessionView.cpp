@@ -42,7 +42,8 @@ ClipGrid::ClipGrid(Project* project, Transport* transport, QWidget* parent)
     setFocusPolicy(Qt::ClickFocus);
     setAcceptDrops(true);
     InfoView::attach(this, "Session View",
-        "Click ▶ to launch a clip, ■ to stop a track. Drag clips between slots (Ctrl copies), drag track titles to reorder. "
+        "Click ▶ to launch a clip, ■ to stop a track. Number-row keys 1–9 and 0 launch the first ten scenes. "
+        "Drag clips between slots (Ctrl copies), drag track titles to reorder. "
         "Arm a track and click ● in an empty slot to record from the computer keyboard (M). Right-click anything for more.");
     connect(project, &Project::structureChanged, this, [this] {
         m_selTrack = std::clamp(m_selTrack, 0, std::max(0, m_project->trackCount() - 1));
@@ -305,7 +306,7 @@ void ClipGrid::paintEvent(QPaintEvent*) {
         p.drawText(r.adjusted(18, 0, -kSceneNumberW - 4, 0), Qt::AlignVCenter | Qt::AlignLeft,
                    p.fontMetrics().elidedText(m_project->scenes[row], Qt::ElideRight, r.width() - 22 - kSceneNumberW));
         p.setPen(theme::dim);
-        p.drawText(num.adjusted(0, 0, -3, 0), Qt::AlignVCenter | Qt::AlignRight, QString::number(row + 1));
+        p.drawText(num.adjusted(0, 0, -3, 0), Qt::AlignVCenter | Qt::AlignRight, row == 9 ? QString("0") : QString::number(row + 1));
         if (selScene) { p.setPen(theme::outline); p.setBrush(Qt::NoBrush); p.drawRect(r.adjusted(0, 0, -1, -1)); }
     }
     if (rows > visibleRows()) {   // where the visible scenes are, in a slim bar at the right edge

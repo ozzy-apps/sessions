@@ -69,7 +69,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
 
     // ---- follow, tempo & timing
     m_follow = makeButton(this, "Follow", "Follow", "On: the Arrangement scrolls along with the playhead while it plays.", true);
-    m_follow->setChecked(true);
+    m_follow->setChecked(QSettings("Sessions", "Sessions").value("arrangement/follow", true).toBool());
     connect(m_follow, &QToolButton::toggled, this, &ControlBar::followToggled);
     m_follow->setObjectName("followButton");
     lay->addWidget(m_follow);
@@ -315,6 +315,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
 }
 
 void ControlBar::setMapButtons(bool keyMap, bool midiMap) { m_keyMap->setChecked(keyMap); m_midiMap->setChecked(midiMap); }
+void ControlBar::setFollow(bool on) { const QSignalBlocker block(m_follow); m_follow->setChecked(on); }
 void ControlBar::flashMidiIn() { m_midiLitUntil = QDateTime::currentMSecsSinceEpoch() + 120; }
 
 bool ControlBar::drawMode() const { return m_draw->isChecked(); }

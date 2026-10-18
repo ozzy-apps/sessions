@@ -6,7 +6,7 @@
 //  - Shift+click toggles selection; Alt (or Cmd) while dragging ignores the grid
 //  - arrows move selected notes (Shift+Up/Down = octave, Shift+Left/Right = length)
 //  - ruler: drag up/down to zoom, sideways to scroll; wheel scrolls pitch, Ctrl+wheel zooms.
-//    It carries the loop brace (the clip's colour, on top: drag its body to move the loop, its
+//    It carries the neutral loop brace (on top: drag its body to move the loop, its
 //    ends for the loop's start and length) and the ▶ start / ◀ end markers (0.23; Model.h Clip::
 //    start / loopStart): drag ▶ to begin playing elsewhere, ◀ for the length.
 //  - velocity lane: drag stems; selected notes move together
@@ -47,6 +47,8 @@ public:
     // What's on screen, in clip beats (the clip overviews outline it and drag it): first and last beat.
     bool   viewport(double& first, double& last) const;
     void   setViewport(double first, double last);
+    void   setFollow(bool on);          // independent from Arrangement follow
+    bool   follow() const { return m_follow; }
     void   clampView();   // the view never runs off before 1.1.1 or far past the clip's end
     static constexpr int kRulerH = 16;   // the ruler's height: the brace in its top 5 px, the markers below
 
@@ -86,6 +88,7 @@ private:
     void   preview(int pitch, double velocity = 0.8);
     void   openEdit(const QString& label);   // undo step spanning a mouse drag
     void   closeEdit();
+    void   followPlayhead();
 
     Project*   m_project;
     Transport* m_transport;
@@ -100,6 +103,7 @@ private:
     void       centerOnNotes();
     void       fitToClip();
     bool       m_userZoomed = false;   // per clip: until you zoom, the loop fills the width
+    bool       m_follow = true;
     const int  m_rowH = 10, m_keyW = 34, m_rulerH = kRulerH, m_velH = 44;
 
     QSet<int>  m_selected;    // note indices

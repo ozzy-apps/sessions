@@ -4,6 +4,9 @@
 #include "audio/Driver.h"
 #include "audio/MidiInput.h"
 #include <QComboBox>
+#include <QCheckBox>
+#include <QFormLayout>
+#include <QSignalBlocker>
 #include <algorithm>
 #include <QLabel>
 #include <QListWidget>
@@ -232,7 +235,7 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     auto* portsBox = new QWidget(midiTab); auto* ml = new QVBoxLayout(portsBox); ml->setContentsMargins(0, 0, 0, 0); ml->setSpacing(6);
     m_ports = new QListWidget(portsBox);
     m_ports->setObjectName("midiPorts");
-    m_ports->setFixedHeight(180);
+    m_ports->setFixedHeight(128);
     ml->addWidget(m_ports);
     m_midiStatus = new QLabel(portsBox);
     m_midiStatus->setObjectName("dimLabel");
@@ -240,6 +243,50 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     ml->addWidget(m_midiStatus);
     rows->addWidget(row("Inputs", portsBox, "Checked inputs play the armed track (or the selected one) and drive what you map in MIDI Map mode (Ctrl+M). "
                                             "Keyboards and controllers plugged in later are connected automatically.", midiTab));
+    auto* controller = new QWidget(midiTab);
+    auto* controllerForm = new QFormLayout(controller);
+    controllerForm->setContentsMargins(0, 0, 0, 0);
+    controllerForm->setSpacing(6);
+    auto* profile = new QComboBox(controller);
+    profile->setObjectName("controllerProfile");
+    profile->addItem("Automatic: Nektar Impact LX49+ / LX61+", "auto");
+    profile->addItem("Off", "off");
+    profile->setCurrentIndex(std::max(0, profile->findData(settings().value("midi/controller", "auto"))));
+    controllerForm->addRow("Profile", profile);
+    m_controllerInput = new QComboBox(controller);
+    m_controllerInput->setObjectName("controllerInput");
+    controllerForm->addRow("Input", m_controllerInput);
+    auto* bankLine = new QWidget(controller);
+    auto* bankLayout = new QHBoxLayout(bankLine);
+    bankLayout->setContentsMargins(0, 0, 0, 0);
+    auto* bank = new QComboBox(bankLine);
+    bank->setObjectName("controllerBank");
+    for (int first = 0; first < 64; first += 8) bank->addItem(QString("Tracks %1–%2").arg(first + 1).arg(first + 8), first);
+    bank->setCurrentIndex(std::max(0, bank->findData(settings().value("midi/controllerBank", 0))));
+    auto* pickup = new QCheckBox("Pickup", bankLine);
+    pickup->setObjectName("controllerPickup");
+    pickup->setChecked(settings().value("midi/controllerPickup", true).toBool());
+    pickup->setToolTip("A fader or pan knob takes control when it reaches the current value. This prevents jumps.");
+    bankLayout->addWidget(bank, 1); bankLayout->addWidget(pickup);
+    controllerForm->addRow("Mixer", bankLine);
+    auto setControllerEnabled = [=] { bankLine->setEnabled(profile->currentData().toString() != "off"); m_controllerInput->setEnabled(profile->currentData().toString() != "off"); };
+    setControllerEnabled();
+    connect(profile, &QComboBox::activated, this, [=] {
+        settings().setValue("midi/controller", profile->currentData());
+        setControllerEnabled(); emit midiControllerSettingsChanged();
+    });
+    connect(m_controllerInput, &QComboBox::activated, this, [this] {
+        settings().setValue("midi/controllerInput", m_controllerInput->currentData()); emit midiControllerSettingsChanged();
+    });
+    connect(bank, &QComboBox::activated, this, [=] {
+        settings().setValue("midi/controllerBank", bank->currentData()); emit midiControllerSettingsChanged();
+    });
+    connect(pickup, &QCheckBox::toggled, this, [this](bool on) {
+        settings().setValue("midi/controllerPickup", on); emit midiControllerSettingsChanged();
+    });
+    rows->addWidget(row("Control surface", controller,
+        "LX49+/61+: select User Preset 2 (GM Mixer), Global MIDI channel 16. Faders 1–8: volume; knobs: pan; buttons: mute; fader 9: Master. "
+        "Transport accepts MMC. Custom MIDI Maps take priority.", midiTab));
     rows->addStretch(1);
     connect(m_ports, &QListWidget::itemChanged, this, [this](QListWidgetItem* it) {
         m_midi->setEnabled(it->data(Qt::UserRole).toString(), it->checkState() == Qt::Checked);
@@ -420,6 +467,15 @@ void PreferencesDialog::refreshAudioStatus() {
 void PreferencesDialog::refreshMidiPorts() {
     QSignalBlocker block(m_ports);
     m_ports->clear();
+    if (m_controllerInput) {
+        QSignalBlocker inputBlock(m_controllerInput);
+        const QString selected = settings().value("midi/controllerInput").toString();
+        m_controllerInput->clear();
+        m_controllerInput->addItem("Automatic (Impact LX49+ / LX61+)", QString());
+        for (const auto& port : m_midi->ports()) m_controllerInput->addItem(port.name, port.name);
+        if (!selected.isEmpty() && m_controllerInput->findData(selected) < 0) m_controllerInput->addItem(selected + " (disconnected)", selected);
+        m_controllerInput->setCurrentIndex(std::max(0, m_controllerInput->findData(selected)));
+    }
     if (!m_midi->available()) {
         m_midiStatus->setText(m_midi->status());
         return;

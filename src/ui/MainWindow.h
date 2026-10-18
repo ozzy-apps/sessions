@@ -36,6 +36,7 @@ class DeviceView;
 class InfoView;
 class ThemeEditor;
 class OverviewBar;
+class ControlSurface;
 struct ArrangementClip;
 
 class MainWindow : public QMainWindow {
@@ -59,6 +60,7 @@ public:
     audio::MidiInput* midiInput() const { return m_midi; }
     audio::Engine*   engine() const { return m_engine; }
     Mapper*          mapper() const { return m_mapper; }
+    ControlSurface*  controlSurface() const { return m_surface; }
     MapOverlay*      mapOverlay() const { return m_overlay; }
     // MIDI Map / Key Map mode (Ctrl+M / Ctrl+K; Esc leaves): clicks select a control instead of using it.
     void             setMapMode(Mapper::Mode mode);
@@ -205,6 +207,7 @@ private:
 
     // MIDI input and mappings
     audio::MidiInput* m_midi = nullptr;
+    ControlSurface* m_surface = nullptr;
     Mapper*         m_mapper = nullptr;
     MapOverlay*     m_overlay = nullptr;
     QAction*        m_keyMapAction = nullptr;

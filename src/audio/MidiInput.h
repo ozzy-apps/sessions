@@ -11,6 +11,8 @@
 #include <QSet>
 #include <QString>
 #include <QVector>
+#include <QHash>
+#include <QByteArray>
 
 struct _snd_seq;
 
@@ -33,7 +35,9 @@ public:
     int     portId() const { return m_port; }
 
     // The same signals as from a device, for code that doesn't come through ALSA.
-    void    inject(int status, int data1, int data2);
+    void    inject(int status, int data1, int data2, const QString& sourceName = {});
+    void    injectSysEx(const QByteArray& message, const QString& sourceName = {});
+    QString sourceName() const { return m_sourceName; } // source of the signal currently being delivered
 
 signals:
     void noteOn(int channel, int pitch, int velocity);   // velocity 1..127
@@ -43,6 +47,7 @@ signals:
     void channelPressure(int channel, int value);           // 0..127 (aftertouch)
     void activity();                                     // any message (the control bar's light)
     void portsChanged();                                 // a device came or went
+    void machineControl(const QString& sourceName, int command);
 
 private:
     void readEvents();
@@ -52,6 +57,8 @@ private:
     int           m_port = -1;
     QString       m_status;
     QSet<QString> m_connected;   // port ids we're subscribed to
+    QHash<QString, QString> m_sourceNames;
+    QString m_sourceName;
 };
 
 } // namespace sessions::audio

@@ -233,6 +233,11 @@ QJsonObject writeTrack(const EditState::TrackState& t, bool isReturn, int width,
         o.insert("input", t.inputChannel);
     }
     if (t.groupId) o.insert("group", t.groupId);
+    if (t.type == TrackType::Group && (t.groupFadeIn > 0 || t.groupFadeOut > 0
+                                      || t.groupFadeInCurve != 0.5 || t.groupFadeOutCurve != 0.5)) {
+        o.insert("groupFades", QJsonObject{{"in", t.groupFadeIn}, {"out", t.groupFadeOut},
+                                         {"inCurve", t.groupFadeInCurve}, {"outCurve", t.groupFadeOutCurve}});
+    }
     if (folded) o.insert("folded", true);
     if (!isReturn) {
         QJsonArray slotIds, arrangement;
@@ -457,6 +462,13 @@ EditState::TrackState readTrack(const QJsonObject& o, bool isReturn, const QStri
         t.inputChannel = std::clamp(integer(o, "input", 0), 0, 2);
     }
     t.groupId = isReturn ? 0 : std::max(0, integer(o, "group", 0));
+    if (t.type == TrackType::Group) {
+        const QJsonObject fades = o.value("groupFades").toObject();
+        t.groupFadeIn = std::max(0.0, num(fades, "in", 0));
+        t.groupFadeOut = std::max(0.0, num(fades, "out", 0));
+        t.groupFadeInCurve = std::clamp(num(fades, "inCurve", 0.5), 0.02, 0.98);
+        t.groupFadeOutCurve = std::clamp(num(fades, "outCurve", 0.5), 0.02, 0.98);
+    }
     if (!isReturn) {
         for (const QJsonValue& v : o.value("slots").toArray()) t.slotClips.push_back(v.isDouble() ? std::max(0, v.toInt()) : 0);
         for (const QJsonValue& v : o.value("arrangement").toArray()) {

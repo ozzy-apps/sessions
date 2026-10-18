@@ -40,6 +40,9 @@ public:
     static double  dragZoom(double dyPixels);
     static audio::DriverOptions savedAudio();   // everything above for Engine::setOutput
 
+signals:
+    void midiControllerSettingsChanged();
+
 private:
     void applyAudio();
     void refreshAudioStatus();
@@ -61,6 +64,7 @@ private:
     QLabel*      m_audioStatus;
     QListWidget* m_ports;
     QLabel*      m_midiStatus;
+    QComboBox*   m_controllerInput = nullptr;
 };
 
 } // namespace sessions

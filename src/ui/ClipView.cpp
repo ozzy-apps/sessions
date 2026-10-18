@@ -139,7 +139,21 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
         label->setObjectName("clipBoxTitle");
         label->setFixedHeight(16);
         InfoView::attach(label, title, help);
-        fl->addWidget(label);
+        if (title == "Clip") {
+            auto* titleRow = new QHBoxLayout;
+            titleRow->setContentsMargins(0, 0, 0, 0);
+            titleRow->setSpacing(0);
+            titleRow->addWidget(label, 1);
+            m_playheadFollow = new QToolButton(frame);
+            m_playheadFollow->setObjectName("clipFollowButton");
+            m_playheadFollow->setText("Follow");
+            m_playheadFollow->setCheckable(true);
+            m_playheadFollow->setFocusPolicy(Qt::NoFocus);
+            m_playheadFollow->setFixedHeight(15);
+            InfoView::attach(m_playheadFollow, "Follow Clip Playhead", "On: the sample or MIDI editor scrolls when its playhead reaches the edge. Off: the view stays fixed. Independent from Arrangement Follow.");
+            titleRow->addWidget(m_playheadFollow);
+            fl->addLayout(titleRow);
+        } else fl->addWidget(label);
         auto* inner = new QVBoxLayout;
         inner->setContentsMargins(4, 4, 4, 4);
         content->setParent(frame);
@@ -171,6 +185,15 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
         const double at = m_strip->beatAt(m_strip->mapFromGlobal(QCursor::pos()).x()), span = l - f;
         setEditorViewport(at - span / 2, at + span / 2);
     });
+    connect(m_playheadFollow, &QToolButton::toggled, this, [this](bool on) {
+        QSettings("Sessions", "Sessions").setValue("clipView/follow", on);
+        m_sampleEditor->setFollow(on);
+        m_roll->setFollow(on);
+    });
+    const bool follow = QSettings("Sessions", "Sessions").value("clipView/follow", true).toBool();
+    m_playheadFollow->setChecked(follow);
+    m_sampleEditor->setFollow(follow);
+    m_roll->setFollow(follow);
     cl->addWidget(m_strip);
     cl->addWidget(m_editors, 1);
     lay->addWidget(column, 1);
@@ -825,6 +848,9 @@ void ClipView::setEditorViewport(double first, double last) {
     else if (m_editors->currentWidget() == m_sampleEditor) m_sampleEditor->setViewport(first, last);
     if (m_strip) m_strip->update();
 }
+
+void ClipView::setFollow(bool on) { m_playheadFollow->setChecked(on); }
+bool ClipView::follow() const { return m_playheadFollow->isChecked(); }
 
 // ---- edits ------------------------------------------------------------------
 

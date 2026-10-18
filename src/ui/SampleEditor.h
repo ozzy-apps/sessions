@@ -6,7 +6,7 @@
 //  - the ruler: drag up / down to zoom (Preferences picks which way zooms in), sideways to
 //    scroll. The wheel scrolls, Ctrl+wheel zooms around the pointer. The view stays between
 //    1.1.1 (or the audio before it) and the audio's end.
-//  - the loop brace (the clip's colour): the loop, from Clip::loopStart for the length (0.23,
+//  - the neutral loop brace: the loop, from Clip::loopStart for the length (0.23,
 //    the classic way). Drag its body to move the loop along the clip (its length stays), its left end
 //    for the loop's start (the end stays), its right end for the length. Faded with Loop off.
 //  - the start marker (▶ at Clip::start) and the end marker (◀ at the brace's end): drag ▶ to
@@ -52,6 +52,8 @@ public:
     int    selectedMarker() const { return m_sel; }
     bool   viewport(double& first, double& last) const;   // the beats on screen
     void   setViewport(double first, double last);
+    void   setFollow(bool on);          // page with this clip's own playhead, without changing zoom
+    bool   follow() const { return m_follow; }
     void   extent(double& first, double& last) const;     // what there is to see: from 1.1.1 (or the audio before it) to the audio's end
     // The time selection (clip beats), if any.
     bool   hasSelection() const { return m_rangeOn && m_rangeB - m_rangeA > 1e-9; }
@@ -95,6 +97,7 @@ private:
     void   removeMarker(int i);
     int    insertMarker(double beat, double seconds);   // into the sorted list; its index
     double playheadBeat() const;       // clip beat under the playhead, or -1
+    void   followPlayhead();
     QString editFolder() const;
 
     Project*   m_project;
@@ -102,6 +105,7 @@ private:
     ClipPtr    m_clip;
     double     m_zoom = 40, m_offset = 0;   // px per beat, first beat shown
     bool       m_userZoomed = false;        // until you zoom, the sample fills the width (and refits on resize)
+    bool       m_follow = true;
     int        m_sel = -1;
     int        m_hoverTransient = -1;
     enum class Drag { None, Marker, LoopEnd, LoopStart, Start, LoopMove, Ruler, Scroll, Slide, Select } m_drag = Drag::None;

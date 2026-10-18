@@ -13,11 +13,15 @@
 #include "widgets/Fader.h"
 #include <QPainter>
 #include <QPainterPath>
+#include <QRegion>
 #include <QMouseEvent>
 #include <QCursor>
 #include <QWheelEvent>
 #include <QContextMenuEvent>
 #include <QToolButton>
+#include <QScrollBar>
+#include <QSettings>
+#include <QDateTime>
 #include <QMenu>
 #include <QGuiApplication>
 #include <QFileInfo>
@@ -48,7 +52,8 @@ ArrangementView::ArrangementView(Project* project, Transport* transport, QWidget
         "Drag empty space to select time (Shift extends): Ctrl+L loops it, Ctrl+E splits, Ctrl+J consolidates, Delete clears. "
         "Drag clips to move them, their right edge to lengthen. Double-click a lane to add a clip. "
         "Audio clips: hover one for its fade handles: drag a top-corner square sideways for a fade's length, the circle on the curve up or down for its shape. "
-        "Top strip: double-click to add a locator. Below it, drag the loop brace. Drag the ruler up/down to zoom. A toggles automation.");
+        "Group lanes have the same fade handles for all their tracks. Top strip: double-click to add a locator. Drag the loop brace or the start/end triangles. "
+        "Follow keeps the playhead visible. Wheel scrolls tracks when needed; Shift+wheel scrolls time, Ctrl+wheel zooms. A toggles automation.");
 
     m_backToArr = new QToolButton(this);
     m_backToArr->setText("Back to Arrangement");
@@ -69,6 +74,27 @@ ArrangementView::ArrangementView(Project* project, Transport* transport, QWidget
         "Shows one parameter's envelope in each lane. Pick the parameter under the track name. Click a lane to add a breakpoint, drag to move it, double-click to delete it.");
     connect(m_autoButton, &QToolButton::toggled, this, &ArrangementView::setAutomationMode);
 
+    m_follow = QSettings("Sessions", "Sessions").value("arrangement/follow", true).toBool();
+    m_followButton = new QToolButton(this);
+    m_followButton->setObjectName("arrangementFollowButton");
+    m_followButton->setText("Follow");
+    m_followButton->setCheckable(true);
+    m_followButton->setChecked(m_follow);
+    m_followButton->setFocusPolicy(Qt::NoFocus);
+    InfoView::attach(m_followButton, "Follow Arrangement", "Keep the playing position visible. Turn off to hold the timeline while playback continues.");
+    connect(m_followButton, &QToolButton::toggled, this, &ArrangementView::setFollow);
+
+    m_verticalScroll = new QScrollBar(Qt::Vertical, this);
+    m_verticalScroll->setObjectName("arrangementTrackScroll");
+    m_verticalScroll->setFocusPolicy(Qt::NoFocus);
+    m_verticalScroll->hide();
+    connect(m_verticalScroll, &QScrollBar::valueChanged, this, [this] { update(); });
+    m_returnScroll = new QScrollBar(Qt::Vertical, this);
+    m_returnScroll->setObjectName("arrangementReturnScroll");
+    m_returnScroll->setFocusPolicy(Qt::NoFocus);
+    m_returnScroll->hide();
+    connect(m_returnScroll, &QScrollBar::valueChanged, this, [this] { update(); });
+
     connect(project, &Project::structureChanged, this, [this] {
         validSel();
         m_selTrack = std::clamp(m_selTrack, 0, std::max(0, m_project->trackCount() - 1));
@@ -88,7 +114,7 @@ ArrangementView::ArrangementView(Project* project, Transport* transport, QWidget
         update();
     });
     connect(transport, &Transport::tick, this, [this] {
-        if (m_follow && m_transport->playing() && m_drag == Drag::None) {   // Follow: page on with the playhead
+        if (m_follow && m_transport->playing() && m_drag == Drag::None && QDateTime::currentMSecsSinceEpoch() >= m_followResumeAt) {   // Follow: page on with the playhead
             const double x = beatToX(m_transport->beat());
             if (x < 0 || x > laneWidth() - 12) m_offset = std::max(0.0, m_transport->beat() - 0.05 * laneWidth() / m_zoom);
         }
@@ -107,18 +133,33 @@ ArrangementView::ArrangementView(Project* project, Transport* transport, QWidget
 // ---- geometry -------------------------------------------------------------
 
 int ArrangementView::laneTop(int i) const {
-    int y = kTopH;
+    const int nT = int(m_project->tracks.size());
+    if (i >= laneCount()) return std::max(kTopH, height() - kTimeH - m_masterH);
+    if (i >= nT) return returnsTop() + (i - nT) * m_returnH - m_returnScroll->value();
+    int y = kTopH - m_verticalScroll->value();
     for (int k = 0; k < i; ++k) y += laneHeight(k);
     return y;
 }
 
 // a folded group's tracks have no lane; returns and the Main lane are shorter
 int ArrangementView::laneHeight(int i) const {
+    if (i >= laneCount()) return m_masterH;
     if (i >= m_project->tracks.size()) return m_returnH;
     return m_project->hiddenByFold(i) ? 0 : m_trackH;
 }
 
 int ArrangementView::laneCount() const { return m_project->trackCount(); }
+
+int ArrangementView::returnsTop() const {
+    return std::max(kTopH, height() - kTimeH - m_masterH - m_returnViewportH);
+}
+
+QRect ArrangementView::laneViewport(int lane) const {
+    const bool regular = lane < m_project->tracks.size(), master = lane >= laneCount();
+    const int top = regular ? kTopH : master ? mainLaneTop() : returnsTop();
+    const int bottom = regular ? returnsTop() : master ? height() - kTimeH : mainLaneTop();
+    return QRect(0, top, width(), std::max(0, bottom - top));
+}
 
 QRect ArrangementView::laneRect(int lane) const { return QRect(0, laneTop(lane), laneWidth(), laneHeight(lane)); }
 
@@ -141,7 +182,8 @@ QRect ArrangementView::fieldRect(const Field& f) const {
     QRect r;
     if (f.kind == Field::MainVolume) {
         const QRect m = mixerRect(laneCount());
-        return QRect(m.left() + 4, m.top() + 4, 50, 14);
+        const QRect main(m.left() + 4, m.top() + 4, 50, 14);
+        return main.bottom() <= m.bottom() - 1 ? main : QRect();
     }
     if (f.lane < 0 || f.lane >= laneCount()) return {};
     const QRect m = mixerRect(f.lane);
@@ -219,7 +261,7 @@ void ArrangementView::centerOn(double beat) {
 int ArrangementView::trackAt(int y) const {
     if (y < kTopH || y >= height() - kTimeH) return -1;
     for (int i = 0; i < m_project->trackCount(); ++i)
-        if (y < laneTop(i) + laneHeight(i)) return i;
+        if (laneViewport(i).contains(0, y) && laneHeight(i) > 0 && y >= laneTop(i) && y < laneTop(i) + laneHeight(i)) return i;
     return -1;
 }
 
@@ -228,16 +270,39 @@ void ArrangementView::fitLanes() {
     for (int i = 0; i < m_project->tracks.size(); ++i) if (!m_project->hiddenByFold(i)) ++shown;
     const int nT = std::max(1, shown), nR = int(m_project->returns.size());
     m_returnH = m_autoMode ? 52 : 40;
-    const int avail = height() - kTopH - kTimeH - (nR + 1) * m_returnH - 4;   // returns, then the Main lane
+    const int body = std::max(0, height() - kTopH - kTimeH);
+    m_masterH = std::min(m_returnH, body);
+    const int remaining = body - m_masterH;
+    const int minimumReturns = nR ? std::min(m_returnH, remaining / 2) : 0;
+    const int minimumTracks = shown ? std::min(56, remaining - minimumReturns) : 0;
+    m_returnViewportH = std::min(nR * m_returnH, std::max(0, remaining - minimumTracks));
+    const int avail = body - m_masterH - m_returnViewportH - 4;
     m_trackH = std::clamp(avail / nT, 56, 120);
+    m_verticalScroll->setPageStep(std::max(1, returnsTop() - kTopH));
+    m_verticalScroll->setSingleStep(m_trackH);
+    m_verticalScroll->setRange(0, std::max(0, shown * m_trackH - (returnsTop() - kTopH)));
+    m_verticalScroll->setVisible(m_verticalScroll->maximum() > 0);
+    m_returnScroll->setPageStep(std::max(1, m_returnViewportH));
+    m_returnScroll->setSingleStep(m_returnH);
+    m_returnScroll->setRange(0, std::max(0, nR * m_returnH - m_returnViewportH));
+    m_returnScroll->setVisible(m_returnScroll->maximum() > 0 && m_returnViewportH > 0);
+    layoutControls();
 }
 
 void ArrangementView::resizeEvent(QResizeEvent*) {
     fitLanes();
     if (!m_userZoomed) zoomToFit();
+    layoutControls();
+}
+
+void ArrangementView::layoutControls() {
     const QSize bs = m_backToArr->sizeHint();
     m_backToArr->move(laneWidth() - bs.width() - 8, kLocY + 1);
-    m_autoButton->setGeometry(laneWidth() + 6, kOverH + (kTopH - kOverH - 22) / 2, m_headerW - 12, 22);
+    const int y = kOverH + (kTopH - kOverH - 22) / 2;
+    m_autoButton->setGeometry(laneWidth() + 6, y, m_headerW - 88, 22);
+    m_followButton->setGeometry(width() - 76, y, 70, 22);
+    m_verticalScroll->setGeometry(width() - 12, kTopH, 12, std::max(0, returnsTop() - kTopH));
+    m_returnScroll->setGeometry(width() - 12, returnsTop(), 12, m_returnViewportH);
 }
 
 double ArrangementView::grid() const {
@@ -270,6 +335,57 @@ ArrangementView::FadeHandles ArrangementView::fadeHandles(const ArrangementClip&
     return f;
 }
 
+ArrangementClip ArrangementView::groupFadePlacement(int lane) const {
+    ArrangementClip a;
+    a.length = 0;
+    if (lane < 0 || lane >= m_project->tracks.size() || !m_project->tracks[lane].isGroup()) return a;
+    const auto span = m_project->groupArrangementSpan(lane);
+    if (span.empty()) return a;
+    const Track& t = m_project->tracks[lane];
+    a.start = span.start; a.length = span.end - span.start;
+    a.fadeIn = std::clamp(t.groupFadeIn, 0.0, a.length); a.fadeOut = std::clamp(t.groupFadeOut, 0.0, a.length);
+    a.fadeInCurve = t.groupFadeInCurve; a.fadeOutCurve = t.groupFadeOutCurve;
+    return a;
+}
+
+void ArrangementView::drawGroupFades(QPainter& p, int lane) {
+    const ArrangementClip a = groupFadePlacement(lane);
+    if (a.length <= 0) return;
+    const Track& t = m_project->tracks[lane];
+    const double x = beatToX(a.start), end = beatToX(a.start + a.length) - 1;
+    const int y = laneTop(lane), h = laneHeight(lane);
+    const double bottom = y + h - 2, body = h - 15;
+    p.save();
+    p.setClipRect(QRectF(0, kTopH, laneWidth(), returnsTop() - kTopH), Qt::IntersectClip);
+    p.fillRect(QRectF(x, y + 1, end - x, 12), t.color);
+    QFont label = font(); label.setBold(true); label.setPointSizeF(8); p.setFont(label);
+    p.setPen(t.color.lightnessF() > 0.45 ? theme::ink : theme::inkLight);
+    p.drawText(QPointF(x + 4, y + 10), t.name);
+    p.setRenderHint(QPainter::Antialiasing, true);
+    auto curve = [&](double from, double to, double shape) {
+        QPainterPath line; line.moveTo(from, bottom);
+        const int steps = std::clamp(int(std::abs(to - from) / 3), 2, 2048);
+        for (int k = 0; k <= steps; ++k) {
+            const double u = double(k) / steps;
+            line.lineTo(from + (to - from) * u, bottom - fadeGain(u, shape) * body);
+        }
+        QPainterPath mask = line; mask.lineTo(to, y + 13); mask.lineTo(from, y + 13); mask.closeSubpath();
+        p.fillPath(mask, theme::outOfClip);
+        p.setPen(QPen(theme::clipInk, 1.2)); p.setBrush(Qt::NoBrush); p.drawPath(line);
+    };
+    if (a.fadeIn > 0) curve(x, x + a.fadeIn * m_zoom, a.fadeInCurve);
+    if (a.fadeOut > 0) curve(end, end - a.fadeOut * m_zoom, a.fadeOutCurve);
+    if (lane == m_selTrack || lane == m_hoverLane) {
+        const FadeHandles f = fadeHandles(a, lane);
+        p.setPen(QPen(theme::ink, 1)); p.setBrush(theme::outline);
+        p.drawRect(QRectF(f.inSq.x() - 3.5, f.inSq.y() - 3.5, 7, 7));
+        p.drawRect(QRectF(f.outSq.x() - 3.5, f.outSq.y() - 3.5, 7, 7));
+        if (a.fadeIn > 0) p.drawEllipse(f.inCircle, 3.5, 3.5);
+        if (a.fadeOut > 0) p.drawEllipse(f.outCircle, 3.5, 3.5);
+    }
+    p.restore();
+}
+
 bool ArrangementView::hovered(const ArrangementClip& a) const {
     if (m_hoverLane < 0 || m_hoverLane >= m_project->tracks.size()) return false;
     const QVector<ArrangementClip>& arr = m_project->tracks[m_hoverLane].arrangement;
@@ -282,11 +398,18 @@ void ArrangementView::leaveEvent(QEvent*) {
 
 void ArrangementView::resetFades() {
     ArrangementClip* a = validSel();
-    if (!a || (a->fadeIn <= 0 && a->fadeOut <= 0)) return;
+    const bool group = m_selTrack >= 0 && m_selTrack < m_project->tracks.size() && m_project->tracks[m_selTrack].isGroup();
+    if (!group && (!a || (a->fadeIn <= 0 && a->fadeOut <= 0))) return;
     {
         EditScope edit(m_project, "Reset Fades");
-        a->fadeIn = a->fadeOut = 0;
-        a->fadeInCurve = a->fadeOutCurve = 0.5;
+        if (group) {
+            Track& t = m_project->tracks[m_selTrack];
+            t.groupFadeIn = t.groupFadeOut = 0;
+            t.groupFadeInCurve = t.groupFadeOutCurve = 0.5;
+        } else {
+            a->fadeIn = a->fadeOut = 0;
+            a->fadeInCurve = a->fadeOutCurve = 0.5;
+        }
     }
     emit m_project->clipChanged();
     emit m_project->structureChanged();
@@ -375,12 +498,12 @@ void ArrangementView::chooseTarget(int lane, const QPoint& globalPos) {
 // ---- painting -------------------------------------------------------------
 
 void ArrangementView::drawClip(QPainter& p, const Track& t, const ArrangementClip& a, int y, int h, double alpha) {
-    if (!a.clip) return;
+    if (!a.clip || y + h <= kTopH || y >= returnsTop()) return;
     const double x = beatToX(a.start), w = a.length * m_zoom;
     const int lw = laneWidth();
     if (x > lw || x + w < 0) return;
     p.save();
-    p.setClipRect(QRectF(std::max(0.0, x), y, std::min(w, lw - x), h));
+    p.setClipRect(QRectF(std::max(0.0, x), y, std::min(w, lw - x), h).intersected(QRectF(0, kTopH, lw, returnsTop() - kTopH)), Qt::IntersectClip);
     QColor c = m_project->clipColor(a.clip); c.setAlphaF(alpha);
     p.fillRect(QRectF(x, y + 1, w - 1, 12), c);
     c.setAlphaF(alpha * 0.5);
@@ -504,7 +627,7 @@ void ArrangementView::drawTake(QPainter& p, const Transport::Take& take) {
         drawClip(p, t, ghost, y, h, 1.0);
     } else {
         p.save();
-        p.setClipRect(QRectF(std::max(0.0, x), y, std::min(w, lw - x), h));
+        p.setClipRect(QRectF(std::max(0.0, x), y, std::min(w, lw - x), h), Qt::IntersectClip);
         QColor c = t.color;
         p.fillRect(QRectF(x, y + 1, w - 1, 12), c);
         c.setAlphaF(0.5);
@@ -547,7 +670,7 @@ void ArrangementView::drawEnvelope(QPainter& p, int lane) {
     const QRect r = laneRect(lane);
     const bool off = t->overriddenTargets.contains(tgt);
     p.save();
-    p.setClipRect(r);
+    p.setClipRect(r.intersected(laneViewport(lane)), Qt::IntersectClip);
     p.setRenderHint(QPainter::Antialiasing, true);
     if (!e || e->points.isEmpty()) {   // not automated yet: the static value as a dashed line
         const double y = valueToY(lane, m_project->targetValue(lane, tgt));
@@ -595,10 +718,16 @@ void ArrangementView::paintEvent(QPaintEvent*) {
         if (!laneHeight(i)) continue;
         const bool group = i < nT && m_project->tracks[i].isGroup();
         const QColor c = i == m_selTrack ? theme::laneSelected : group ? theme::laneGroup : i < nT ? theme::lane : theme::laneReturn;
-        p.fillRect(QRect(0, laneTop(i), lw, laneHeight(i) - 1), c);
+        p.fillRect(QRect(0, laneTop(i), lw, laneHeight(i) - 1).intersected(laneViewport(i)), c);
     }
 
     // every second beat (or bar) a shade lighter, then the grid lines
+    int regularBottom = kTopH - m_verticalScroll->value();
+    for (int i = 0; i < nT; ++i) regularBottom += laneHeight(i);
+    const QRect regularGrid(0, kTopH, lw, std::max(0, std::min(returnsTop(), regularBottom) - kTopH));
+    const QRect returnGrid(0, returnsTop(), lw, std::max(0, H - returnsTop()));
+    p.save();
+    p.setClipRegion(QRegion(regularGrid) | QRegion(returnGrid));
     gridshade::paint(p, m_zoom, [this](double b) { return beatToX(b); }, m_offset, xToBeat(lw), QRectF(0, kTopH, lw, H - kTopH));
     const double b1 = xToBeat(lw);
     for (int b = std::max(0, int(std::floor(m_offset))); b <= b1; ++b) {
@@ -607,8 +736,11 @@ void ArrangementView::paintEvent(QPaintEvent*) {
         int x = int(beatToX(b));
         p.fillRect(QRect(x, kTopH, 1, H - kTopH), bar ? theme::arrBar : theme::arrBeat);
     }
+    p.restore();
 
     // clips (dimmed while editing automation)
+    p.save();
+    p.setClipRect(QRect(0, kTopH, lw, returnsTop() - kTopH));
     for (int i = 0; i < nT; ++i) {
         const Track& t = m_project->tracks[i];
         if (!laneHeight(i)) continue;
@@ -621,6 +753,7 @@ void ArrangementView::paintEvent(QPaintEvent*) {
                     QColor c = m_project->tracks[m].color; c.setAlphaF(m_autoMode ? 0.25 : 0.45);
                     p.fillRect(QRectF(x0, y + 4, std::max(1.0, x1 - x0 - 1), m_trackH - 9), c);
                 }
+            if (!m_autoMode) drawGroupFades(p, i);
             continue;
         }
         const double alpha = (t.overridden ? 0.35 : 1.0) * (m_autoMode ? 0.45 : 1.0);
@@ -629,14 +762,18 @@ void ArrangementView::paintEvent(QPaintEvent*) {
 
     // recordings in progress: drawn as the clips they're becoming (0.22)
     for (const Transport::Take& take : m_transport->takes()) drawTake(p, take);
+    p.restore();
 
     // time selection, over the clips too (a part of a clip can be selected)
     if (m_timeSel.active) {
         const double x0 = beatToX(m_timeSel.start), x1 = beatToX(m_timeSel.end);
         for (int i = m_timeSel.lane0; i <= m_timeSel.lane1 && i < lanes; ++i) {
             if (!laneHeight(i)) continue;
+            p.save();
+            p.setClipRect(laneViewport(i));
             if (x1 - x0 >= 1) p.fillRect(QRectF(x0, laneTop(i), x1 - x0, laneHeight(i) - 1), theme::timeSelection);
             else p.fillRect(QRectF(x0, laneTop(i), 1, laneHeight(i) - 1), theme::insertMarker);   // insert marker
+            p.restore();
         }
     }
 
@@ -661,7 +798,7 @@ void ArrangementView::paintEvent(QPaintEvent*) {
         p.fillRect(QRectF(2 + m_transport->beat() * k, 1, 1, kOverH - 3), theme::playhead);
     }
     p.fillRect(QRect(0, kLocY, lw, kLocH), theme::locatorStrip);
-    p.fillRect(QRect(0, kBraceY, lw, kBraceH + kRulerH), theme::ruler);
+    p.fillRect(QRect(0, kRulerY, lw, kTopH - kRulerY), theme::ruler);
     QFont small = font(); small.setPointSizeF(7.5); p.setFont(small);
     for (int i = 0; i < m_project->locators.size(); ++i) {
         const Locator& l = m_project->locators[i];
@@ -678,7 +815,13 @@ void ArrangementView::paintEvent(QPaintEvent*) {
         p.fillRect(QRectF(x, kTopH, 1, H - kTopH), theme::locatorLine);
     }
     const double lx0 = beatToX(m_transport->loopStart()), lx1 = beatToX(m_transport->loopStart() + m_transport->loopLength());
-    p.fillRect(QRectF(lx0, kBraceY + 1, lx1 - lx0, kBraceH - 2), m_transport->loopEnabled() ? theme::accent : theme::inactive);
+    const QColor brace = m_transport->loopEnabled() ? theme::text : theme::withAlpha(theme::text, 115);
+    p.save();
+    p.setClipRect(QRect(0, kBraceY, lw, kBraceH));
+    p.fillRect(QRectF(lx0, kBraceY + 2, lx1 - lx0, kBraceH - 4), brace);
+    p.fillRect(QRectF(lx0, kBraceY + 1, 2, kBraceH - 2), theme::text);
+    p.fillRect(QRectF(lx1 - 2, kBraceY + 1, 2, kBraceH - 2), theme::text);
+    p.restore();
     // punch-in / punch-out: red ends on the brace and a line down the lanes, where recording starts and stops
     for (const auto& [on, x] : {std::pair{m_transport->punchIn(), lx0}, std::pair{m_transport->punchOut(), lx1}}) {
         if (!on || x < -2 || x > lw) continue;
@@ -690,8 +833,8 @@ void ArrangementView::paintEvent(QPaintEvent*) {
     for (int bar = std::max(0, int(std::floor(m_offset / 4))); bar * 4 <= b1; ++bar) {
         if (bar % every) continue;
         int x = int(beatToX(bar * 4));
-        p.fillRect(QRect(x, kTopH - 5, 1, 5), theme::rulerText);
-        p.drawText(x + 3, kTopH - 4, QString::number(bar + 1));
+        p.fillRect(QRect(x, kRulerY + kRulerH - 5, 1, 5), theme::rulerText);
+        p.drawText(x + 3, kRulerY + kRulerH - 4, QString::number(bar + 1));
     }
     p.setFont(font());
 
@@ -724,6 +867,8 @@ void ArrangementView::paintEvent(QPaintEvent*) {
     };
     for (int i = 0; i < lanes; ++i) {
         if (!laneHeight(i)) continue;
+        p.save();
+        p.setClipRect(laneViewport(i));
         const Track& t = *m_project->trackAt(i);
         const bool isRet = i >= nT;
         const bool sel = i == m_selTrack || (!isRet && m_project->selectedTrackIds.size() > 1 && m_project->selectedTrackIds.contains(t.id));
@@ -764,11 +909,12 @@ void ArrangementView::paintEvent(QPaintEvent*) {
                        p.fontMetrics().elidedText("▾ " + m_project->targetName(i, autoTarget(i)), Qt::ElideRight, chooser.width() - 5));
         }
         p.setFont(font());
+        p.restore();
     }
     {   // the Main lane: main volume
         const int y = mainLaneTop();
-        p.fillRect(QRect(0, y, lw, m_returnH - 1), theme::editorBg);
-        p.fillRect(QRect(lw, y, m_headerW, m_returnH - 1), theme::editorBg);
+        p.fillRect(QRect(0, y, lw, m_masterH - 1), theme::editorBg);
+        p.fillRect(QRect(lw, y, m_headerW, m_masterH - 1), theme::editorBg);
         nameBlock(nameRect(lanes).adjusted(0, 0, 0, 0), theme::neutral, "Master", m_selTrack == lanes);
         p.fillRect(mixerRect(lanes), theme::panel);
         p.setFont(sf);
@@ -779,7 +925,9 @@ void ArrangementView::paintEvent(QPaintEvent*) {
     p.fillRect(QRect(lw, 0, 1, height()), theme::line);
 
     if (m_drag == Drag::Header && m_moved) {   // where a dragged track will land
-        const int target = std::clamp(trackAt(int(m_mousePos.y())), 0, nT - 1);
+        int target = trackAt(int(m_mousePos.y()));
+        if (target < 0) target = m_mousePos.y() < kTopH ? 0 : nT - 1;
+        target = std::clamp(target, 0, nT - 1);
         const int y = target > m_dragTrack ? laneTop(target) + laneHeight(target) : laneTop(target);
         p.fillRect(QRect(0, y - 1, width(), 3), theme::accent);
     }
@@ -855,24 +1003,26 @@ void ArrangementView::paintEvent(QPaintEvent*) {
         }
     }
 
-    // start marker: where Play starts (an outlined triangle in the ruler)
+    // The same right-facing start and left-facing end markers as the clip editors.
     const double sx = beatToX(m_transport->startMarker());
-    if (sx >= 0 && sx < lw) {
+    {
+        p.save();
+        p.setClipRect(QRect(0, kMarkY, lw, kMarkH));
         p.setRenderHint(QPainter::Antialiasing, true);
-        p.setBrush(Qt::NoBrush); p.setPen(QPen(theme::accent, 1.5));
-        QPolygonF tri; tri << QPointF(sx - 4, kTopH - 6) << QPointF(sx + 4, kTopH - 6) << QPointF(sx, kTopH);
-        p.drawPolygon(tri);
+        p.setBrush(theme::text); p.setPen(Qt::NoPen);
+        QPolygonF start; start << QPointF(sx, kMarkY + 1) << QPointF(sx + 7, kMarkY + kMarkH / 2.0) << QPointF(sx, kTopH - 1);
+        QPolygonF end; end << QPointF(lx1, kMarkY + 1) << QPointF(lx1 - 7, kMarkY + kMarkH / 2.0) << QPointF(lx1, kTopH - 1);
+        p.drawPolygon(start); p.drawPolygon(end);
         p.setRenderHint(QPainter::Antialiasing, false);
+        p.fillRect(QRectF(sx, kMarkY, 1, kMarkH), theme::withAlpha(theme::text, 140));
+        p.fillRect(QRectF(lx1, kMarkY, 1, kMarkH), theme::withAlpha(theme::text, 140));
+        p.restore();
     }
 
     // playhead
     const double px = beatToX(m_transport->beat());
     if (px >= 0 && px < lw) {
-        p.fillRect(QRectF(px, kTopH, 1, H - kTopH), theme::playhead);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        p.setBrush(theme::playhead); p.setPen(Qt::NoPen);
-        QPolygonF tri; tri << QPointF(px - 4, kTopH - 6) << QPointF(px + 4, kTopH - 6) << QPointF(px, kTopH);
-        p.drawPolygon(tri);
+        p.fillRect(QRectF(px, kTopH, 1, height() - kTimeH - kTopH), theme::playhead);
     }
 }
 
@@ -906,7 +1056,7 @@ void ArrangementView::mousePressEvent(QMouseEvent* e) {
         }
         const int i = trackAt(int(pos.y()));
         if (i < 0) {
-            if (pt.y() >= mainLaneTop() && pt.y() < mainLaneTop() + m_returnH) { m_selTrack = laneCount(); emit trackSelected(m_project->trackCount()); update(); }   // the Master
+            if (pt.y() >= mainLaneTop() && pt.y() < mainLaneTop() + m_masterH) { m_selTrack = laneCount(); emit trackSelected(m_project->trackCount()); update(); }   // the Master
             return;
         }
         Track& t = *m_project->trackAt(i);
@@ -983,7 +1133,12 @@ void ArrangementView::mousePressEvent(QMouseEvent* e) {
         update();
         return;
     }
-    if (pos.y() < kBraceY + kBraceH) {                          // ---- loop brace
+    if (pos.y() < kBraceY) {                                    // ---- beat ruler
+        m_drag = Drag::Ruler; m_pressBeat = beat; m_zoom0 = m_zoom;
+        m_userZoomed = true;
+        return;
+    }
+    if (pos.y() < kMarkY) {                                    // ---- loop brace
         const double xs = beatToX(m_transport->loopStart()), xe = beatToX(m_transport->loopStart() + m_transport->loopLength());
         m_loop0 = m_transport->loopStart();
         m_loopLen0 = m_transport->loopLength();
@@ -994,9 +1149,15 @@ void ArrangementView::mousePressEvent(QMouseEvent* e) {
         else { m_transport->setLoop(snap(beat, fine), grid()); m_loop0 = snap(beat, fine); m_drag = Drag::LoopEnd; }
         return;
     }
-    if (pos.y() < kTopH) {                                      // ---- ruler
-        m_drag = Drag::Ruler; m_pressBeat = beat; m_zoom0 = m_zoom;
-        m_userZoomed = true;
+    if (pos.y() < kTopH) {                                     // ---- start / end markers
+        const double xs = beatToX(m_transport->startMarker());
+        const double xe = beatToX(m_transport->loopStart() + m_transport->loopLength());
+        if (std::abs(pos.x() - xs) <= 7) m_drag = Drag::StartMarker;
+        else if (std::abs(pos.x() - xe) <= 7) {
+            m_loop0 = m_transport->loopStart();
+            m_loopLen0 = m_transport->loopLength();
+            m_drag = Drag::LoopEnd;
+        } else { m_transport->setStartMarker(snap(beat, fine)); m_drag = Drag::StartMarker; }
         return;
     }
 
@@ -1024,6 +1185,27 @@ void ArrangementView::mousePressEvent(QMouseEvent* e) {
         m_drag = Drag::Point;
         update();
         return;
+    }
+
+    if (i < nT && m_project->tracks[i].isGroup()) {
+        const ArrangementClip group = groupFadePlacement(i);
+        if (group.length > 0) {
+            const FadeHandles fh = fadeHandles(group, i);
+            auto hit = [&](const QPointF& hp) { return std::abs(pos.x() - hp.x()) <= 6 && std::abs(pos.y() - hp.y()) <= 6; };
+            Drag d = Drag::None;
+            if (group.fadeIn > 0 && hit(fh.inCircle)) d = Drag::FadeInCurve;
+            else if (group.fadeOut > 0 && hit(fh.outCircle)) d = Drag::FadeOutCurve;
+            else if (hit(fh.inSq)) d = Drag::FadeIn;
+            else if (hit(fh.outSq)) d = Drag::FadeOut;
+            if (d != Drag::None) {
+                m_sel = nullptr; m_timeSel.active = false;
+                m_dragTrack = i; m_drag = d;
+                m_project->beginEdit(d == Drag::FadeIn ? "Group Fade In" : d == Drag::FadeOut ? "Group Fade Out" : "Group Fade Curve");
+                m_editOpen = true;
+                update();
+                return;
+            }
+        }
     }
 
     ArrangementClip* a = clipAt(i, beat);
@@ -1117,10 +1299,11 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
         if (pos.x() >= lw) cur = fieldAt(pos.toPoint()).kind != Field::None ? Qt::SizeVerCursor : Qt::PointingHandCursor;
         else if (pos.y() < kOverH) cur = Qt::PointingHandCursor;
         else if (pos.y() < kLocY + kLocH) cur = locatorAt(pos.x()) >= 0 ? Qt::PointingHandCursor : Qt::ArrowCursor;
-        else if (pos.y() < kBraceY + kBraceH) {
+        else if (pos.y() < kBraceY) cur = Qt::SizeVerCursor;
+        else if (pos.y() < kMarkY) {
             const double xs = beatToX(m_transport->loopStart()), xe = beatToX(m_transport->loopStart() + m_transport->loopLength());
             cur = std::abs(pos.x() - xs) <= 5 || std::abs(pos.x() - xe) <= 5 ? Qt::SizeHorCursor : Qt::OpenHandCursor;
-        } else if (pos.y() < kTopH) cur = Qt::SizeVerCursor;
+        } else if (pos.y() < kTopH) cur = Qt::SizeHorCursor;
         else if (m_autoMode) cur = pointAt(trackAt(int(pos.y())), pos) >= 0 ? Qt::SizeAllCursor : Qt::CrossCursor;
         else {
             const int i = trackAt(int(pos.y()));
@@ -1142,7 +1325,16 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
                 else if ((a->start + a->length - b) * m_zoom < 6 || (b - a->start) * m_zoom < 6) cur = Qt::SizeHorCursor;
                 else if (pos.y() < laneTop(i) + 14 || inRange) cur = ctrl ? Qt::DragCopyCursor : Qt::OpenHandCursor;
                 else cur = Qt::IBeamCursor;
-            } else if (i >= 0) cur = Qt::IBeamCursor;
+            } else if (i >= 0) {
+                cur = Qt::IBeamCursor;
+                if (i < m_project->tracks.size() && m_project->tracks[i].isGroup()) {
+                    const ArrangementClip group = groupFadePlacement(i);
+                    const FadeHandles fh = fadeHandles(group, i);
+                    auto hit = [&](const QPointF& hp) { return std::abs(pos.x() - hp.x()) <= 6 && std::abs(pos.y() - hp.y()) <= 6; };
+                    if (group.length > 0 && ((group.fadeIn > 0 && hit(fh.inCircle)) || (group.fadeOut > 0 && hit(fh.outCircle)))) cur = Qt::SizeVerCursor;
+                    else if (group.length > 0 && (hit(fh.inSq) || hit(fh.outSq))) cur = Qt::SizeHorCursor;
+                }
+            }
         }
         setCursor(cur);
         return;
@@ -1170,6 +1362,9 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
     case Drag::Ruler:
         m_zoom = std::clamp(m_zoom0 * PreferencesDialog::dragZoom(pos.y() - m_pressPos.y()), 1.5, 160.0);
         m_offset = std::max(0.0, m_pressBeat - pos.x() / m_zoom);
+        break;
+    case Drag::StartMarker:
+        m_transport->setStartMarker(snap(beat, fine));
         break;
     case Drag::MoveRange: {   // the pieces move together, on the grid; the selection follows them
         const double g = std::max(grid(), m_zoom < 8 ? 4.0 : 1.0);
@@ -1227,6 +1422,13 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
     }
     case Drag::FadeIn:
     case Drag::FadeOut: {   // the square: the fade's length, on the grid (Alt: free), never past the other fade
+        if (m_dragTrack >= 0 && m_dragTrack < m_project->tracks.size() && m_project->tracks[m_dragTrack].isGroup()) {
+            Track& t = m_project->tracks[m_dragTrack];
+            const ArrangementClip group = groupFadePlacement(m_dragTrack);
+            if (m_drag == Drag::FadeIn) t.groupFadeIn = std::clamp(snap(beat, fine) - group.start, 0.0, std::max(0.0, group.length - t.groupFadeOut));
+            else t.groupFadeOut = std::clamp(group.start + group.length - snap(beat, fine), 0.0, std::max(0.0, group.length - t.groupFadeIn));
+            break;
+        }
         if (!validSel()) break;
         const double end = m_sel->start + m_sel->length;
         if (m_drag == Drag::FadeIn) m_sel->fadeIn = std::clamp(snap(beat, fine) - m_sel->start, 0.0, std::max(0.0, m_sel->length - m_sel->fadeOut));
@@ -1235,10 +1437,13 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
     }
     case Drag::FadeInCurve:
     case Drag::FadeOutCurve: {   // the circle: how high the curve is half-way along
-        if (!validSel() || m_dragTrack < 0) break;
+        if (m_dragTrack < 0) break;
         const int y = laneTop(m_dragTrack), h = laneHeight(m_dragTrack);
         const double c = std::clamp((y + h - 2 - pos.y()) / std::max(1.0, h - 15.0), 0.05, 0.95);
-        (m_drag == Drag::FadeInCurve ? m_sel->fadeInCurve : m_sel->fadeOutCurve) = c;
+        if (m_dragTrack < m_project->tracks.size() && m_project->tracks[m_dragTrack].isGroup()) {
+            Track& t = m_project->tracks[m_dragTrack];
+            (m_drag == Drag::FadeInCurve ? t.groupFadeInCurve : t.groupFadeOutCurve) = c;
+        } else if (validSel()) (m_drag == Drag::FadeInCurve ? m_sel->fadeInCurve : m_sel->fadeOutCurve) = c;
         break;
     }
     case Drag::Time: {
@@ -1270,16 +1475,16 @@ void ArrangementView::mouseMoveEvent(QMouseEvent* e) {
         }
         break;
     case Drag::LoopMove:
-        m_transport->setLoop(std::max(0.0, m_loop0 + std::round((beat - m_pressBeat) / grid()) * grid()), m_loopLen0);
+        m_transport->setLoop(std::max(0.0, snap(m_loop0 + beat - m_pressBeat, fine)), m_loopLen0);
         break;
     case Drag::LoopStart: {
         const double end = m_loop0 + m_loopLen0;
-        const double s = std::min(snap(beat, fine), end - grid());
+        const double s = std::max(0.0, std::min(snap(beat, fine), end - (fine ? 0.25 : grid())));
         m_transport->setLoop(s, end - s);
         break;
     }
     case Drag::LoopEnd: {
-        const double e2 = std::max(snap(beat, fine), m_loop0 + grid());
+        const double e2 = std::max(snap(beat, fine), m_loop0 + (fine ? 0.25 : grid()));
         m_transport->setLoop(m_loop0, e2 - m_loop0);
         break;
     }
@@ -1405,7 +1610,7 @@ void ArrangementView::mouseDoubleClickEvent(QMouseEvent* e) {
         }
         int i = trackAt(int(pos.y()));
         if (i >= 0) emit openDeviceView(i);
-        else if (pos.y() >= mainLaneTop() && pos.y() < mainLaneTop() + m_returnH) emit openDeviceView(m_project->trackCount());   // the Master's chain
+        else if (pos.y() >= mainLaneTop() && pos.y() < mainLaneTop() + m_masterH) emit openDeviceView(m_project->trackCount());   // the Master's chain
         return;
     }
     if (pos.y() < kOverH) return;
@@ -1506,6 +1711,13 @@ void ArrangementView::contextMenuEvent(QContextMenuEvent* e) {
         menu.exec(e->globalPos());
         return;
     }
+    if (i < m_project->tracks.size() && m_project->tracks[i].isGroup()) {
+        selectTrack(i); m_sel = nullptr;
+        const Track& group = m_project->tracks[i];
+        menu.addAction("Show Devices", this, [this, i] { emit openDeviceView(i); });
+        menu.addAction("Reset Group Fades", this, [this] { resetFades(); })->setEnabled(group.groupFadeIn > 0 || group.groupFadeOut > 0);
+        menu.addSeparator();
+    }
     const double hereBeat = xToBeat(pos.x());
     ArrangementClip* a = clipAt(i, hereBeat);
     const bool inRange = a && hasTimeSelection() && i >= m_timeSel.lane0 && i <= m_timeSel.lane1 && hereBeat >= m_timeSel.start && hereBeat < m_timeSel.end;
@@ -1579,12 +1791,22 @@ void ArrangementView::contextMenuEvent(QContextMenuEvent* e) {
 
 void ArrangementView::wheelEvent(QWheelEvent* e) {
     QPointF pos = e->position();
-    m_userZoomed = true;
     if (e->modifiers() & Qt::ControlModifier) {
+        m_followResumeAt = QDateTime::currentMSecsSinceEpoch() + 600;
+        m_userZoomed = true;
         double b = xToBeat(pos.x());
         m_zoom = std::clamp(m_zoom * std::exp(e->angleDelta().y() * 0.002), 1.5, 160.0);
         m_offset = std::max(0.0, b - pos.x() / m_zoom);
+    } else if (pos.y() >= returnsTop() && pos.y() < mainLaneTop() && m_returnScroll->maximum() > 0
+               && !e->angleDelta().x() && !(e->modifiers() & Qt::ShiftModifier)) {
+        const int delta = e->pixelDelta().isNull() ? e->angleDelta().y() / 2 : e->pixelDelta().y();
+        m_returnScroll->setValue(m_returnScroll->value() - delta);
+    } else if (m_verticalScroll->maximum() > 0 && !e->angleDelta().x() && !(e->modifiers() & Qt::ShiftModifier)) {
+        const int delta = e->pixelDelta().isNull() ? e->angleDelta().y() / 2 : e->pixelDelta().y();
+        m_verticalScroll->setValue(m_verticalScroll->value() - delta);
     } else {
+        m_followResumeAt = QDateTime::currentMSecsSinceEpoch() + 600;
+        m_userZoomed = true;
         int d = e->angleDelta().x() ? e->angleDelta().x() : e->angleDelta().y();
         m_offset = std::max(0.0, m_offset - d / m_zoom);
     }
@@ -1597,7 +1819,25 @@ void ArrangementView::wheelEvent(QWheelEvent* e) {
 void ArrangementView::selectTrack(int lane) {
     if (lane < 0 || lane > m_project->trackCount()) return;   // trackCount(): the Master lane
     m_selTrack = lane;
+    if (lane < m_project->tracks.size() && laneHeight(lane) > 0 && m_drag != Drag::Header) {
+        const int top = laneTop(lane), bottom = top + laneHeight(lane);
+        if (top < kTopH) m_verticalScroll->setValue(m_verticalScroll->value() + top - kTopH);
+        else if (bottom > returnsTop()) m_verticalScroll->setValue(m_verticalScroll->value() + bottom - returnsTop());
+    } else if (lane >= m_project->tracks.size() && lane < laneCount()) {
+        const int top = laneTop(lane), bottom = top + laneHeight(lane);
+        if (top < returnsTop()) m_returnScroll->setValue(m_returnScroll->value() + top - returnsTop());
+        else if (bottom > mainLaneTop()) m_returnScroll->setValue(m_returnScroll->value() + bottom - mainLaneTop());
+    }
     update();
+}
+
+void ArrangementView::setFollow(bool on) {
+    if (m_follow == on) return;
+    m_follow = on;
+    m_followButton->setChecked(on);
+    QSettings("Sessions", "Sessions").setValue("arrangement/follow", on);
+    update();
+    emit followChanged(on);
 }
 
 void ArrangementView::setAutomationMode(bool on) {
@@ -1983,7 +2223,7 @@ int ArrangementView::deviceLaneAt(int y) const {
     if (y < kTopH || y >= height() - kTimeH) return -2;
     const int lane = trackAt(y);
     if (lane >= 0) return lane;
-    if (y >= mainLaneTop() && y < mainLaneTop() + m_returnH) return m_project->trackCount();   // the Master lane: its chain
+    if (y >= mainLaneTop() && y < mainLaneTop() + m_masterH) return m_project->trackCount();   // the Master lane: its chain
     return -1;   // the return lanes, below the Master: a new track (0.26: anywhere that isn't a track)
 }
 

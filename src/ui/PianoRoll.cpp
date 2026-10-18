@@ -28,7 +28,10 @@ PianoRoll::PianoRoll(Project* project, Transport* transport, QWidget* parent)
     setFocusPolicy(Qt::ClickFocus);
     setMinimumHeight(120);
     InfoView::attach(this, "MIDI Note Editor", "Double-click to add or delete notes. Drag to move, drag a note's right edge to lengthen, drag empty space to box-select. Alt ignores the grid. Drag the ruler to zoom, wheel scrolls pitch. Drag stems in the Vel lane.");
-    connect(transport, &Transport::tick, this, [this] { if (m_transport->playing() && m_clip) update(); });
+    connect(transport, &Transport::tick, this, [this] {
+        followPlayhead();
+        if (m_transport->playing() && m_clip) update();
+    });
     connect(project, &Project::restored, this, [this] {   // undo replaced the notes: indices are stale
         m_selected.clear();
         m_orig.clear();
@@ -146,6 +149,24 @@ void PianoRoll::setViewport(double first, double last) {
     update();
 }
 
+void PianoRoll::setFollow(bool on) {
+    m_follow = on;
+    followPlayhead();
+    update();
+}
+
+void PianoRoll::followPlayhead() {
+    if (!m_follow || !m_clip || !m_transport->playing() || m_drag != Drag::None || width() <= m_keyW) return;
+    const double beat = m_project->clipPosition(m_clip, m_transport->beat());
+    if (beat < 0) return;
+    const double span = (width() - m_keyW) / m_zoom;
+    if (beat < m_offset || beat >= m_offset + span - std::min(12.0 / m_zoom, span * 0.1)) {
+        // Keep the start of the pattern in view after a loop returns to its first page.
+        m_offset = beat < m_offset && beat < span * 0.9 ? 0.0 : beat - span * 0.08;
+        clampView();
+    }
+}
+
 void PianoRoll::clampView() {
     if (!m_clip) return;
     const double visible = std::max(0.0, (width() - m_keyW) / m_zoom);
@@ -231,6 +252,7 @@ void PianoRoll::paintEvent(QPaintEvent*) {
     const int gridH = R * m_rowH;
     const int owner = ownerTrack();
     const QColor col = owner >= 0 ? m_project->clipColor(m_clip) : theme::accent;
+    const QColor marker = theme::text;
     QFont small = font(); small.setPointSizeF(7);
 
     // rows + keys; with a scale, in-scale rows are lit and the root is marked
@@ -300,8 +322,8 @@ void PianoRoll::paintEvent(QPaintEvent*) {
     }
     // the start marker and the end marker, as lines down the grid
     const double xs = beatToX(m_clip->start), xl = beatToX(m_clip->loopStart);
-    p.fillRect(QRectF(xs, m_rulerH, 1, gridH), theme::withAlpha(col, 140));
-    p.fillRect(QRectF(endX, m_rulerH, 1, gridH), theme::withAlpha(col, 140));
+    p.fillRect(QRectF(xs, m_rulerH, 1, gridH), theme::withAlpha(marker, 140));
+    p.fillRect(QRectF(endX, m_rulerH, 1, gridH), theme::withAlpha(marker, 140));
     // playhead inside the clip (the start marker and the brace: Project::clipPosition)
     if (owner >= 0 && m_transport->playing()) {
         const double pos = m_project->clipPosition(m_clip, m_transport->beat());
@@ -310,7 +332,7 @@ void PianoRoll::paintEvent(QPaintEvent*) {
     if (m_drag == Drag::Box) { p.setPen(QPen(theme::boxSelect, 1, Qt::DashLine)); p.setBrush(Qt::NoBrush); p.drawRect(m_box.normalized()); }
     p.restore();
 
-    // ruler: the loop brace on top (the clip's colour, handles at its ends; faded with Loop off), the bar numbers,
+    // ruler: the neutral loop brace on top (handles at its ends; faded with Loop off), the bar numbers,
     // then the ▶ start and ◀ end markers over them
     p.fillRect(QRect(0, 0, W, m_rulerH), theme::ruler);
     p.setPen(theme::rollRulerText); p.setFont(small);
@@ -320,14 +342,13 @@ void PianoRoll::paintEvent(QPaintEvent*) {
         p.drawText(x + 3, 11, QString::number(b / 4 + 1));
     }
     {
-        QColor brace = col;
-        if (!m_clip->loop) brace.setAlphaF(0.45);
+        const QColor brace = m_clip->loop ? marker : theme::withAlpha(marker, 115);
         const double l0 = std::max(double(m_keyW), xl);
         p.fillRect(QRectF(l0, 0, std::max(0.0, endX - l0), 3), brace);
-        p.fillRect(QRectF(xl, 0, 2, 5), col);
-        p.fillRect(QRectF(endX - 2, 0, 2, 5), col);
+        p.fillRect(QRectF(xl, 0, 2, 5), marker);
+        p.fillRect(QRectF(endX - 2, 0, 2, 5), marker);
         p.setRenderHint(QPainter::Antialiasing, true);
-        p.setPen(Qt::NoPen); p.setBrush(col);
+        p.setPen(Qt::NoPen); p.setBrush(marker);
         QPolygonF startTri; startTri << QPointF(xs, 5) << QPointF(xs + 7, 9) << QPointF(xs, 13);
         QPolygonF endTri; endTri << QPointF(endX, 5) << QPointF(endX - 7, 9) << QPointF(endX, 13);
         p.drawPolygon(startTri);
