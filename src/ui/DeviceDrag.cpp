@@ -135,6 +135,14 @@ bool wouldConvert(const Project& p, int track, const Project::DeviceBlocks& bloc
 }
 }
 
+bool accepts(const Project& p, const Payload& pl, int track, const Project::DevicePlace& at, QString* why);
+
+bool newTrackAfter(const Project& p, const Payload& pl, int track) {
+    if (track < 0 || track >= p.tracks.size() || pl.source == Payload::Devices) return false;   // moving panels keeps its rules
+    const Project::DeviceBlocks blocks = shape(p, pl);
+    return !blocks.isEmpty() && needsMidi(blocks) && !accepts(p, pl, track);
+}
+
 bool accepts(const Project& p, const Payload& pl, int track, const Project::DevicePlace& at, QString* why) {
     const Project::DeviceBlocks blocks = shape(p, pl);
     if (blocks.isEmpty()) { if (why) *why = pl.source == Payload::Preset ? "The preset can't be read." : "Those devices aren't there any more."; return false; }
@@ -148,7 +156,7 @@ bool accepts(const Project& p, const Payload& pl, int track, const Project::Devi
     return false;
 }
 
-Result drop(Project& p, const Payload& pl, int track, const Project::DevicePlace& at, bool copy) {
+Result drop(Project& p, const Payload& pl, int track, const Project::DevicePlace& at, bool copy, int after) {
     Result r;
     const Project::DeviceBlocks blocks = shape(p, pl);
     const QString what = pl.source == Payload::Devices && blocks.size() > 1 ? QString("%1 devices").arg(blocks.size()) : pl.name.isEmpty() && !blocks.isEmpty() ? blocks.first().first().name : pl.name;
@@ -181,7 +189,7 @@ Result drop(Project& p, const Payload& pl, int track, const Project::DevicePlace
     Project::DevicePlace place = at;
     if (track < 0) {
         scope = std::make_unique<EditScope>(&p, verb + what);
-        track = p.insertTrackFor(blocks, pl.source == Payload::Devices ? blocks.first().first().name : pl.name);
+        track = p.insertTrackFor(blocks, pl.source == Payload::Devices ? blocks.first().first().name : pl.name, after);
         place = {};
     }
     QString why;

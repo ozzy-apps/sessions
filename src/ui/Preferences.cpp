@@ -255,17 +255,15 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     for (int pct : {100, 125, 150, 175, 200}) zoom->addItem(QString("%1 %").arg(pct), pct / 100.0);
     const double z = settings().value("ui/zoom", 1.0).toDouble();
     for (int i = 0; i < zoom->count(); ++i) if (std::abs(zoom->itemData(i).toDouble() - z) < 0.01) zoom->setCurrentIndex(i);
-    auto* restart = new QPushButton("Restart Now", lookTab);
-    restart->setObjectName("restartNow");
-    restart->setEnabled(false);
-    auto* zoomBox = new QWidget(lookTab); auto* zl = new QHBoxLayout(zoomBox); zl->setContentsMargins(0, 0, 0, 0); zl->setSpacing(8);
-    zl->addWidget(zoom, 1); zl->addWidget(restart);
-    rows->addWidget(row("Zoom", zoomBox, "The whole interface, larger (for 1440p and 4K screens). It applies when Sessions restarts; the set reopens as it is.", lookTab));
-    connect(zoom, &QComboBox::activated, this, [zoom, restart] {
-        QSettings("Sessions", "Sessions").setValue("ui/zoom", zoom->currentData().toDouble());
-        restart->setEnabled(true);
+    rows->addWidget(row("Zoom", zoom, "The whole interface, larger (for 1440p and 4K screens). It applies at once: Sessions reloads with the set as it is, "
+                                      "unsaved changes included and the window where it was; only the undo history starts over.", lookTab));
+    connect(zoom, &QComboBox::activated, this, [this, zoom, restartForZoom] {
+        const double z = zoom->currentData().toDouble();
+        if (std::abs(z - settings().value("ui/zoom", 1.0).toDouble()) < 0.01) return;
+        QSettings("Sessions", "Sessions").setValue("ui/zoom", z);
+        accept();
+        if (restartForZoom) restartForZoom();
     });
-    connect(restart, &QPushButton::clicked, this, [this, restartForZoom] { accept(); if (restartForZoom) restartForZoom(); });
     auto* zoomDir = new QComboBox(lookTab);
     zoomDir->setObjectName("zoomDragDirection");
     zoomDir->addItem("Drag down to zoom in", false);

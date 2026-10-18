@@ -28,6 +28,7 @@ enum class DeviceType {
     Twang, PhasePedal, ChorusPedal, Wah, Nam, Cabinet,
     // MIDI effects
     Arpeggiator, Chord, Scale, Velocity, MidiEffectRack,
+    Osmium,
 };
 
 // Drum Rack: Volume and Velocity, then five knobs per pad. Pad k plays on MIDI note 36 + k
@@ -135,6 +136,13 @@ QString     sectionName(int param);   // "Osc 1", "Filter 2", "Env 3", … for m
 }
 // The modulation routes a Sound (preset) of the Monolith comes with.
 const std::vector<ModRoute>& presetMods(const QString& name);
+
+// Osmium shares Monolith's parameter/source indices and adds independent ADSR segment bends.
+namespace osmium {
+constexpr int kEnvBendBase = monolith::kParams;
+constexpr int bend(int env, int segment) { return kEnvBendBase + env * 3 + segment; }
+constexpr int kParams = kEnvBendBase + monolith::kEnvs * 3;
+}
 
 // Macros: eight knobs, each turning any number of parameters of the track's other devices
 // between a minimum and a maximum (Device::maps).

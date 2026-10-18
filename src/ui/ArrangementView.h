@@ -49,6 +49,8 @@ struct ArrangementClip;
 class ArrangementView : public QWidget {
     Q_OBJECT
 public:
+    int    laneTop(int i) const;      // a lane's top in widget pixels (tests, the device-drop line)
+    int    laneHeight(int i) const;
     ArrangementView(Project* project, Transport* transport, QWidget* parent = nullptr);
 
     // Edit commands (Edit menu / shortcuts).
@@ -131,8 +133,6 @@ protected:
 
 private:
     int    laneWidth() const { return width() - m_headerW; }
-    int    laneTop(int i) const;
-    int    laneHeight(int i) const;
     int    trackAt(int y) const;      // lane index (tracks then returns), -1 outside
     ArrangementClip* clipAt(int track, double beat);
     ArrangementClip* validSel();      // m_sel, if it still points into the model
@@ -179,6 +179,7 @@ private:
     bool   m_lastOverridden = false;   // whether any track was overridden at the last tick (a change repaints)
     int    m_dropLane = -2;        // a file drag hovers this lane (-1: below the tracks), -2: none
     int    m_deviceLane = -2;      // a device drag hovers this lane (-1: a new track), -2: none
+    int    m_deviceAfter = -1;     // with m_deviceLane -1: the new track goes right after this lane (an instrument over an audio track with clips)
     int    deviceLaneAt(int y) const;   // where a device dropped at y goes: a lane, -1 a new track, -2 nowhere
     double m_dropBeat = 0;
     static constexpr int kOverH = 22, kLocY = kOverH, kLocH = 14, kBraceY = kLocY + kLocH, kBraceH = 6, kRulerH = 16;

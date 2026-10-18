@@ -246,8 +246,12 @@ struct ModRoute {
 inline bool operator==(const ModRoute& a, const ModRoute& b) { return a.source == b.source && a.param == b.param && a.amount == b.amount; }
 inline bool operator!=(const ModRoute& a, const ModRoute& b) { return !(a == b); }
 // A point of one of the Monolith's drawable curves (0.21): x along the curve (0 .. 1 of its length), y its value (0 .. 1).
-struct CurvePoint { double x = 0, y = 0; };
-inline bool operator==(const CurvePoint& a, const CurvePoint& b) { return a.x == b.x && a.y == b.y; }
+struct CurvePoint {
+    double x = 0, y = 0;
+    double bend = 0;  // outgoing segment: -1 fast start .. +1 slow start
+    int shape = 0;    // 0 bent line, 1 smooth S, 2 hold
+};
+inline bool operator==(const CurvePoint& a, const CurvePoint& b) { return a.x == b.x && a.y == b.y && a.bend == b.bend && a.shape == b.shape; }
 inline bool operator!=(const CurvePoint& a, const CurvePoint& b) { return !(a == b); }
 
 // A rack chain's zone: the values (0 .. 127: a note, a velocity, the Chain selector) it answers
@@ -486,7 +490,7 @@ public:
     bool canPlace(int to, const DeviceBlocks& blocks, const DevicePlace& at, QString* why = nullptr) const;
     // A new track after the last one (outside any group) for `blocks`: MIDI when one of them is
     // an instrument or a MIDI effect, else audio; named `name`. Returns its index.
-    int    insertTrackFor(const DeviceBlocks& blocks, const QString& name);
+    int    insertTrackFor(const DeviceBlocks& blocks, const QString& name, int after = -1);   // after: the index it follows (in that track's group); -1 = after the last, outside groups
     bool   deleteDevices(int trackIndex, const QList<int>& ids);   // racks go with their chains
     void   setDeviceFolded(int trackIndex, int deviceId, bool folded);
 

@@ -12,6 +12,7 @@ std::shared_ptr<DeviceProcessor> createInstrument(DeviceType type, float sampleR
 std::shared_ptr<DeviceProcessor> createEffect(DeviceType type, float sampleRate);
 std::shared_ptr<DeviceProcessor> createGuitar(DeviceType type, float sampleRate);   // Guitar.cpp
 std::shared_ptr<DeviceProcessor> createMonolith(float sampleRate);                   // Monolith.cpp
+std::shared_ptr<DeviceProcessor> createOsmium(float sampleRate);                     // Monolith.cpp, independent envelope segments
 std::shared_ptr<DeviceProcessor> createNam(float sampleRate);                        // Nam.cpp
 std::shared_ptr<DeviceProcessor> createDrumStudio(float sampleRate);                 // DrumStudio.cpp
 

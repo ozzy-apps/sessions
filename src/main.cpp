@@ -54,10 +54,14 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; ++i)
         if (!std::strcmp(argv[i], "--render")) return renderDemo(argc, argv, i);
 
-    // UI zoom (View > Zoom) has to be in place before QApplication exists.
+    // UI zoom (View > Zoom, Preferences > Look) has to be in place before QApplication exists. A
+    // QT_SCALE_FACTOR you set yourself wins; one Sessions set (marked, so a restarted Sessions
+    // inheriting it still applies the new zoom: before 0.26 a zoom change showed only after a second start).
     const double zoom = QSettings("Sessions", "Sessions").value("ui/zoom", 1.0).toDouble();
-    if (zoom > 0 && zoom != 1.0 && !qEnvironmentVariableIsSet("QT_SCALE_FACTOR"))
-        qputenv("QT_SCALE_FACTOR", QByteArray::number(zoom));
+    if (!qEnvironmentVariableIsSet("QT_SCALE_FACTOR") || qEnvironmentVariableIsSet("SESSIONS_SCALE_FROM_SETTINGS")) {
+        if (zoom > 0 && zoom != 1.0) { qputenv("QT_SCALE_FACTOR", QByteArray::number(zoom)); qputenv("SESSIONS_SCALE_FROM_SETTINGS", "1"); }
+        else { qunsetenv("QT_SCALE_FACTOR"); qunsetenv("SESSIONS_SCALE_FROM_SETTINGS"); }
+    }
 
     QApplication app(argc, argv);
     Q_INIT_RESOURCE(resources);   // the .qrc lives in the static sessions_core library

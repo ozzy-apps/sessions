@@ -1,5 +1,16 @@
 # Sessions — handoff
 
+## In progress · Osmium instrument · 2026-10-18
+
+**Last updated:** 2026-10-18 · **Milestone 26 done (an instrument or MIDI effect dropped on a track that can't take it, an audio track with clips, lands on a new MIDI track right beside it, in the Session View and the Arrangement, and the Arrangement's return / Master band makes a new track too; the interface zoom applies at once, as a reload that keeps the set and the window, and a restarted Sessions no longer inherits the old scale)**, after **Milestone 25** (your icon, Preferences with a sidebar, clean buttons) · v0.26.0 · 49k lines · builds clean on Qt 6.4, all 1018 smoke checks pass · ships a .deb on every build · `docs/test-checklist.md` lists what to try by hand.
+
+1. Inspect existing Monolith, device registration, undo, persistence and panel constraints (done). Monolith has 170 parameters, 26 sources, two 32-point linear curves; rack bodies are 192 px tall.
+2. Register Osmium separately, reuse proven wavetable DSP, add independent envelope segment bends and persistent curved/hold/smooth curve segments. Keep Monolith's defaults and UI unchanged.
+3. Build a Material 3 inspired floating editor plus compact rack panel: direct source selection/dragging, draggable green modulation arcs, envelope handles and curve tension handles, source/route inspection, voice/FX and macro controls.
+4. Add meaningful UI/audio/persistence/undo coverage, build and run smoke checks, capture and inspect editor screenshots, update README and this handoff with outcomes and remaining work.
+
+Next AI: start with this section while this work is in progress. Do not replace other changes or assume the older milestone count below describes the dirty workspace.
+
 A clip-based DAW in C++17 / Qt 6 Widgets, built around a Session grid and an Arrangement timeline. This file is the running log between iterations: what exists, how it's built, and what to do next. Read it first, then `src/ui/MainWindow.cpp` for how the UI connects and `src/audio/Engine.h` for how sound gets made.
 
 **Last updated:** 2026-10-18 · **Milestone 25 done (the app icon is yours to pick: six colour treatments in Preferences > Look, the window icon, a per-user desktop entry and the About logo follow; Preferences rebuilt as a sidebar of categories with pages of labelled rows; dialog buttons without icons, flat message-box glyphs, a menu pass)**, after **Milestone 24** (the logo, the About, launching after a stop) · v0.25.0 · 49k lines · builds clean on Qt 6.4, all 1012 smoke checks pass · ships a .deb on every build · `docs/test-checklist.md` lists what to try by hand.
@@ -1273,7 +1284,7 @@ After 0.24: "preserve the other icons as well, and have an option in preferences
 
 ### Preferences (`ui/Preferences.cpp`)
 
-- A `QListWidget#prefsSidebar` (172 px, the categories: Audio, Record, MIDI, Look, Startup) drives a `QStackedWidget#prefsPages`; the page you were on is remembered (`prefs/page`). A page is a title (`#prefsTitle`) over rows: `row(label, control, hint, parent)` puts the setting's name in a 150 px left column (`#prefsRowLabel`), the control(s) and a dim note on the right, a hairline under (`QWidget#prefsRow`). The JACK box groups the ports as **Outputs** and **Inputs** rows; the PulseAudio box and the status (now a **Status** row) as before; the MIDI list is an **Inputs** row; Look has **Zoom** (with Restart Now beside it), **Zoom drag** and **App icon**: six `QToolButton#iconChoice` (icon 48 px, the name under, the chosen one outlined in the accent; property `iconKey`), a click is `appicon::setCurrent`. The footer (`#prefsFooter`) holds a plain **Close** (`#prefsClose`), no `QDialogButtonBox`. Every control keeps its object name (`audioSystem`, `audioFrames`, `jackPort0..3`, `audioDevice`, `audioBuffer`, `inputDevice`, `countIn`, `midiPorts`, `zoomDragDirection`), plus `uiZoom`, `restartNow`, `rescanPorts`.
+- A `QListWidget#prefsSidebar` (172 px, the categories: Audio, Record, MIDI, Look, Startup) drives a `QStackedWidget#prefsPages`; the page you were on is remembered (`prefs/page`). A page is a title (`#prefsTitle`) over rows: `row(label, control, hint, parent)` puts the setting's name in a 150 px left column (`#prefsRowLabel`), the control(s) and a dim note on the right, a hairline under (`QWidget#prefsRow`). The JACK box groups the ports as **Outputs** and **Inputs** rows; the PulseAudio box and the status (now a **Status** row) as before; the MIDI list is an **Inputs** row; Look has **Zoom** (0.26: it applies at once), **Zoom drag** and **App icon**: six `QToolButton#iconChoice` (icon 48 px, the name under, the chosen one outlined in the accent; property `iconKey`), a click is `appicon::setCurrent`. The footer (`#prefsFooter`) holds a plain **Close** (`#prefsClose`), no `QDialogButtonBox`. Every control keeps its object name (`audioSystem`, `audioFrames`, `jackPort0..3`, `audioDevice`, `audioBuffer`, `inputDevice`, `countIn`, `midiPorts`, `zoomDragDirection`), plus `uiZoom`, `rescanPorts`.
 
 ### Buttons, menus, message boxes (`Theme.cpp` stylesheet, `theme::installAppStyle`)
 
@@ -1286,7 +1297,26 @@ After 0.24: "preserve the other icons as well, and have an option in preferences
 - M25 icon: six variants and the default for an unknown key; choosing one saves it, sets the window icon and writes the desktop entry (icon path, `StartupWMClass`, the marker) and the SVG under a scratch `XDG_DATA_HOME`; the About logo's top-left segment takes the variant's colour and the wordmark the ink; Playing's grey clips take the ink; the default removes the override.
 - M25 prefs: five categories drive five pages (no QTabWidget), the page is remembered, six icon buttons with the current one checked, a click changes the app's icon, a plain Close and the old controls by name; the stylesheet carries the no-icon rule and the sidebar; the proxy style answers the hint and draws the glyphs.
 
-## Milestone 26: next
+## Milestone 26: instruments land anywhere, the zoom applies at once (done)
+
+After 0.25: "I can't drag an instrument like Monolith to a new track or empty space; it only allows me to drag it into the Device View. It needs to be as flexible as audio samples" and "the zoom should be done without restarting; besides, clicking Yes to restart restarts, but doesn't show the new zoom level until you close the app and start it again".
+
+### Device drops (`DeviceDrag` `newTrackAfter`, `drop(…, after)`, `Project::insertTrackFor(blocks, name, after)`)
+
+- The Session grid, the mixer strips and the Arrangement lanes already took devices (M11 / M21: on a track, the free space and the Master column make a new track, an empty audio track converts). What was refused with a "forbidden" cursor was an instrument or a MIDI effect over a track that can't take it and can't convert: an audio track with clips, a group, a return. Now `newTrackAfter` says so and the drop goes on a **new MIDI track right after that track** (`insertTrackFor` with `after`: the track is inserted at `after + 1` and joins that track's group), named after the device, holding it, one undo step. The Session grid shows an accent bar with "New track" at the column's right edge (`m_dropAfter`), the Arrangement a line under the lane (`m_deviceAfter`).
+- The Arrangement's `deviceLaneAt`: anything in the lane area that isn't a track or the Master lane (the return lanes, below the Master) is a new track at the end; it used to refuse the return band.
+- Moving device panels (`Payload::Devices`) keeps its rules: a panel refused by a track stays refused.
+
+### The zoom (`main.cpp`, `MainWindow::restartReopeningSet`, View > Zoom, Preferences > Look > Zoom)
+
+- The interface scale (`QT_SCALE_FACTOR`) is fixed when Qt starts, so a zoom change is a reload: View > Zoom and the Preferences' Zoom now apply at once, without the question. `restartReopeningSet` saves the window state first (the new instance opens where the old one was), snapshots the set as before (unsaved changes included), and starts the new instance through a `QProcess` whose environment has `QT_SCALE_FACTOR` and the marker removed.
+- The bug: `main()` set `QT_SCALE_FACTOR` from the setting and the restarted instance inherited it, saw it set and left it alone, so the new zoom showed only after a second, manual start. Now the variable Sessions sets is marked (`SESSIONS_SCALE_FROM_SETTINGS`), and a marked one is always re-derived from the setting (unset at 100 %); a `QT_SCALE_FACTOR` you set yourself still wins. Checked offscreen: a child inheriting 1.25 with the marker and a 1.5 setting renders at 1.5; without the marker, 1.25 stays.
+
+### Tests (6 new; 1018 in all)
+
+- M26 drop: `newTrackAfter` for an audio track with a clip (not for a MIDI track); synthesized drag events on the Session grid's column and the Arrangement's lane land Monolith on a new MIDI track right after it, one undo step; `insertTrackFor(after)` joins the group; Preferences' Zoom has no Restart Now button.
+
+## Milestone 27: next
 
 - A note clipboard for the piano roll; the envelope editor showing the brace and ▶; Set 1.1.1 Here moving the markers with the audio.
 - Monolith: a compact main panel for narrow screens, a free delay time, reverb pre-delay / damping, chorus feedback, unison up to 8 (a new choice parameter: the old one can't grow).

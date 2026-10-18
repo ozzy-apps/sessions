@@ -76,6 +76,7 @@
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QDragEnterEvent>
+#include <QDragMoveEvent>
 #include <QDropEvent>
 #include <QLabel>
 #include <QDialog>
@@ -8166,6 +8167,59 @@ int main(int argc, char** argv) {
         appicon::setCurrent(was);
         QSettings("Sessions", "Sessions").remove("prefs/page");
         qunsetenv("XDG_DATA_HOME");
+    }
+
+    // ================================================================ Milestone 26: instruments land anywhere, the zoom applies at once
+    {
+        MainWindow w;
+        w.resize(1400, 900);
+        w.show();
+        QApplication::processEvents();
+        Project* p = w.project();
+        // an audio track with a clip: it can't take an instrument and can't become a MIDI track
+        const int audioAt = p->tracks.size();
+        p->addTrack("Guitar", QColor("#f2905e"));
+        p->tracks[audioAt].type = TrackType::Audio;
+        p->tracks[audioAt].clipSlots[0] = p->newClip("Riff", 4);
+        emit p->structureChanged();
+        QApplication::processEvents();
+        auto itemMime = [](const char* payload) { auto* m = new QMimeData; m->setData(Browser::mimeType(), payload); m->setText("x"); return m; };
+        auto dragTo = [&](QWidget* target, const QPoint& at, const char* payload) {   // enter, move, drop; true when the drop was accepted
+            QMimeData* m = itemMime(payload);
+            QDragEnterEvent en(at, Qt::CopyAction, m, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &en);
+            QDragMoveEvent mv(at, Qt::CopyAction, m, Qt::LeftButton, Qt::NoModifier);
+            QApplication::sendEvent(target, &mv);
+            bool ok = false;
+            if (mv.isAccepted()) { QDropEvent dr(at, Qt::CopyAction, m, Qt::LeftButton, Qt::NoModifier); QApplication::sendEvent(target, &dr); ok = dr.isAccepted(); }
+            delete m;
+            return ok;
+        };
+        devicedrag::Payload mono = devicedrag::parse(itemMime("Monolith|i"));
+        CHECK((devicedrag::newTrackAfter(*p, mono, audioAt) && !devicedrag::accepts(*p, mono, audioAt) && !devicedrag::newTrackAfter(*p, mono, 0)), "M26 drop: an instrument over an audio track with clips goes on a new track after it (a MIDI track takes it itself)");
+        ClipGrid* g = w.sessionView()->grid();
+        const int before = p->tracks.size();
+        const bool sessionOk = dragTo(g, QPoint(g->columnLeft(audioAt) + g->columnWidth(audioAt) / 2, 60), "Monolith|i");
+        const bool landed = p->tracks.size() == before + 1 && p->tracks[audioAt + 1].type == TrackType::Midi && p->tracks[audioAt + 1].name == "Monolith"
+                            && !p->tracks[audioAt + 1].devices.isEmpty() && p->tracks[audioAt + 1].devices[0].name == "Monolith" && p->tracks[audioAt].type == TrackType::Audio;
+        CHECK((sessionOk && landed), "M26 drop: Session View: Monolith dropped on the audio track's column lands on a new MIDI track right after it");
+        p->undoStack()->undo();
+        CHECK((p->tracks.size() == before), "M26 drop: one undo step takes the new track away");
+        for (QAction* a : w.findChildren<QAction*>()) if (a->text().startsWith("Toggle Session")) a->trigger();
+        QApplication::processEvents();
+        ArrangementView* arr = w.arrangementView();
+        const bool arrOk = dragTo(arr, QPoint(40, arr->laneTop(audioAt) + arr->laneHeight(audioAt) / 2), "Monolith|i");
+        CHECK((arrOk && p->tracks.size() == before + 1 && p->tracks[audioAt + 1].type == TrackType::Midi && p->tracks[audioAt + 1].devices.value(0).name == "Monolith"),
+              "M26 drop: Arrangement: Monolith dropped on the audio track's lane lands on a new MIDI track under it");
+        p->undoStack()->undo();
+        // a group: the new track joins it
+        const int n = p->tracks.size();
+        Project::DeviceBlocks blocks = devicedrag::shape(*p, mono);
+        const int idx = p->insertTrackFor(blocks, "Beside", 0);
+        CHECK((idx == 1 && p->tracks.size() == n + 1 && p->tracks[1].name == "Beside" && p->tracks[1].groupId == p->tracks[0].groupId), "M26 drop: insertTrackFor(after) puts the track right after that one, in its group");
+        p->undoStack()->undo();
+        PreferencesDialog prefs(w.engine(), w.midiInput(), {}, &w);
+        CHECK((prefs.findChild<QComboBox*>("uiZoom") && !prefs.findChild<QPushButton*>("restartNow")), "M26 zoom: Preferences' Zoom applies at once (no Restart Now button)");
     }
 
     std::printf("%d failure(s)\n", failures);

@@ -323,6 +323,14 @@ Get a few captures: [tonehunt.org](https://tonehunt.org) (free `.nam` files; "st
 5. Dialog buttons: File → New Set with unsaved changes → Save / Discard / Cancel are plain buttons in the app's style, no desktop icons; the default one has the orange border; the question mark is a flat orange disc. The same in Preferences' Close, About's OK, the Zoom restart question, the theme editor's buttons, the export dialog.
 6. Menus: File, Edit, View, Help → the panel colour, the orange highlight, greyed-out items (Undo with nothing to undo) read as disabled, separators inset. Right-click menus in the Session View, the Arrangement and the device chain look the same.
 
+## 23. Instruments land anywhere, the zoom applies at once (0.26)
+
+1. Browser → Instruments → drag **Monolith** over the Session View: over an empty MIDI track's column → the column outlines, drop → the instrument is on it (the Device View opens). Over a MIDI track that has an instrument → drop → it replaces the instrument, the clips stay. Over an **audio track with clips** → an orange bar with "New track" at the column's right edge, drop → a new MIDI track named Monolith right after it, holding Monolith; Ctrl+Z takes it away. Over the free space before the returns → "Drop Files, Samples and Devices Here" lights, drop → a new track at the end. Over the Master column → a new track too.
+2. The same in the Arrangement: over a MIDI lane → the lane outlines; over an audio lane with clips → a line under it with "New track", drop → the new track under it; over the return lanes or under the Master → "New track" dashed at the bottom, drop → a new track at the end. The mixer strips in the Session View behave like their columns.
+3. A Sound (Browser → Sounds), a MIDI effect (Arpeggiator) and a preset of yours do the same. Dragging a device *panel* by its title onto an audio track with clips is still refused (panels move by their own rules).
+4. View → Zoom → 125 % → Sessions reloads at once at 125 %, the set as it was (unsaved changes included), the window where it was, the same view; only Ctrl+Z has nothing to undo. Zoom → 100 % → it reloads at 100 % right away (before 0.26 this needed a second, manual start). Preferences → Look → Zoom does the same.
+5. With `QT_SCALE_FACTOR=1.25 sessions` from a terminal, View → Zoom reloads but your 1.25 stays: the environment wins.
+
 ## How to tell me what you found
 
 For each problem: the section and number (e.g. "4.3"), what you did, what happened, and what you expected. For sound problems, which device and settings, and whether it's a click, crackle, noise, distortion, a wrong level or a delay. If something crashed, say what you clicked last.

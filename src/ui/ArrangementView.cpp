@@ -742,6 +742,12 @@ void ArrangementView::paintEvent(QPaintEvent*) {
         p.setPen(QPen(theme::accent, 2));
         p.setBrush(Qt::NoBrush);
         p.drawRect(QRect(0, laneTop(m_deviceLane), width(), laneHeight(m_deviceLane)).adjusted(1, 1, -1, -1));
+    } else if (m_deviceLane == -1 && m_deviceAfter >= 0 && m_deviceAfter < m_project->tracks.size()) {
+        const int y = laneTop(m_deviceAfter) + laneHeight(m_deviceAfter);
+        p.setPen(QPen(theme::accent, 3));
+        p.drawLine(0, y, width(), y);
+        p.setPen(theme::accent);
+        p.drawText(QPointF(10, y - 5), "New track");
     } else if (m_deviceLane == -1) {
         const int y0 = mainLaneTop();
         p.setPen(QPen(theme::accent, 2, Qt::DashLine));
@@ -1859,15 +1865,19 @@ int ArrangementView::deviceLaneAt(int y) const {
     const int lane = trackAt(y);
     if (lane >= 0) return lane;
     if (y >= mainLaneTop() && y < mainLaneTop() + m_returnH) return m_project->trackCount();   // the Master lane: its chain
-    return y >= mainLaneTop() ? -1 : -2;   // below it: a new track
+    return -1;   // the return lanes, below the Master: a new track (0.26: anywhere that isn't a track)
 }
 
 void ArrangementView::dragMoveEvent(QDragMoveEvent* e) {
     if (const devicedrag::Payload pl = devicedrag::parse(e->mimeData()); pl.valid()) {
         int lane = deviceLaneAt(int(e->position().y()));
+        int after = -1;
         if (lane == m_project->trackCount() && !devicedrag::accepts(*m_project, pl, lane)) lane = -1;   // the Master takes effects only: anything else makes a new track
-        if (lane >= 0 && !devicedrag::accepts(*m_project, pl, lane)) lane = -2;
-        if (lane != m_deviceLane) { m_deviceLane = lane; update(); }
+        if (lane >= 0 && !devicedrag::accepts(*m_project, pl, lane)) {
+            if (devicedrag::newTrackAfter(*m_project, pl, lane)) { after = lane; lane = -1; }   // an instrument over an audio track with clips: a new MIDI track under it
+            else lane = -2;
+        }
+        if (lane != m_deviceLane || after != m_deviceAfter) { m_deviceLane = lane; m_deviceAfter = after; update(); }
         if (lane == -2) { e->ignore(); return; }
         if (pl.source == devicedrag::Payload::Devices) { e->setDropAction(devicedrag::copying(e) ? Qt::CopyAction : Qt::MoveAction); e->accept(); }
         else e->acceptProposedAction();
@@ -1882,17 +1892,20 @@ void ArrangementView::dragMoveEvent(QDragMoveEvent* e) {
     update();
 }
 
-void ArrangementView::dragLeaveEvent(QDragLeaveEvent*) { m_dropLane = m_deviceLane = -2; update(); }
+void ArrangementView::dragLeaveEvent(QDragLeaveEvent*) { m_dropLane = m_deviceLane = -2; m_deviceAfter = -1; update(); }
 
 void ArrangementView::dropEvent(QDropEvent* e) {
     if (const devicedrag::Payload pl = devicedrag::parse(e->mimeData()); pl.valid()) {
         m_deviceLane = -2;
+        m_deviceAfter = -1;
         update();
         int lane = deviceLaneAt(int(e->position().y()));
+        int after = -1;
         if (lane == m_project->trackCount() && !devicedrag::accepts(*m_project, pl, lane)) lane = -1;
+        if (lane >= 0 && devicedrag::newTrackAfter(*m_project, pl, lane)) { after = lane; lane = -1; }
         if (lane == -2) return;
         const bool copy = devicedrag::copying(e);
-        const devicedrag::Result r = devicedrag::drop(*m_project, pl, lane, {}, copy);
+        const devicedrag::Result r = devicedrag::drop(*m_project, pl, lane, {}, copy, after);
         InfoView::notify(r.title, r.text);
         if (!r.ok) return;
         e->setDropAction(pl.source == devicedrag::Payload::Devices && !copy ? Qt::MoveAction : Qt::CopyAction);

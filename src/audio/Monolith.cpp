@@ -27,6 +27,7 @@
 #include "DeviceKit.h"
 #include "Wavetables.h"
 #include "core/DeviceSpecs.h"
+#include "core/ModulationCurve.h"
 
 namespace sessions::audio {
 
@@ -112,7 +113,10 @@ struct Voice {
     VoiceFilter f[kFilters];
     Noise    rng;
     // worked out every kSub samples from the modulated knobs
-    float mp[kParams] = {};
+    float mp[osmium::kParams] = {};
+    double envPhase[kEnvs] = {};
+    float envStart[kEnvs] = {}, envDuration[kEnvs][3] = {}, envBend[kEnvs][3] = {};
+    int envStage[kEnvs] = {};
     float dt[kOscs][kMaxUnison] = {}, wl[kOscs][kMaxUnison] = {}, wr[kOscs][kMaxUnison] = {};
     int   table[kOscs] = {}, level[kOscs] = {}, mode[kOscs] = {};
     const Wavetable* tbl[kOscs] = {};
@@ -125,7 +129,8 @@ struct Voice {
 
 class Monolith : public DeviceProcessor {
 public:
-    explicit Monolith(float sr) : m_sr(sr), m_volCoef(onePoleCoef(0.01f, sr)), m_spec(specOf(kType)) {
+    explicit Monolith(float sr, bool osmium = false) : m_sr(sr), m_volCoef(onePoleCoef(0.01f, sr)),
+        m_spec(specOf(osmium ? T::Osmium : kType)), m_osmium(osmium), m_params(osmium ? osmium::kParams : kParams) {
         wavetable(0);   // the tables are built here, never on the audio thread
         sinTable(0);
         for (int k = 0; k < kVoices; ++k) {
@@ -142,7 +147,7 @@ public:
     }
 
     void render(const EventList& ev, float* L, float* R, int frames, const float* p, const Context& ctx) override {
-        std::copy(p, p + kParams, m_p);
+        std::copy(p, p + m_params, m_p);
         m_mods = ctx.mods;
         m_modCount = ctx.mods ? std::min(ctx.modCount, kMaxRoutes) : 0;
         m_ctx = ctx;
@@ -225,6 +230,7 @@ private:
             v.vel = vel;
             v.rnd = v.rng.uniform() * 2 - 1;
             for (Adsr& e : v.env) e.on();
+            std::fill(std::begin(v.envStage), std::end(v.envStage), int(Adsr::Idle));
             v.startBeat = m_ctx.beat + pos * m_ctx.beatsPerSample;   // its own LFOs and steppers count from here
             v.startClock = m_clock + pos;
             for (double& ph : v.lfoPh) ph = 0;
@@ -293,14 +299,7 @@ private:
         const int n = m_ctx.curveCount ? m_ctx.curveCount[c] : 0;
         if (n <= 0 || !m_ctx.curves) return 0;
         const CurvePoint* pts = m_ctx.curves + c * kCurvePoints;
-        if (phase <= pts[0].x) return float(pts[0].y);
-        for (int k = 1; k < n; ++k)
-            if (phase <= pts[k].x) {
-                const double span = pts[k].x - pts[k - 1].x;
-                const double t = span > 1e-9 ? (phase - pts[k - 1].x) / span : 1.0;
-                return float(pts[k - 1].y + (pts[k].y - pts[k - 1].y) * t);
-            }
-        return float(pts[n - 1].y);
+        return float(modcurve::value(pts, n, phase));
     }
     double curvePhase(int c, double beat, double origin) const {
         double beats = rv(m_p, cparam(c, CRate));
@@ -373,11 +372,11 @@ private:
 
     // A voice's knobs with its modulation applied, and everything derived from them.
     void modulate(Voice& v) {
-        std::copy(m_p, m_p + kParams, v.mp);
+        std::copy(m_p, m_p + m_params, v.mp);
         voiceSources(v);
         for (int r = 0; r < m_modCount; ++r) {
             const ModRoute& m = m_mods[r];
-            if (m.param < 0 || m.param >= kParams) continue;
+            if (m.param < 0 || m.param >= m_params) continue;
             v.mp[m.param] = std::clamp(v.mp[m.param] + float(m.amount) * source(m.source, v), 0.0f, 1.0f);
         }
         const float* p = v.mp;
@@ -429,6 +428,10 @@ private:
             v.env[e].set(rv(p, eparam(e, A)), rv(p, eparam(e, D)), p[eparam(e, S)], rv(p, eparam(e, R)), m_sr);
             v.curve[e] = (p[ecurve(e)] - 0.5f) * 2;
             v.loop[e] = p[eloop(e)] >= 0.5f;
+            if (m_osmium) for (int s = 0; s < 3; ++s) {
+                v.envDuration[e][s] = rv(p, eparam(e, s == 0 ? A : s == 1 ? D : R));
+                v.envBend[e][s] = (p[osmium::bend(e, s)] - 0.5f) * 2;
+            }
         }
         v.ampVel = 1 - p[VelAmp] + p[VelAmp] * v.vel;
     }
@@ -437,6 +440,31 @@ private:
     static float curved(float x, float c) {
         if (std::fabs(c) < 0.01f) return x;
         return c > 0 ? std::pow(x, 1 + 3 * c) : 1 - std::pow(1 - x, 1 - 3 * c);
+    }
+
+    float osmiumEnvelope(Voice& v, int k) {
+        Adsr& a = v.env[k];
+        if (v.envStage[k] != int(a.stage)) {
+            v.envStage[k] = int(a.stage);
+            v.envPhase[k] = 0;
+            v.envStart[k] = a.level;
+        }
+        if (a.stage == Adsr::Idle) return 0;
+        if (a.stage == Adsr::Sustain) {
+            a.level = a.sustain;
+            if (v.loop[k] && v.gate != 0) a.stage = Adsr::Attack;
+            return a.level;
+        }
+        const int s = a.stage == Adsr::Attack ? 0 : a.stage == Adsr::Decay ? 1 : 2;
+        v.envPhase[k] = std::min(1.0, v.envPhase[k] + 1.0 / std::max(1.0f, v.envDuration[k][s] * m_sr));
+        const float target = s == 0 ? 1 : s == 1 ? a.sustain : 0;
+        a.level = v.envStart[k] + (target - v.envStart[k]) * float(modcurve::bend(v.envPhase[k], v.envBend[k][s]));
+        if (v.envPhase[k] >= 1) {
+            a.level = target;
+            a.stage = s == 0 ? Adsr::Decay : s == 1 ? Adsr::Sustain : Adsr::Idle;
+            if (s == 1 && target == 0 && !v.loop[k]) a.stage = Adsr::Idle;
+        }
+        return curved(a.level, v.curve[k]);
     }
 
     static float shapeAt(int wave, float ph) {   // the modulation oscillator's and the sub's waves
@@ -467,8 +495,11 @@ private:
                 float e[kEnvs];
                 for (int k = 0; k < kEnvs; ++k) {
                     Adsr& a = v.env[k];
-                    if (v.loop[k] && v.gate != 0 && (a.stage == Adsr::Sustain || (a.stage == Adsr::Decay && a.level - a.sustain < 2e-4f))) a.stage = Adsr::Attack;   // Loop: round again while held
-                    e[k] = curved(a.next(), v.curve[k]);
+                    if (m_osmium) e[k] = osmiumEnvelope(v, k);
+                    else {
+                        if (v.loop[k] && v.gate != 0 && (a.stage == Adsr::Sustain || (a.stage == Adsr::Decay && a.level - a.sustain < 2e-4f))) a.stage = Adsr::Attack;
+                        e[k] = curved(a.next(), v.curve[k]);
+                    }
                 }
                 const float m = shapeAt(v.modWave, v.modPh);
                 v.modPh += v.modDt; if (v.modPh >= 1) v.modPh -= 1;
@@ -603,12 +634,14 @@ private:
 
     float   m_sr, m_volCoef;
     const DeviceSpec* m_spec;
+    bool m_osmium;
+    int m_params;
     Smoothed m_vol;
     Voice   m_v[kVoices];
     Held    m_stack[16]; int m_count = 0;
     int64_t m_clock = 0;
     uint32_t m_age = 0;
-    float   m_p[kParams] = {};
+    float   m_p[osmium::kParams] = {};
     const ModRoute* m_mods = nullptr; int m_modCount = 0;
     Context m_ctx;
     int     m_voiceMode = 0, m_unison = 1;
@@ -633,5 +666,6 @@ private:
 } // namespace
 
 std::shared_ptr<DeviceProcessor> createMonolith(float sr) { return std::make_shared<Monolith>(sr); }
+std::shared_ptr<DeviceProcessor> createOsmium(float sr) { return std::make_shared<Monolith>(sr, true); }
 
 } // namespace sessions::audio

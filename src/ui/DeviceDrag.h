@@ -45,7 +45,12 @@ struct Result {
     QList<int> ids;          // the devices that landed (racks: the rack)
     QString    title, text;  // for the Info View
 };
-// Drops it (one undo step) on track `track` at `at`; track -1: a new track after the last one.
-Result drop(Project& p, const Payload& pl, int track, const Project::DevicePlace& at, bool copy);
+// A track that can't take it, and can't become a MIDI track for it (an audio track with clips, a
+// group, a return): an instrument or a MIDI effect goes on a new MIDI track right after it instead
+// (0.26: as flexible as a sample, which makes a track of its kind wherever it lands).
+bool newTrackAfter(const Project& p, const Payload& pl, int track);
+// Drops it (one undo step) on track `track` at `at`; track -1: a new track, after track `after`
+// (in its group) or after the last one.
+Result drop(Project& p, const Payload& pl, int track, const Project::DevicePlace& at, bool copy, int after = -1);
 
 } // namespace sessions::devicedrag

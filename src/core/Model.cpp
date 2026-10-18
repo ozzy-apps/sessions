@@ -350,6 +350,10 @@ Device Project::makeDevice(const QString& name, DeviceKind kind) {
         for (const ParamSpec& p : s->params) d.params.push_back({p.name, p.def});
         if (s->type == DeviceType::DrumRack) d.pads = audio::defaultDrumPads();   // a ready kit: the 808's sounds
         if (s->type == DeviceType::Monolith) for (const ModRoute& r : presetMods(name)) d.mods.push_back(r);   // a Sound's routes
+        if (s->type == DeviceType::Osmium) {
+            d.curves = {{{0, 0}, {0.25, 1, -0.35, 1}, {0.5, 0.15}, {0.75, 0.7, 0.3, 1}, {1, 0}},
+                        {{0, 1, 0.35}, {0.5, 0, -0.35}, {1, 1}}};
+        }
     } else {
         for (const char* p : {"Amount", "Tone", "Mix", "Output"}) d.params.push_back({p, 0.5});
     }
@@ -1126,11 +1130,13 @@ bool Project::convertTrack(int index, TrackType to, QString* why) {
     return true;
 }
 
-int Project::insertTrackFor(const DeviceBlocks& blocks, const QString& name) {
+int Project::insertTrackFor(const DeviceBlocks& blocks, const QString& name, int after) {
     const bool midi = std::any_of(blocks.begin(), blocks.end(), [](const QVector<Device>& b) { return !b.isEmpty() && b.first().kind != DeviceKind::AudioEffect; });
     EditScope edit(this, midi ? "Insert MIDI Track" : "Insert Audio Track");
-    const int i = insertTrack(int(tracks.size()), midi ? TrackType::Midi : TrackType::Audio);
-    tracks[i].groupId = 0;   // after the last track, outside its group
+    const bool beside = after >= 0 && after < tracks.size();
+    const int group = beside ? (tracks[after].isGroup() ? tracks[after].id : tracks[after].groupId) : 0;   // next to a track: in its group
+    const int i = insertTrack(beside ? after + 1 : int(tracks.size()), midi ? TrackType::Midi : TrackType::Audio);
+    tracks[i].groupId = group;   // after the last track: outside any group
     if (!name.trimmed().isEmpty()) tracks[i].name = name.trimmed();
     emit structureChanged();
     return i;

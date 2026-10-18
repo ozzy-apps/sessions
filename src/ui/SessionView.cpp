@@ -368,6 +368,18 @@ void ClipGrid::paintEvent(QPaintEvent*) {
         if (m_dropHere) { p.setBrush(Qt::NoBrush); p.drawRect(gap.adjusted(2, 2, -3, -3)); }
     }
 
+    // ---- a device drag over a track that can't take it: a new track right after it
+    if (m_dropAfter >= 0 && m_dropAfter < cols) {
+        const int x = columnLeft(m_dropAfter) + columnWidth(m_dropAfter) + m_gap / 2;
+        p.setPen(QPen(theme::accent, 3));
+        p.drawLine(x, m_headerH + 2, x, stopTop() - 2);
+        p.setPen(theme::accent);
+        p.save();
+        p.translate(x + 6, m_headerH + 8);
+        p.rotate(90);
+        p.drawText(0, 0, "New track");
+        p.restore();
+    }
     // ---- a device drag: the column it would go on
     if (m_dropColumn >= 0 && m_dropColumn < cols) {
         const QRect head = slotRect(m_dropColumn, kHeaderRow), stop = slotRect(m_dropColumn, kStopRow);
@@ -723,20 +735,22 @@ void ClipGrid::dragEnterEvent(QDragEnterEvent* e) {
 
 bool ClipGrid::deviceDragOver(const QMimeData* mime, int col) {
     const devicedrag::Payload pl = devicedrag::parse(mime);
-    const int oldColumn = m_dropColumn;
+    const int oldColumn = m_dropColumn, oldAfter = m_dropAfter;
     const bool oldHere = m_dropHere;
     m_dropColumn = -1;
+    m_dropAfter = -1;
     m_dropHere = false;
     bool ok = pl.valid();
     if (ok && col >= 0 && col < m_project->trackCount()) {
         ok = devicedrag::accepts(*m_project, pl, col);
         if (ok) m_dropColumn = col;
+        else if (devicedrag::newTrackAfter(*m_project, pl, col)) { ok = true; m_dropAfter = col; }   // an instrument over an audio track with clips: a new MIDI track beside it
     } else if (ok && col == m_project->trackCount() && devicedrag::accepts(*m_project, pl, col)) {   // the Master column: its chain takes audio effects
         m_dropColumn = col;
     } else if (ok) {   // the free space (or an instrument over the Master column): a new track
         m_dropHere = true;   // the free space: a new track
     }
-    if (m_dropColumn != oldColumn || m_dropHere != oldHere) update();
+    if (m_dropColumn != oldColumn || m_dropHere != oldHere || m_dropAfter != oldAfter) update();
     return ok;
 }
 
@@ -744,8 +758,9 @@ bool ClipGrid::deviceDrop(const QMimeData* mime, int col, bool copy) {
     clearDeviceDrop();
     const devicedrag::Payload pl = devicedrag::parse(mime);
     if (!pl.valid()) return false;
-    const int target = col > m_project->trackCount() || (col == m_project->trackCount() && !devicedrag::accepts(*m_project, pl, col)) ? -1 : col;
-    const devicedrag::Result r = devicedrag::drop(*m_project, pl, target, {}, copy);
+    const int after = devicedrag::newTrackAfter(*m_project, pl, col) ? col : -1;
+    const int target = after >= 0 || col > m_project->trackCount() || (col == m_project->trackCount() && !devicedrag::accepts(*m_project, pl, col)) ? -1 : col;
+    const devicedrag::Result r = devicedrag::drop(*m_project, pl, target, {}, copy, after);
     InfoView::notify(r.title, r.text);
     if (!r.ok) return false;
     select(Sel::Track, r.track, -1);
@@ -754,8 +769,9 @@ bool ClipGrid::deviceDrop(const QMimeData* mime, int col, bool copy) {
 }
 
 void ClipGrid::clearDeviceDrop() {
-    if (m_dropColumn < 0 && !m_dropHere) return;
+    if (m_dropColumn < 0 && m_dropAfter < 0 && !m_dropHere) return;
     m_dropColumn = -1;
+    m_dropAfter = -1;
     m_dropHere = false;
     update();
 }
@@ -791,7 +807,7 @@ void ClipGrid::dragMoveEvent(QDragMoveEvent* e) {
 }
 
 void ClipGrid::dragLeaveEvent(QDragLeaveEvent*) {
-    m_dropTrack = m_dropScene = m_dropColumn = -1;
+    m_dropTrack = m_dropScene = m_dropColumn = m_dropAfter = -1;
     m_dropHere = false;
     update();
 }

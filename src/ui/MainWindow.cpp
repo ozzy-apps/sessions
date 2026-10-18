@@ -97,6 +97,7 @@ protected:
 #include <QDialogButtonBox>
 #include <QPushButton>
 #include <QDialog>
+#include <QProcessEnvironment>
 #include <QSvgRenderer>
 #include <QFile>
 #include <QPainter>
@@ -497,11 +498,11 @@ void MainWindow::buildMenus() {
         a->setChecked(std::abs(current * 100 - pct) < 1);
         zoomGroup->addAction(a);
         connect(a, &QAction::triggered, this, [this, pct] {
+            // 0.26: applies at once. The interface scale is fixed when the app starts, so Sessions
+            // reloads itself with the set exactly as it is (unsaved changes included, the window where
+            // it was); only the undo history starts over.
             QSettings("Sessions", "Sessions").setValue("ui/zoom", pct / 100.0);
-            auto answer = QMessageBox::question(this, "Zoom",
-                QString("Zoom %1 % applies when Sessions restarts.\n\nRestart now? The set reopens as it is, unsaved changes included; only the undo history starts over.").arg(pct),
-                QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-            if (answer == QMessageBox::Yes) restartReopeningSet();
+            restartReopeningSet();
         });
     }
 
@@ -1139,7 +1140,15 @@ void MainWindow::restartReopeningSet() {
     QStringList args{"--reopen", snapshot, "--reopen-name", m_setName};
     if (!m_setPath.isEmpty()) args << "--reopen-path" << m_setPath;
     if (setModified()) args << "--reopen-modified";
-    if (!QProcess::startDetached(QCoreApplication::applicationFilePath(), args)) {
+    saveWindowState();   // the new instance opens where this one is
+    QProcess next;
+    next.setProgram(QCoreApplication::applicationFilePath());
+    next.setArguments(args);
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    env.remove("QT_SCALE_FACTOR");                // ours (main() sets it from the zoom): the new instance reads the new zoom
+    env.remove("SESSIONS_SCALE_FROM_SETTINGS");
+    next.setProcessEnvironment(env);
+    if (!next.startDetached()) {
         QFile::remove(snapshot);
         QMessageBox::warning(this, "Zoom", "Couldn't start Sessions again. The new zoom applies the next time you start it.");
         return;

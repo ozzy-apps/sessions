@@ -188,7 +188,11 @@ QJsonObject writeDevice(const Device& d, const QString& baseDir) {
         QJsonArray curves;
         for (const QVector<CurvePoint>& c : d.curves) {
             QJsonArray pts;
-            for (const CurvePoint& pt : c) pts.append(QJsonArray{pt.x, pt.y});
+            for (const CurvePoint& pt : c) {
+                QJsonArray point{pt.x, pt.y};
+                if (pt.bend != 0 || pt.shape != 0) { point.append(pt.bend); point.append(pt.shape); }
+                pts.append(point);
+            }
             curves.append(pts);
         }
         o.insert("curves", curves);
@@ -386,7 +390,9 @@ Device readDevice(const QJsonObject& o, const QString& baseDir) {
         for (const QJsonValue& pv : v.toArray()) {
             const QJsonArray pa = pv.toArray();
             if (pa.size() < 2 || pts.size() >= monolith::kCurvePoints) continue;
-            pts.push_back({std::clamp(pa[0].toDouble(), 0.0, 1.0), std::clamp(pa[1].toDouble(), 0.0, 1.0)});
+            pts.push_back({std::clamp(pa[0].toDouble(), 0.0, 1.0), std::clamp(pa[1].toDouble(), 0.0, 1.0),
+                           pa.size() > 2 ? std::clamp(pa[2].toDouble(), -1.0, 1.0) : 0,
+                           pa.size() > 3 ? std::clamp(pa[3].toInt(), 0, 2) : 0});
         }
         std::sort(pts.begin(), pts.end(), [](const CurvePoint& a, const CurvePoint& b) { return a.x < b.x; });
         d.curves.push_back(pts);

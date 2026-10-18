@@ -936,6 +936,7 @@ std::shared_ptr<DeviceProcessor> createInstrument(DeviceType type, float sr) {
     case T::FMSynth:        return std::make_shared<PolySynth<FmVoice, FmParams, 10>>(sr);
     case T::WavetableSynth: return std::make_shared<WavetableSynth>(sr);
     case T::Monolith:       return createMonolith(sr);
+    case T::Osmium:         return createOsmium(sr);
     case T::DrumStudio:     return createDrumStudio(sr);
     case T::Sampler:        return std::make_shared<PolySynth<SamplerVoice, SamplerParams, 8>>(sr);
     case T::Organ:          return std::make_shared<Organ>(sr);

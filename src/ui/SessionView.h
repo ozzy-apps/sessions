@@ -157,6 +157,7 @@ private:
     bool   m_dropHere = false;           // a file drag hovers the free space
     int    m_dropTrack = -1, m_dropScene = -1;   // a file drag hovers this audio track slot
     int    m_dropColumn = -1;            // a device drag hovers this track's column
+    int    m_dropAfter = -1;             // a device drag hovers a track that can't take it: a new track right after it
     bool   m_sceneClick = false;         // pressed on a scene's name: it launches on release unless dragged
     int    rowAt(int y) const;
     int    m_launchTrack = -1, m_launchScene = -1;   // slot held down (for Gate / Repeat release)

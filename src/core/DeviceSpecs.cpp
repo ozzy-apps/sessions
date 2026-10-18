@@ -402,6 +402,13 @@ std::vector<Preset> monolithPresets() {
 }
 
 std::vector<DeviceSpec> build() {
+    const auto monoParams = monolithParams();
+    auto osmiumParams = monoParams;
+    for (const char* name : {"Env1 Attack Bend", "Env1 Decay Bend", "Env1 Release Bend",
+                             "Env2 Attack Bend", "Env2 Decay Bend", "Env2 Release Bend",
+                             "Env3 Attack Bend", "Env3 Decay Bend", "Env3 Release Bend",
+                             "Env4 Attack Bend", "Env4 Decay Bend", "Env4 Release Bend"})
+        osmiumParams.push_back(lin(name, -1, 1, 0.5));
     std::vector<DeviceSpec> s = {
         // ---------------------------------------------------------------- instruments
         {"Instrument Rack", T::InstrumentRack, K::Instrument, rackParams(),
@@ -466,7 +473,11 @@ std::vector<DeviceSpec> build() {
             pct("Env Mod", 0.5), expo("Decay", 0.05, 2, ne(0.3, 0.05, 2), U::Seconds), pct("Accent", 0.4),
             expo("Glide", 0.001, 0.5, ne(0.06, 0.001, 0.5), U::Seconds), pct("Sub", 0.3), pct("Drive", 0.3), volume()},
          "A monophonic bass synth: notes that overlap slide into each other, hard-played notes get an accent. Ready-made: Acid Line and Square Bass in Browser → Sounds."},
-        {"Monolith", T::Monolith, K::Instrument, monolithParams(),
+        {"Osmium", T::Osmium, K::Instrument, osmiumParams,
+         "Three wavetable oscillators, dual filters and a visual modulation workspace. Open Editor for draggable green modulation ranges, "
+         "four envelopes with independent segment bends, four LFOs, two curved phrase editors, two step sequencers and eight macros. "
+         "Select a source and click a knob's + slot, or drag a source onto it. Drag its green ring to set the range."},
+        {"Monolith", T::Monolith, K::Instrument, monoParams,
          "The big synth, for meaty, growling basses and much more: three wavetable oscillators (Bend / Formant / Sync warping), a sub oscillator, a modulation oscillator, noise and "
          "feedback into two driven filters (Scream for growl), an insert drive, four envelopes, two LFOs (loop or one-shot), two step sequencers, four macros, "
          "then a chorus, a synced delay, a reverb and an EQ. The drawers beside the main panel open the envelopes, LFOs, steppers, modulation, voice and FX. "
