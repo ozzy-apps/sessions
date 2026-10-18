@@ -1,17 +1,20 @@
 #include "Preferences.h"
+#include "AppIcon.h"
 #include "audio/Engine.h"
 #include "audio/Driver.h"
 #include "audio/MidiInput.h"
 #include <QComboBox>
-#include <QDialogButtonBox>
-#include <QFormLayout>
+#include <algorithm>
 #include <QLabel>
 #include <QListWidget>
 #include <QPushButton>
 #include <QRadioButton>
 #include <QButtonGroup>
 #include <QSettings>
-#include <QTabWidget>
+#include <QStackedWidget>
+#include <QToolButton>
+#include <QHBoxLayout>
+#include <QMessageBox>
 #include <QVBoxLayout>
 #include <cmath>
 
@@ -20,6 +23,52 @@ namespace sessions {
 namespace {
 QSettings settings() { return QSettings("Sessions", "Sessions"); }
 const int kBuffers[] = {10, 20, 30, 50, 100};
+constexpr int kLabelWidth = 150;   // the left column of a row: what the setting is about
+
+// A page: its title, then rows. A row is the setting's name on the left and its controls on the
+// right, with a note under them when one helps, and a hairline under the row.
+QLabel* note(const QString& text, QWidget* parent) {
+    auto* l = new QLabel(text, parent);
+    l->setObjectName("dimLabel");
+    l->setWordWrap(true);
+    return l;
+}
+
+QWidget* row(const QString& label, QWidget* control, const QString& hint, QWidget* parent) {
+    auto* w = new QWidget(parent);
+    w->setObjectName("prefsRow");
+    w->setAttribute(Qt::WA_StyledBackground);
+    auto* h = new QHBoxLayout(w);
+    h->setContentsMargins(0, 12, 0, 12);
+    h->setSpacing(16);
+    auto* l = new QLabel(label, w);
+    l->setObjectName("prefsRowLabel");
+    l->setFixedWidth(kLabelWidth);
+    l->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+    l->setContentsMargins(0, 2, 0, 0);
+    h->addWidget(l);
+    auto* right = new QVBoxLayout;
+    right->setContentsMargins(0, 0, 0, 0);
+    right->setSpacing(6);
+    right->addWidget(control);
+    if (!hint.isEmpty()) right->addWidget(note(hint, w));
+    h->addLayout(right, 1);
+    return w;
+}
+
+QWidget* page(const QString& title, QVBoxLayout*& rows, QWidget* parent) {
+    auto* w = new QWidget(parent);
+    w->setObjectName("prefsPage");
+    w->setAttribute(Qt::WA_StyledBackground);
+    rows = new QVBoxLayout(w);
+    rows->setContentsMargins(28, 22, 28, 16);
+    rows->setSpacing(0);
+    auto* t = new QLabel(title, w);
+    t->setObjectName("prefsTitle");
+    rows->addWidget(t);
+    rows->addSpacing(8);
+    return w;
+}
 }
 
 int PreferencesDialog::bufferMs() { return QSettings("Sessions", "Sessions").value("audio/bufferMs", 30).toInt(); }
@@ -41,15 +90,31 @@ double PreferencesDialog::dragZoom(double dyPixels) { return std::exp((zoomDragU
 PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* midi, std::function<void()> restartForZoom, QWidget* parent)
     : QDialog(parent), m_engine(engine), m_midi(midi) {
     setWindowTitle("Preferences");
-    setMinimumWidth(460);
+    setObjectName("preferences");
+    resize(860, 580);
+    setMinimumSize(720, 480);
     auto* lay = new QVBoxLayout(this);
-    auto* tabs = new QTabWidget(this);
-    lay->addWidget(tabs);
+    lay->setContentsMargins(0, 0, 0, 0);
+    lay->setSpacing(0);
+    auto* body = new QHBoxLayout;
+    body->setContentsMargins(0, 0, 0, 0);
+    body->setSpacing(0);
+    lay->addLayout(body, 1);
+    auto* sidebar = new QListWidget(this);   // the categories
+    sidebar->setObjectName("prefsSidebar");
+    sidebar->setFixedWidth(172);
+    sidebar->setFocusPolicy(Qt::NoFocus);
+    sidebar->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    body->addWidget(sidebar);
+    auto* tabs = new QStackedWidget(this);   // one page per category
+    tabs->setObjectName("prefsPages");
+    body->addWidget(tabs, 1);
+    auto addPage = [&](QWidget* w, const QString& name) { tabs->addWidget(w); sidebar->addItem(name); };
+    QVBoxLayout* rows = nullptr;
 
     // ---- Audio
-    auto* audioTab = new QWidget(tabs);
-    auto* outer = new QVBoxLayout(audioTab);
-    auto* top = new QFormLayout;
+    auto* audioTab = page("Audio", rows, tabs);
+    QVBoxLayout* outer = rows;
     m_system = new QComboBox(audioTab);
     m_system->setObjectName("audioSystem");
     m_system->addItem("PipeWire / JACK: low latency, your interface's channels", "jack");
@@ -57,57 +122,63 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     m_system->setCurrentIndex(std::max(0, m_system->findData(savedAudio().system)));
     m_system->setToolTip("PipeWire / JACK hands Sessions your audio interface's inputs and outputs with a small buffer, "
                          "so you can play a guitar through the amp and hear it at once. PulseAudio goes through the desktop's mixer.");
-    top->addRow("Audio system", m_system);
-    outer->addLayout(top);
+    outer->addWidget(row("Audio system", m_system, {}, audioTab));
 
     // JACK: buffer and ports
     m_jackBox = new QWidget(audioTab);
-    auto* jf = new QFormLayout(m_jackBox);
+    auto* jf = new QVBoxLayout(m_jackBox);
     jf->setContentsMargins(0, 0, 0, 0);
+    jf->setSpacing(0);
     m_frames = new QComboBox(m_jackBox);
     m_frames->setObjectName("audioFrames");
     for (int f : {32, 64, 128, 256, 512, 1024}) m_frames->addItem(QString("%1 samples (%2 ms)").arg(f).arg(f * 1000.0 / 48000, 0, 'f', 1), f);
     m_frames->setCurrentIndex(std::max(0, m_frames->findData(savedAudio().frames)));
     m_frames->setToolTip("Smaller: you hear what you play sooner (64 or 128 for playing guitar through the amp). Larger: safer against crackles.");
-    jf->addRow("Buffer", m_frames);
+    jf->addWidget(row("Buffer", m_frames, "Smaller: you hear what you play sooner (64 or 128 for playing guitar through the amp). Larger: safer against crackles.", m_jackBox));
     const char* labels[4] = {"Main out L", "Main out R", "Input 1", "Input 2"};
+    auto* outs = new QWidget(m_jackBox); auto* ol = new QVBoxLayout(outs); ol->setContentsMargins(0, 0, 0, 0); ol->setSpacing(6);
+    auto* ins = new QWidget(m_jackBox);  auto* il = new QVBoxLayout(ins);  il->setContentsMargins(0, 0, 0, 0); il->setSpacing(6);
     for (int k = 0; k < 4; ++k) {
         m_jackPorts[k] = new QComboBox(m_jackBox);
         m_jackPorts[k]->setObjectName(QString("jackPort%1").arg(k));
         m_jackPorts[k]->setMinimumContentsLength(28);
         m_jackPorts[k]->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
-        jf->addRow(labels[k], m_jackPorts[k]);
+        auto* line = new QHBoxLayout; line->setContentsMargins(0, 0, 0, 0); line->setSpacing(8);
+        auto* cap = new QLabel(labels[k], m_jackBox); cap->setFixedWidth(64);
+        line->addWidget(cap); line->addWidget(m_jackPorts[k], 1);
+        (k < 2 ? ol : il)->addLayout(line);
         connect(m_jackPorts[k], &QComboBox::activated, this, &PreferencesDialog::applyAudio);
     }
     auto* rescan = new QPushButton("Look for interfaces again", m_jackBox);
-    jf->addRow("", rescan);
-    auto* jackNote = new QLabel("Input 1 and Input 2 are what an audio track's Audio From picks (1/2, 1 or 2). "
-                                "For a guitar in your interface's first input: Input 1 = its first capture channel, "
-                                "then set the track's Audio From to 1 and Monitor to In.", m_jackBox);
-    jackNote->setObjectName("dimLabel");
-    jackNote->setWordWrap(true);
-    jf->addRow("", jackNote);
+    rescan->setObjectName("rescanPorts");
+    auto* rescanLine = new QHBoxLayout; rescanLine->setContentsMargins(0, 0, 0, 0); rescanLine->addWidget(rescan); rescanLine->addStretch(1);
+    il->addLayout(rescanLine);
+    jf->addWidget(row("Outputs", outs, "The interface channels Main L and R play to.", m_jackBox));
+    jf->addWidget(row("Inputs", ins, "Input 1 and Input 2 are what an audio track's Audio From picks (1/2, 1 or 2). "
+                                     "For a guitar in your interface's first input: Input 1 = its first capture channel, "
+                                     "then set the track's Audio From to 1 and Monitor to In.", m_jackBox));
     outer->addWidget(m_jackBox);
     connect(m_frames, &QComboBox::activated, this, &PreferencesDialog::applyAudio);
     connect(rescan, &QPushButton::clicked, this, [this] { fillJackPorts(); });
 
     // PulseAudio: devices and buffer
     m_pulseBox = new QWidget(audioTab);
-    auto* af = new QFormLayout(m_pulseBox);
+    auto* af = new QVBoxLayout(m_pulseBox);
     af->setContentsMargins(0, 0, 0, 0);
+    af->setSpacing(0);
     m_device = new QComboBox(m_pulseBox);
     m_device->setObjectName("audioDevice");
     m_device->addItem("System default", QString());
     for (const audio::OutputDevice& d : audio::listOutputDevices()) m_device->addItem(d.description, d.name);
     const int cur = m_device->findData(outputDevice());
     m_device->setCurrentIndex(cur >= 0 ? cur : 0);
-    af->addRow("Output device", m_device);
+    af->addWidget(row("Output device", m_device, {}, m_pulseBox));
     m_buffer = new QComboBox(m_pulseBox);
     m_buffer->setObjectName("audioBuffer");
     for (int ms : kBuffers) m_buffer->addItem(QString("%1 ms").arg(ms), ms);
     m_buffer->setCurrentIndex(std::max(0, m_buffer->findData(bufferMs())));
     m_buffer->setToolTip("Smaller: what you play is heard sooner. Larger: safer against crackles on a busy computer.");
-    af->addRow("Buffer", m_buffer);
+    af->addWidget(row("Buffer", m_buffer, "Smaller: what you play is heard sooner. Larger: safer against crackles on a busy computer.", m_pulseBox));
     m_inputDevice = new QComboBox(m_pulseBox);
     m_inputDevice->setObjectName("inputDevice");
     m_inputDevice->addItem("System default", QString());
@@ -115,7 +186,7 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     const int icur = m_inputDevice->findData(inputDevice());
     m_inputDevice->setCurrentIndex(icur >= 0 ? icur : 0);
     m_inputDevice->setToolTip("Where audio tracks record from: your audio interface, a microphone, or a monitor of another program's sound.");
-    af->addRow("Input device", m_inputDevice);
+    af->addWidget(row("Input device", m_inputDevice, "Where audio tracks record from: your audio interface, a microphone, or a monitor of another program's sound.", m_pulseBox));
     outer->addWidget(m_pulseBox);
     connect(m_inputDevice, &QComboBox::activated, this, [this] {
         const QString device = m_inputDevice->currentData().toString();
@@ -126,74 +197,70 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     connect(m_device, &QComboBox::activated, this, &PreferencesDialog::applyAudio);
     connect(m_buffer, &QComboBox::activated, this, &PreferencesDialog::applyAudio);
 
-    m_audioStatus = new QLabel(audioTab);
+    auto* status = new QWidget(audioTab); auto* stl = new QVBoxLayout(status); stl->setContentsMargins(0, 0, 0, 0); stl->setSpacing(4);
+    m_audioStatus = new QLabel(status);
     m_audioStatus->setWordWrap(true);
-    m_audioStatus->setObjectName("dimLabel");
-    outer->addWidget(m_audioStatus);
-    m_inputStatus = new QLabel(audioTab);
+    stl->addWidget(m_audioStatus);
+    m_inputStatus = new QLabel(status);
     m_inputStatus->setWordWrap(true);
     m_inputStatus->setObjectName("dimLabel");
-    outer->addWidget(m_inputStatus);
+    stl->addWidget(m_inputStatus);
+    outer->addWidget(row("Status", status, {}, audioTab));
     outer->addStretch(1);
     connect(m_system, &QComboBox::activated, this, [this] { showSystem(); applyAudio(); });
-    tabs->addTab(audioTab, "Audio");
+    addPage(audioTab, "Audio");
     fillJackPorts();
     showSystem();
     refreshAudioStatus();
 
     // ---- Record
-    auto* recTab = new QWidget(tabs);
-    auto* rf = new QFormLayout(recTab);
+    auto* recTab = page("Record", rows, tabs);
     auto* countIn = new QComboBox(recTab);
     countIn->setObjectName("countIn");
     for (int bars : {0, 1, 2, 4}) countIn->addItem(bars == 0 ? QString("None") : bars == 1 ? QString("1 Bar") : QString("%1 Bars").arg(bars), bars);
     countIn->setCurrentIndex(std::max(0, countIn->findData(countInBars())));
     countIn->setToolTip("Bars of click before a recording starts from a standstill (Arrangement Record, or ● in a slot).");
-    rf->addRow("Count-in", countIn);
-    auto* recNote = new QLabel("Also on the metronome button's right-click menu. During the count-in the position shows "
-                               "the bars left in red; nothing is recorded until it ends.", recTab);
-    recNote->setObjectName("dimLabel");
-    recNote->setWordWrap(true);
-    rf->addRow("", recNote);
+    rows->addWidget(row("Count-in", countIn, "Bars of click before a recording starts from a standstill (Arrangement Record, or ● in a slot). "
+                                             "Also on the metronome button's right-click menu. During the count-in the position shows "
+                                             "the bars left in red; nothing is recorded until it ends.", recTab));
+    rows->addStretch(1);
     connect(countIn, &QComboBox::activated, this, [countIn] { QSettings("Sessions", "Sessions").setValue("record/countIn", countIn->currentData().toInt()); });
-    tabs->addTab(recTab, "Record");
+    addPage(recTab, "Record");
 
     // ---- MIDI
-    auto* midiTab = new QWidget(tabs);
-    auto* ml = new QVBoxLayout(midiTab);
-    auto* hint = new QLabel("Checked inputs play the armed track (or the selected one) and drive what you map in MIDI Map mode (Ctrl+M). "
-                            "Keyboards and controllers plugged in later are connected automatically.", midiTab);
-    hint->setWordWrap(true);
-    ml->addWidget(hint);
-    m_ports = new QListWidget(midiTab);
+    auto* midiTab = page("MIDI", rows, tabs);
+    auto* portsBox = new QWidget(midiTab); auto* ml = new QVBoxLayout(portsBox); ml->setContentsMargins(0, 0, 0, 0); ml->setSpacing(6);
+    m_ports = new QListWidget(portsBox);
     m_ports->setObjectName("midiPorts");
-    ml->addWidget(m_ports, 1);
-    m_midiStatus = new QLabel(midiTab);
+    m_ports->setFixedHeight(180);
+    ml->addWidget(m_ports);
+    m_midiStatus = new QLabel(portsBox);
     m_midiStatus->setObjectName("dimLabel");
     m_midiStatus->setWordWrap(true);
     ml->addWidget(m_midiStatus);
+    rows->addWidget(row("Inputs", portsBox, "Checked inputs play the armed track (or the selected one) and drive what you map in MIDI Map mode (Ctrl+M). "
+                                            "Keyboards and controllers plugged in later are connected automatically.", midiTab));
+    rows->addStretch(1);
     connect(m_ports, &QListWidget::itemChanged, this, [this](QListWidgetItem* it) {
         m_midi->setEnabled(it->data(Qt::UserRole).toString(), it->checkState() == Qt::Checked);
     });
     connect(m_midi, &audio::MidiInput::portsChanged, this, &PreferencesDialog::refreshMidiPorts);
-    tabs->addTab(midiTab, "MIDI");
+    addPage(midiTab, "MIDI");
     refreshMidiPorts();
 
     // ---- Look
-    auto* lookTab = new QWidget(tabs);
-    auto* lf = new QFormLayout(lookTab);
+    auto* lookTab = page("Look", rows, tabs);
     auto* zoom = new QComboBox(lookTab);
+    zoom->setObjectName("uiZoom");
     for (int pct : {100, 125, 150, 175, 200}) zoom->addItem(QString("%1 %").arg(pct), pct / 100.0);
     const double z = settings().value("ui/zoom", 1.0).toDouble();
     for (int i = 0; i < zoom->count(); ++i) if (std::abs(zoom->itemData(i).toDouble() - z) < 0.01) zoom->setCurrentIndex(i);
-    lf->addRow("Zoom", zoom);
     auto* restart = new QPushButton("Restart Now", lookTab);
+    restart->setObjectName("restartNow");
     restart->setEnabled(false);
-    lf->addRow("", restart);
-    auto* zoomNote = new QLabel("The zoom applies when Sessions restarts; the set reopens as it is.", lookTab);
-    zoomNote->setObjectName("dimLabel");
-    zoomNote->setWordWrap(true);
-    lf->addRow("", zoomNote);
+    auto* zoomBox = new QWidget(lookTab); auto* zl = new QHBoxLayout(zoomBox); zl->setContentsMargins(0, 0, 0, 0); zl->setSpacing(8);
+    zl->addWidget(zoom, 1); zl->addWidget(restart);
+    rows->addWidget(row("Zoom", zoomBox, "The whole interface, larger (for 1440p and 4K screens). It applies when Sessions restarts; the set reopens as it is.", lookTab));
     connect(zoom, &QComboBox::activated, this, [zoom, restart] {
         QSettings("Sessions", "Sessions").setValue("ui/zoom", zoom->currentData().toDouble());
         restart->setEnabled(true);
@@ -204,19 +271,45 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     zoomDir->addItem("Drag down to zoom in", false);
     zoomDir->addItem("Drag up to zoom in", true);
     zoomDir->setCurrentIndex(zoomDragUp() ? 1 : 0);
-    lf->addRow("Zoom drag", zoomDir);
-    auto* dirNote = new QLabel("In the Arrangement's overview strip, the clip overviews and the rulers, dragging sideways scrolls and dragging up or down zooms. "
-                               "This picks which way zooms in.", lookTab);
-    dirNote->setObjectName("dimLabel");
-    dirNote->setWordWrap(true);
-    lf->addRow("", dirNote);
+    rows->addWidget(row("Zoom drag", zoomDir, "In the Arrangement's overview strip, the clip overviews and the rulers, dragging sideways scrolls and dragging up or down zooms. "
+                                              "This picks which way zooms in.", lookTab));
     connect(zoomDir, &QComboBox::activated, this, [zoomDir] { setZoomDragUp(zoomDir->currentData().toBool()); });
-    tabs->addTab(lookTab, "Look");
+
+    // The app icon: the six colour treatments of the mark, the chosen one outlined.
+    auto* icons = new QWidget(lookTab);
+    auto* iconRow = new QHBoxLayout(icons);
+    iconRow->setContentsMargins(0, 0, 0, 0);
+    iconRow->setSpacing(6);
+    auto* iconGroup = new QButtonGroup(icons);
+    const QString chosen = appicon::currentKey();
+    for (const appicon::Variant& v : appicon::variants()) {
+        auto* b = new QToolButton(icons);
+        b->setObjectName("iconChoice");
+        b->setProperty("iconKey", v.key);
+        b->setIcon(appicon::icon(v.key));
+        b->setIconSize(QSize(48, 48));
+        b->setText(v.name);
+        b->setToolButtonStyle(Qt::ToolButtonTextUnderIcon);
+        b->setToolTip(v.blurb);
+        b->setCheckable(true);
+        b->setChecked(v.key == chosen);
+        b->setFixedWidth(76);
+        iconGroup->addButton(b);
+        iconRow->addWidget(b);
+        connect(b, &QToolButton::clicked, this, [this, key = v.key] {
+            QString error;
+            if (!appicon::setCurrent(key, &error)) QMessageBox::warning(this, "App icon", error);
+        });
+    }
+    iconRow->addStretch(1);
+    rows->addWidget(row("App icon", icons, "The icon in the window's title bar and the taskbar. The app menu follows through a desktop entry written for your user "
+                                           "(~/.local/share/applications/sessions.desktop); some desktops show it after a new login. The About dialog's logo takes the same colours.", lookTab));
+    rows->addStretch(1);
+    addPage(lookTab, "Look");
 
     // ---- Startup
-    auto* startTab = new QWidget(tabs);
-    auto* sl = new QVBoxLayout(startTab);
-    sl->addWidget(new QLabel("When Sessions starts without a set to open:", startTab));
+    auto* startTab = page("Startup", rows, tabs);
+    auto* openBox = new QWidget(startTab); auto* sl = new QVBoxLayout(openBox); sl->setContentsMargins(0, 0, 0, 0); sl->setSpacing(6);
     auto* group = new QButtonGroup(startTab);
     const QString mode = settings().value("startup/open", "demo").toString();
     const std::pair<QString, QString> choices[] = {{"demo", "Open the demo set"}, {"empty", "Start with an empty set"}, {"last", "Reopen the last set"}};
@@ -227,12 +320,31 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
         sl->addWidget(b);
         connect(b, &QRadioButton::toggled, this, [key = key](bool on) { if (on) QSettings("Sessions", "Sessions").setValue("startup/open", key); });
     }
-    sl->addStretch(1);
-    tabs->addTab(startTab, "Startup");
+    rows->addWidget(row("Open", openBox, "When Sessions starts without a set to open.", startTab));
+    rows->addStretch(1);
+    addPage(startTab, "Startup");
 
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Close, this);
-    connect(buttons, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    lay->addWidget(buttons);
+    // the footer: Close, as a plain button
+    auto* footer = new QWidget(this);
+    footer->setObjectName("prefsFooter");
+    footer->setAttribute(Qt::WA_StyledBackground);
+    auto* fl = new QHBoxLayout(footer);
+    fl->setContentsMargins(16, 10, 16, 10);
+    fl->addStretch(1);
+    auto* close = new QPushButton("Close", footer);
+    close->setObjectName("prefsClose");
+    close->setDefault(true);
+    connect(close, &QPushButton::clicked, this, &QDialog::reject);
+    fl->addWidget(close);
+    lay->addWidget(footer);
+
+    // the page you were on last
+    connect(sidebar, &QListWidget::currentRowChanged, this, [tabs](int i) {
+        if (i < 0) return;
+        tabs->setCurrentIndex(i);
+        QSettings("Sessions", "Sessions").setValue("prefs/page", i);
+    });
+    sidebar->setCurrentRow(std::clamp(settings().value("prefs/page", 0).toInt(), 0, sidebar->count() - 1));
 }
 
 audio::DriverOptions PreferencesDialog::savedAudio() {

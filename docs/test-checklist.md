@@ -314,6 +314,15 @@ Get a few captures: [tonehunt.org](https://tonehunt.org) (free `.nam` files; "st
 5. Click in the Arrangement at bar 5 (the start marker moves there) and, stopped, launch a clip → the song starts at bar 5 and the clip plays from its beginning right away.
 6. With the song **playing**, launch another clip → it flashes and comes in on the next bar (the control bar's quantization; a clip with its own quantization in the Launch box uses that). Launch a scene while playing → every clip comes in together on the bar. Set the quantization to None → launches are immediate while playing too.
 
+## 22. Your icon, Preferences with a sidebar, clean buttons (0.25)
+
+1. Edit → Preferences (Ctrl+,) → a window with the categories down the left (Audio, Record, MIDI, Look, Startup) and the page on the right: a title, then rows with the setting's name on the left and its controls and a short note on the right. Click each category → its page; close and reopen → it opens on the one you were on. Resize it → the rows stretch, the sidebar stays.
+2. Audio → the same settings as before (system, buffer, Outputs: Main out L / R, Inputs: Input 1 / 2, Look for interfaces again, Status). Change the buffer → it applies as before. PulseAudio → the output / buffer / input device rows instead.
+3. Look → **App icon**: six icons with their names, the current one outlined. Click **Dusk** → the window's title bar / taskbar icon changes at once; Help → About → the logo's S is in Dusk's colours; the app menu shows the new icon (on some desktops after the next login; `~/.local/share/applications/sessions.desktop` now exists). Click **Ember** → the default again, the file is gone.
+4. Each icon in turn, then About → the S follows (Playing: one orange clip, the rest in the text colour). Switch View → Theme to Light with Playing chosen → the grey clips are dark.
+5. Dialog buttons: File → New Set with unsaved changes → Save / Discard / Cancel are plain buttons in the app's style, no desktop icons; the default one has the orange border; the question mark is a flat orange disc. The same in Preferences' Close, About's OK, the Zoom restart question, the theme editor's buttons, the export dialog.
+6. Menus: File, Edit, View, Help → the panel colour, the orange highlight, greyed-out items (Undo with nothing to undo) read as disabled, separators inset. Right-click menus in the Session View, the Arrangement and the device chain look the same.
+
 ## How to tell me what you found
 
 For each problem: the section and number (e.g. "4.3"), what you did, what happened, and what you expected. For sound problems, which device and settings, and whether it's a click, crackle, noise, distortion, a wrong level or a delay. If something crashed, say what you clicked last.

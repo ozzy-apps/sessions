@@ -4,5 +4,12 @@
     <file>icon/sessions.svg</file>
     <file>icon/sessions-64.png</file>
     <file>logo/sessions-logo.svg</file>
+    <file>icon/variants/A-ember.svg</file>
+    <file>icon/variants/B-trio.svg</file>
+    <file>icon/variants/C-clips.svg</file>
+    <file>icon/variants/D-playing.svg</file>
+    <file>icon/variants/E-paper.svg</file>
+    <file>icon/variants/F-dusk.svg</file>
+    <file>sessions.desktop</file>
   </qresource>
 </RCC>

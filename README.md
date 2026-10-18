@@ -34,7 +34,9 @@ Sessions then shows up in the app menu, and double-clicking a `.sessions` file i
 
 ## Artwork
 
-`assets/logo/` holds the logo (`sessions-logo.svg`, charcoal on a transparent background; `sessions-logo-light.svg` for dark pages; `sessions-mark.svg`, the S alone). The app icon is `assets/icon/sessions.svg` (the S in colour on a charcoal tile) with its rendered PNGs beside it; `assets/icon/variants/` has the other colour treatments.
+`assets/logo/` holds the logo (`sessions-logo.svg`, charcoal on a transparent background; `sessions-logo-light.svg` for dark pages; `sessions-mark.svg`, the S alone). The app icon is `assets/icon/sessions.svg` (the S in colour on a charcoal tile) with its rendered PNGs beside it; `assets/icon/variants/` has all six colour treatments, and **Preferences → Look → App icon** lets you pick one (0.25): the window, the taskbar, the app menu (through a desktop entry written for your user) and the About logo follow.
+
+![Preferences](docs/screenshots/40-preferences.png)
 
 ## Shortcuts
 
@@ -47,7 +49,7 @@ Sessions then shows up in the app menu, and double-clicking a `.sessions` file i
 | Tab while dragging a Session clip | Carry the clip into the Arrangement: drop it on a lane of its kind for a copy at the snapped beat (Alt: off the grid); Tab again brings it back; Esc lets go |
 | Ctrl+Alt+B | Show / hide the browser |
 | Ctrl+M / Ctrl+K | MIDI Map / Key Map mode (Esc leaves) |
-| Ctrl+, | Preferences |
+| Ctrl+, | Preferences (0.25: a sidebar of categories, pages of settings) |
 | Ctrl+/ | Keyboard shortcuts |
 | F11 | Full screen |
 | Space | Play from the start marker / stop (click an Arrangement clip to start there) |

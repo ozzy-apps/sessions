@@ -23,6 +23,7 @@
 #include "audio/MidiInput.h"
 #include "MapOverlay.h"
 #include "Preferences.h"
+#include "AppIcon.h"
 #include "ThemeEditor.h"
 #include "OverviewBar.h"
 #include "audio/Builtin.h"
@@ -518,26 +519,6 @@ void MainWindow::buildMenus() {
     command(help, "About Sessions", {}, [this] { QDialog* d = aboutDialog(); d->exec(); d->deleteLater(); });
 }
 
-// The logo (assets/logo/sessions-logo.svg, charcoal on nothing) in any colour: the SVG's one fill
-// is swapped for `ink` before rendering, so it reads on every theme.
-static QPixmap logoPixmap(const QColor& ink, int width, qreal dpr) {
-    QFile f(":/logo/sessions-logo.svg");
-    if (!f.open(QIODevice::ReadOnly)) return {};
-    QByteArray svg = f.readAll();
-    svg.replace("#222221", ink.name(QColor::HexRgb).toLatin1());
-    QSvgRenderer r(svg);
-    const QSizeF natural = r.defaultSize();
-    if (natural.width() <= 0) return {};
-    const int height = int(std::lround(width * natural.height() / natural.width()));
-    QPixmap pm(QSize(width, height) * dpr);
-    pm.setDevicePixelRatio(dpr);
-    pm.fill(Qt::transparent);
-    QPainter p(&pm);
-    p.setRenderHint(QPainter::Antialiasing);
-    r.render(&p, QRectF(0, 0, width, height));
-    return pm;
-}
-
 QDialog* MainWindow::aboutDialog() {
     auto* dlg = new QDialog(this);
     dlg->setObjectName("aboutDialog");
@@ -547,7 +528,7 @@ QDialog* MainWindow::aboutDialog() {
     lay->setSpacing(18);
     auto* logo = new QLabel(dlg);
     logo->setObjectName("aboutLogo");
-    logo->setPixmap(logoPixmap(theme::text, 340, dlg->devicePixelRatioF()));
+    logo->setPixmap(appicon::logo(theme::text, 340, dlg->devicePixelRatioF()));   // the mark in the chosen icon's colours
     logo->setAlignment(Qt::AlignHCenter);
     lay->addWidget(logo);
     const QString version = QCoreApplication::applicationVersion().isEmpty() ? QString("(dev)") : QCoreApplication::applicationVersion();

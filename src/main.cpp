@@ -1,6 +1,7 @@
 // Sessions — a clip-based music sequencer. See handoff.md.
 // `sessions [set.sessions]` opens a set; --help lists the dev flags.
 #include "ui/MainWindow.h"
+#include "ui/AppIcon.h"
 #include "core/Model.h"
 #include "core/Theme.h"
 #include "audio/Engine.h"
@@ -64,10 +65,11 @@ int main(int argc, char** argv) {
     app.setOrganizationName("Sessions");
     app.setApplicationVersion(SESSIONS_VERSION);
     app.setDesktopFileName("sessions");
-    app.setWindowIcon(QIcon(":/icon/sessions.svg"));
+    sessions::appicon::applyWindowIcon();   // Preferences > Look > App icon
     QFont f = app.font();
     f.setPointSizeF(8.5);
     app.setFont(f);
+    sessions::theme::installAppStyle();                      // dialog buttons without icons, flat message-box glyphs
     sessions::theme::apply(sessions::theme::savedKind());   // View > Theme; also applies the stylesheet
 
     QCommandLineParser cli;

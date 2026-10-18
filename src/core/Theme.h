@@ -273,5 +273,8 @@ signals:
 Notifier* notifier();
 
 QString stylesheet();   // for the current colours
+// Wraps the platform style (main and the smoke test, once): dialog buttons carry no icons, and the
+// message-box glyphs (question, information, warning, critical) are flat discs in the theme's colours.
+void installAppStyle();
 
 } // namespace sessions::theme

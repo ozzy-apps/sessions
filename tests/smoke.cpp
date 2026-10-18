@@ -34,12 +34,15 @@
 #include "ui/MixerStrip.h"
 #include "ui/MapOverlay.h"
 #include "ui/Preferences.h"
+#include "ui/AppIcon.h"
+#include <QStackedWidget>
 #include "ui/ThemeEditor.h"
 #include "ui/OverviewBar.h"
 #include "ui/InlineEdit.h"
 #include "ui/Icons.h"
 #include "ui/GridShade.h"
 #include <QImage>
+#include <QStyle>
 #include "core/Grooves.h"
 #include <QSlider>
 #include "audio/Driver.h"
@@ -52,6 +55,8 @@
 #include <QSignalSpy>
 #include <QUndoStack>
 #include <QToolButton>
+#include <QTabWidget>
+#include <QDialogButtonBox>
 #include <QWidgetAction>
 #include <QMenu>
 #include <QAction>
@@ -308,6 +313,7 @@ int main(int argc, char** argv) {
     qputenv("XDG_CONFIG_HOME", config.path().toLocal8Bit());
     QApplication app(argc, argv);
     Q_INIT_RESOURCE(resources);   // the .qrc lives in the static sessions_core library (the About logo reads it)
+    theme::installAppStyle();
     Project project;
     project.loadDemo();
     audio::Engine engine(&project);   // not started: nothing renders unless a test calls process()
@@ -8118,6 +8124,48 @@ int main(int argc, char** argv) {
         CHECK((logo && !logo->pixmap().isNull() && logo->pixmap().width() > 300), "M24 about: the Sessions logo renders from the resources");
         CHECK((words && words->text().contains("Neural Amp Modeler") && words->text().contains("Session grid") && !words->text().contains("in the style of")), "M24 about: the About text is the new one");
         delete d;
+    }
+
+    // ================================================================ Milestone 25: the app icon choice, Preferences with a sidebar, clean buttons
+    {
+        QTemporaryDir data;   // the desktop entry override and the icon file land here, not in ~/.local/share
+        qputenv("XDG_DATA_HOME", data.path().toLocal8Bit());
+        const QString was = appicon::currentKey();
+        QString error;
+        CHECK((appicon::variants().size() == 6 && appicon::variant("nonsense").key == "ember"), "M25 icon: six variants, an unknown key means the default");
+        CHECK((appicon::setCurrent("dusk", &error) && appicon::currentKey() == "dusk" && !qApp->windowIcon().isNull()), qPrintable("M25 icon: choosing one saves it and sets the window icon " + error));
+        QFile entry(appicon::desktopOverridePath());
+        const QByteArray text = entry.open(QIODevice::ReadOnly) ? entry.readAll() : QByteArray();
+        CHECK((text.contains("Icon=" + appicon::iconFilePath("dusk").toUtf8()) && text.contains("StartupWMClass=sessions") && text.contains("X-Sessions-IconChoice=dusk") && QFile::exists(appicon::iconFilePath("dusk"))),
+              "M25 icon: a desktop entry for the user points at the written icon file");
+        const QImage logo = appicon::logo(Qt::white, 400, 1.0, "dusk").toImage();
+        const QColor seg = logo.pixelColor(35, 18), word = logo.pixelColor(int(400 * 0.42), int(400 * 0.10));   // the top-left segment; the capital S
+        CHECK((seg.blue() > 200 && seg.red() < 160 && word.red() > 240 && word.green() > 240), "M25 icon: the About logo's mark takes the variant's colours and the wordmark the ink");
+        const QImage grey = appicon::logo(Qt::black, 400, 1.0, "playing").toImage();
+        CHECK((grey.pixelColor(35, 18).red() > 200 && grey.pixelColor(35, 18).blue() < 120 && grey.pixelColor(35, 45).lightness() < 40), "M25 icon: Playing's grey clips take the ink, its playing clip the accent");
+        CHECK((appicon::setCurrent("ember") && !QFile::exists(appicon::desktopOverridePath())), "M25 icon: the default takes the override away again");
+
+        MainWindow w;
+        PreferencesDialog prefs(w.engine(), w.midiInput(), {}, &w);
+        auto* side = prefs.findChild<QListWidget*>("prefsSidebar");
+        auto* pages = prefs.findChild<QStackedWidget*>("prefsPages");
+        CHECK((side && pages && side->count() == 5 && pages->count() == 5 && side->item(3)->text() == "Look" && !prefs.findChild<QTabWidget*>()), "M25 prefs: a sidebar of five categories drives the pages");
+        side->setCurrentRow(3);
+        CHECK((pages->currentIndex() == 3 && QSettings("Sessions", "Sessions").value("prefs/page").toInt() == 3), "M25 prefs: picking a category shows its page and is remembered");
+        const QList<QToolButton*> choices = prefs.findChildren<QToolButton*>("iconChoice");
+        QToolButton* trio = nullptr; QToolButton* ember = nullptr;
+        for (QToolButton* b : choices) { if (b->property("iconKey") == "trio") trio = b; if (b->property("iconKey") == "ember") ember = b; }
+        CHECK((choices.size() == 6 && ember && ember->isChecked() && trio && !trio->isChecked()), "M25 prefs: Look shows the six icons with the current one checked");
+        if (trio) trio->click();
+        CHECK((appicon::currentKey() == "trio" && trio && trio->isChecked() && ember && !ember->isChecked()), "M25 prefs: clicking an icon makes it the app's");
+        CHECK((prefs.findChild<QPushButton*>("prefsClose") && !prefs.findChild<QDialogButtonBox*>() && prefs.findChild<QComboBox*>("audioBuffer") && prefs.findChild<QComboBox*>("countIn") && prefs.findChild<QComboBox*>("zoomDragDirection")),
+              "M25 prefs: a plain Close button; the audio, record and look controls are still there by name");
+        CHECK((theme::stylesheet().contains("dialogbuttonbox-buttons-have-icons: 0") && theme::stylesheet().contains("QListWidget#prefsSidebar")), "M25 style: dialog buttons carry no icons; the sidebar is styled");
+        const QImage q = qApp->style()->standardIcon(QStyle::SP_MessageBoxQuestion).pixmap(48).toImage();
+        CHECK((qApp->style()->styleHint(QStyle::SH_DialogButtonBox_ButtonsHaveIcons) == 0 && !q.isNull() && q.pixelColor(10, 24) == theme::accent.rgb()), "M25 style: the proxy style answers the hint and draws the question glyph as an accent disc");
+        appicon::setCurrent(was);
+        QSettings("Sessions", "Sessions").remove("prefs/page");
+        qunsetenv("XDG_DATA_HOME");
     }
 
     std::printf("%d failure(s)\n", failures);

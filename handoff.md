@@ -2,7 +2,7 @@
 
 A clip-based DAW in C++17 / Qt 6 Widgets, built around a Session grid and an Arrangement timeline. This file is the running log between iterations: what exists, how it's built, and what to do next. Read it first, then `src/ui/MainWindow.cpp` for how the UI connects and `src/audio/Engine.h` for how sound gets made.
 
-**Last updated:** 2026-10-18 · **Milestone 24 done (the Sessions logo and a coloured app icon, the About rewritten around it, and launching after a stop: a clip or scene launched while the song is stopped starts at once, from the start marker, wherever the song last stopped)**, after **Milestone 23** (a real start marker and loop brace) · v0.24.0 · 48k lines · builds clean on Qt 6.4, all 999 smoke checks pass · ships a .deb on every build · `docs/test-checklist.md` lists what to try by hand.
+**Last updated:** 2026-10-18 · **Milestone 25 done (the app icon is yours to pick: six colour treatments in Preferences > Look, the window icon, a per-user desktop entry and the About logo follow; Preferences rebuilt as a sidebar of categories with pages of labelled rows; dialog buttons without icons, flat message-box glyphs, a menu pass)**, after **Milestone 24** (the logo, the About, launching after a stop) · v0.25.0 · 49k lines · builds clean on Qt 6.4, all 1012 smoke checks pass · ships a .deb on every build · `docs/test-checklist.md` lists what to try by hand.
 
 ---
 
@@ -17,9 +17,9 @@ sessions/
 ├── README.md                 # build, install, shortcuts
 ├── assets/
 │   ├── icon/sessions.svg     # app icon (the mark in colour on a charcoal tile) + rendered PNGs (16–512); also the .sessions file icon
-│   ├── icon/variants/        # the six colour treatments of the icon (A–F); sessions.svg is A
+│   ├── icon/variants/        # the six colour treatments of the icon (A–F), all in the resources: Preferences > Look > App icon; sessions.svg is A
 │   ├── logo/                 # the logo: sessions-logo.svg (charcoal), -light.svg (for dark pages), sessions-mark.svg (the S alone)
-│   ├── sessions.desktop      # Exec=sessions %f, MimeType=application/x-sessions-set
+│   ├── sessions.desktop      # Exec=sessions %f, MimeType=application/x-sessions-set (also in the resources: the per-user override's template)
 │   ├── sessions-mime.xml     # the .sessions MIME type (installed as /usr/share/mime/packages/sessions.xml)
 │   └── resources.qrc         # compiled into sessions_core; main() calls Q_INIT_RESOURCE
 ├── docs/screenshots/         # offscreen captures of each view (--screenshots); devices/ has every device panel
@@ -1261,7 +1261,32 @@ The user brought the Sessions logo (a six-segment S built from clip-shaped block
 - M24 launch: a scene from 1.1.1, Stop Track at the next bar, one Stop leaving the start marker at 1.1.1, then a single clip launched from the standstill plays within a tenth of a beat from 1.1.1 (the regression), a scene from a standstill with the start marker at bar 2 starts there in phase, and with the song playing a launch waits for the next bar and lands on it.
 - M24 about: the dialog's logo renders from the resources and the text is the new one.
 
-## Milestone 25: next
+## Milestone 25: your icon, Preferences with a sidebar, clean buttons (done)
+
+After 0.24: "preserve the other icons as well, and have an option in preferences for the user to set it to their liking · make the full logo in the About section follow the colour style chosen · redesign the menu and buttons, everything following the main UI's design · make the preferences a window with a side bar with all the categories and a main pane with the options (like Bitwig's) · no coloured icons on the buttons like OK, Save, Discard: a clean button with the UI's design".
+
+### The app icon (`ui/AppIcon.h/.cpp`, `appicon::`)
+
+- `appicon::variants()` is the table of the six treatments (key, name, a line about it, the SVG in the resources, the six segment colours; an invalid colour means "a grey clip": the ink in the logo). `currentKey()` reads QSettings `ui/icon` (ember by default; an unknown key is the default), `icon(key)` the QIcon, `applyWindowIcon()` sets the application's window icon at startup (`main.cpp`).
+- `setCurrent(key)` saves, sets the window icon and writes the **desktop entry override**: `~/.local/share/applications/sessions.desktop` (XDG `ApplicationsLocation`) is the shipped entry (`:/sessions.desktop`) with `Icon=` pointing at the SVG written to `~/.local/share/Sessions/Sessions/Icons/sessions-<key>.svg`, plus an `X-Sessions-IconChoice=<key>` line; `StartupWMClass=sessions` stays, so the running window matches it. Choosing the default removes the override (only one carrying the marker). An absolute icon path needs no install, so a build-dir run works too. Some desktops read the override at once, some after a new login.
+- `logo(ink, width, dpr, key)` renders the full logo (`:/logo/sessions-logo.svg`) with the root fill swapped for the ink (the wordmark) and a `fill` added to each of the six segment elements by id, so the About's mark is in the chosen colours (Playing: the accent and the ink).
+
+### Preferences (`ui/Preferences.cpp`)
+
+- A `QListWidget#prefsSidebar` (172 px, the categories: Audio, Record, MIDI, Look, Startup) drives a `QStackedWidget#prefsPages`; the page you were on is remembered (`prefs/page`). A page is a title (`#prefsTitle`) over rows: `row(label, control, hint, parent)` puts the setting's name in a 150 px left column (`#prefsRowLabel`), the control(s) and a dim note on the right, a hairline under (`QWidget#prefsRow`). The JACK box groups the ports as **Outputs** and **Inputs** rows; the PulseAudio box and the status (now a **Status** row) as before; the MIDI list is an **Inputs** row; Look has **Zoom** (with Restart Now beside it), **Zoom drag** and **App icon**: six `QToolButton#iconChoice` (icon 48 px, the name under, the chosen one outlined in the accent; property `iconKey`), a click is `appicon::setCurrent`. The footer (`#prefsFooter`) holds a plain **Close** (`#prefsClose`), no `QDialogButtonBox`. Every control keeps its object name (`audioSystem`, `audioFrames`, `jackPort0..3`, `audioDevice`, `audioBuffer`, `inputDevice`, `countIn`, `midiPorts`, `zoomDragDirection`), plus `uiZoom`, `restartNow`, `rescanPorts`.
+
+### Buttons, menus, message boxes (`Theme.cpp` stylesheet, `theme::installAppStyle`)
+
+- `QDialogButtonBox { dialogbuttonbox-buttons-have-icons: 0; }` and the proxy style's `SH_DialogButtonBox_ButtonsHaveIcons` = 0: no desktop-theme icons on OK / Save / Discard / Cancel / Close anywhere. Dialog push buttons are a little roomier (`QDialog QPushButton`: 20 px, 64 px wide, 3 / 14 px padding), the default button has the accent border; pressed and disabled states for every button.
+- `theme::installAppStyle()` (main and the smoke test) wraps the platform style in a `QProxyStyle` whose `standardIcon` draws the message-box glyphs flat: a disc in the accent (question, information), `theme::solo` (warning) or `theme::record` (critical) with ?, i or ! in `onAccent`, so a QMessageBox looks like the app rather than the desktop.
+- Menus: the panel colour, 4 px padding top and bottom, roomier items, a disabled colour, separators inset; the menu bar's items rounded with a pressed state.
+
+### Tests (13 new; 1012 in all)
+
+- M25 icon: six variants and the default for an unknown key; choosing one saves it, sets the window icon and writes the desktop entry (icon path, `StartupWMClass`, the marker) and the SVG under a scratch `XDG_DATA_HOME`; the About logo's top-left segment takes the variant's colour and the wordmark the ink; Playing's grey clips take the ink; the default removes the override.
+- M25 prefs: five categories drive five pages (no QTabWidget), the page is remembered, six icon buttons with the current one checked, a click changes the app's icon, a plain Close and the old controls by name; the stylesheet carries the no-icon rule and the sidebar; the proxy style answers the hint and draws the glyphs.
+
+## Milestone 26: next
 
 - A note clipboard for the piano roll; the envelope editor showing the brace and ▶; Set 1.1.1 Here moving the markers with the audio.
 - Monolith: a compact main panel for narrow screens, a free delay time, reverb pre-delay / damping, chorus feedback, unison up to 8 (a new choice parameter: the old one can't grow).

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.24.0 LANGUAGES CXX)
+project(Sessions VERSION 0.25.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -64,6 +64,7 @@ set(SESSIONS_SOURCES
     src/ui/EnvelopeEditor.cpp
     src/ui/MapOverlay.cpp
     src/ui/Preferences.cpp
+    src/ui/AppIcon.cpp
     src/ui/ThemeEditor.cpp
     src/ui/OverviewBar.cpp
     src/ui/PianoRoll.cpp

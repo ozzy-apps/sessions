@@ -1,5 +1,8 @@
 #include "Theme.h"
 #include <QApplication>
+#include <QProxyStyle>
+#include <QPainter>
+#include <QStyleOption>
 #include <QWidget>
 #include <QSettings>
 #include <QRegularExpression>
@@ -183,6 +186,56 @@ void apply(const Theme& t) {
 
 void apply(Kind k) { apply(builtinThemes()[int(k)]); }
 
+namespace {
+// The app's style: the platform's, with the dialog buttons' icons off and the message-box glyphs
+// drawn flat in the theme's colours (they're drawn at call time, so they follow a theme change).
+class AppStyle : public QProxyStyle {
+public:
+    using QProxyStyle::QProxyStyle;
+    static constexpr const char* kName = "sessionsAppStyle";
+    int styleHint(StyleHint hint, const QStyleOption* opt, const QWidget* w, QStyleHintReturn* ret) const override {
+        if (hint == SH_DialogButtonBox_ButtonsHaveIcons) return 0;
+        if (hint == SH_MessageBox_CenterButtons) return 0;
+        return QProxyStyle::styleHint(hint, opt, w, ret);
+    }
+    QIcon standardIcon(StandardPixmap sp, const QStyleOption* opt, const QWidget* w) const override {
+        QColor disc; QString glyph;
+        switch (sp) {
+        case SP_MessageBoxQuestion:    disc = accent; glyph = "?"; break;
+        case SP_MessageBoxInformation: disc = accent; glyph = "i"; break;
+        case SP_MessageBoxWarning:     disc = solo;   glyph = "!"; break;
+        case SP_MessageBoxCritical:    disc = record; glyph = "!"; break;
+        default: return QProxyStyle::standardIcon(sp, opt, w);
+        }
+        QIcon icon;
+        for (int size : {32, 48, 64}) {
+            QPixmap pm(size, size);
+            pm.fill(Qt::transparent);
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setPen(Qt::NoPen);
+            p.setBrush(disc);
+            p.drawEllipse(QRectF(1, 1, size - 2, size - 2));
+            QFont f = p.font();
+            f.setPixelSize(int(size * 0.62));
+            f.setWeight(QFont::DemiBold);
+            p.setFont(f);
+            p.setPen(onAccent);
+            p.drawText(QRectF(0, 0, size, size).adjusted(0, -size * 0.02, 0, 0), Qt::AlignCenter, glyph);
+            icon.addPixmap(pm);
+        }
+        return icon;
+    }
+};
+}
+
+void installAppStyle() {
+    if (!qApp || qApp->style()->objectName() == AppStyle::kName) return;
+    auto* style = new AppStyle(qApp->style()->name());
+    style->setObjectName(AppStyle::kName);
+    qApp->setStyle(style);
+}
+
 const QVector<Theme>& builtinThemes() {
     static const QVector<Theme> themes = [] {
         auto make = [](const char* name, Kind base, double hue, double tint, double contrast, const char* accent) {
@@ -335,7 +388,13 @@ QToolButton, QPushButton {
     color: {text}; padding: 1px 6px; min-height: 16px; font-size: 10px;
 }
 QToolButton:hover, QPushButton:hover { background: {hover}; }
+QToolButton:pressed, QPushButton:pressed { background: {panel}; }
 QToolButton:checked, QPushButton:checked { background: {accent}; color: {onAccent}; }
+QToolButton:disabled, QPushButton:disabled { color: {disabled}; }
+QDialog QPushButton { padding: 3px 14px; min-height: 20px; min-width: 64px; }
+QDialog QPushButton:default { border-color: {accent}; }
+QDialogButtonBox { dialogbuttonbox-buttons-have-icons: 0; }
+QMessageBox QLabel { font-size: 11px; }
 QToolButton#playButton:checked { background: {play}; }
 QToolButton#recButton:checked  { background: {record}; }
 QToolButton#muteButton:checked { background: {mute}; color: {onAccent}; }
@@ -381,12 +440,30 @@ QLabel#infoTitle { color: {text}; font-size: 11px; font-weight: 600; }
 QLabel#infoBody  { color: {dim}; font-size: 10px; }
 QLabel#detailTitle { font-weight: 600; }
 QMenuBar { background: {panel}; border-bottom: 1px solid {line}; }
-QMenuBar::item { padding: 3px 8px; background: transparent; }
+QMenuBar::item { padding: 4px 10px; background: transparent; border-radius: 2px; }
 QMenuBar::item:selected { background: {hover}; }
-QMenu { background: {bg}; border: 1px solid {line}; }
-QMenu::item { padding: 3px 22px 3px 14px; }
-QMenu::separator { height: 1px; background: {line}; margin: 3px 0; }
+QMenuBar::item:pressed { background: {panel2}; }
+QMenu { background: {panel}; border: 1px solid {line}; padding: 4px 0; }
+QMenu::item { padding: 4px 28px 4px 16px; }
 QMenu::item:selected { background: {accent}; color: {onAccent}; }
+QMenu::item:disabled { color: {disabled}; }
+QMenu::separator { height: 1px; background: {line}; margin: 4px 10px; }
+QMenu::right-arrow { width: 7px; height: 7px; margin-right: 8px; }
+QMenu::indicator { width: 10px; height: 10px; margin-left: 4px; }
+
+/* Preferences: a sidebar of categories, pages of rows (Edit > Preferences…) */
+QListWidget#prefsSidebar { background: {sidebar}; border: 0; border-right: 1px solid {line}; outline: 0; font-size: 11px; padding-top: 12px; }
+QListWidget#prefsSidebar::item { padding: 7px 16px; border-left: 2px solid transparent; color: {textSoft}; }
+QListWidget#prefsSidebar::item:hover { background: {itemHover}; color: {text}; }
+QListWidget#prefsSidebar::item:selected { background: {panel2}; color: {textBright}; border-left: 2px solid {accent}; }
+QWidget#prefsPage { background: {bg}; }
+QLabel#prefsTitle { font-size: 15px; font-weight: 600; color: {text}; }
+QWidget#prefsRow { border-bottom: 1px solid {line}; }
+QLabel#prefsRowLabel { color: {textSoft}; font-weight: 600; }
+QWidget#prefsFooter { background: {panel}; border-top: 1px solid {line}; }
+QToolButton#iconChoice { background: transparent; border: 1px solid transparent; border-radius: 4px; padding: 6px 2px; font-size: 10px; color: {textSoft}; }
+QToolButton#iconChoice:hover { background: {hover}; color: {text}; }
+QToolButton#iconChoice:checked { background: {panel2}; border: 1px solid {accent}; color: {text}; }
 QToolTip { background: {field}; color: {text}; border: 1px solid {line}; }
 )";
     static const QRegularExpression token("\\{([A-Za-z0-9]+)\\}");
