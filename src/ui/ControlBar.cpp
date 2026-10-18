@@ -1,5 +1,5 @@
 #include "ControlBar.h"
-#include "Icons.h"
+#include "SvgIcons.h"
 #include "core/Theme.h"
 #include "InfoView.h"
 #include "core/Model.h"
@@ -10,6 +10,7 @@
 #include <QToolButton>
 #include <QComboBox>
 #include <QLabel>
+#include <QPainter>
 #include <QMenu>
 #include <QSettings>
 #include <QDateTime>
@@ -20,19 +21,42 @@ namespace sessions {
 
 // Hand-made stylesheets, built from the theme (and rebuilt when View > Theme changes).
 static QString positionStyle(bool counting) {   // the count-in shows in red
-    return QString("background:%1;border:1px solid %2;padding:0 4px;min-height:16px;%3")
+    return QString("background:%1;border:1px solid %2;padding:0 4px;min-height:22px;%3")
         .arg(theme::field.name(), theme::line.name(), counting ? "color:" + theme::record.name() + ";" : QString());
 }
 static QString reEnableStyle() { return QString("background:%1;color:%2;font-weight:600;").arg(theme::record.name(), theme::onAccent.name()); }
+
+// One height for everything in the bar (0.35): the buttons, the fields, the combo and the
+// position, so the row reads as one line; icon buttons are square-ish with a 16 px SVG icon.
+constexpr int kControlH = 24, kIconButtonW = 30, kIconPx = 16;
 
 static QToolButton* makeButton(QWidget* parent, const QString& text, const QString& title, const QString& help, bool checkable = false) {
     auto* b = new QToolButton(parent);
     b->setText(text);
     b->setCheckable(checkable);
     b->setFocusPolicy(Qt::NoFocus);
+    b->setFixedHeight(kControlH);
     InfoView::attach(b, title, help);
     return b;
 }
+
+// The MIDI-in lamp: a disc that lights in the accent colour while a message is coming in.
+class MidiLight : public QWidget {
+public:
+    explicit MidiLight(QWidget* parent) : QWidget(parent) { setFixedSize(14, kControlH); }
+    void setLit(bool on) { if (on != m_lit) { m_lit = on; update(); } }
+    bool lit() const { return m_lit; }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(Qt::NoPen);
+        p.setBrush(m_lit ? theme::accent : theme::dim);
+        p.drawEllipse(QRectF(rect()).center(), 3.5, 3.5);
+    }
+private:
+    bool m_lit = false;
+};
 
 ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     : QWidget(parent), m_project(project), m_transport(transport)
@@ -47,6 +71,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_follow = makeButton(this, "Follow", "Follow", "On: the Arrangement scrolls along with the playhead while it plays.", true);
     m_follow->setChecked(true);
     connect(m_follow, &QToolButton::toggled, this, &ControlBar::followToggled);
+    m_follow->setObjectName("followButton");
     lay->addWidget(m_follow);
 
     auto* tap = makeButton(this, "TAP", "Tap Tempo", "Click in time with the music to set the tempo.");
@@ -60,6 +85,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
             m_tempo->setValue(std::round(bpm));
         }
     });
+    tap->setObjectName("tapButton");
     lay->addWidget(tap);
 
     m_tempo = new DragValue(this);
@@ -77,6 +103,8 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
         m_project->setTempo(v);
     });
     connect(project, &Project::tempoChanged, this, [this] { m_tempo->setValue(m_project->tempo, false); });
+    m_tempo->setObjectName("tempoField");
+    m_tempo->setFixedHeight(kControlH);
     lay->addWidget(m_tempo);
 
     auto* sig = new DragValue(this);
@@ -86,9 +114,11 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     sig->setFormatter([](double) { return "4 / 4"; });
     sig->setCursor(Qt::ArrowCursor);
     InfoView::attach(sig, "Time Signature", "Fixed at 4/4 for now.");
+    sig->setObjectName("sigField");
+    sig->setFixedHeight(kControlH);
     lay->addWidget(sig);
 
-    m_metro = makeButton(this, "◉", "Metronome", "Toggles the click. Right-click for the count-in before recordings.", true);
+    m_metro = makeButton(this, "", "Metronome", "Toggles the click. Right-click for the count-in before recordings.", true);
     connect(m_metro, &QToolButton::toggled, transport, &Transport::setMetronome);
     m_metro->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(m_metro, &QWidget::customContextMenuRequested, this, [this](const QPoint& at) {   // Count-In's metronome menu
@@ -106,6 +136,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
         menu.exec(m_metro->mapToGlobal(at));
     });
     m_metro->setProperty("mapTarget", "transport:metronome");
+    m_metro->setObjectName("metroButton");
     lay->addWidget(m_metro);
 
     m_quant = new QComboBox(this);
@@ -117,6 +148,8 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_quant->setFocusPolicy(Qt::NoFocus);
     InfoView::attach(m_quant, "Global Launch Quantization", "When launched clips actually start. Clips wait for the next point on this grid.");
     connect(m_quant, &QComboBox::currentIndexChanged, this, [this](int i) { m_transport->setLaunchQuantization(m_quant->itemData(i).toDouble()); });
+    m_quant->setObjectName("quantBox");
+    m_quant->setFixedHeight(kControlH);
     lay->addWidget(m_quant);
 
     lay->addStretch(1);
@@ -127,6 +160,8 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_position->setAlignment(Qt::AlignCenter);
     m_position->setStyleSheet(positionStyle(false));
     InfoView::attach(m_position, "Arrangement Position", "Bars. Beats. Sixteenths.");
+    m_position->setObjectName("positionLabel");
+    m_position->setFixedSize(70, kControlH);
     lay->addWidget(m_position);
 
     m_play = makeButton(this, "", "Play", "Space starts and stops playback.", true);
@@ -138,6 +173,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_stop = makeButton(this, "", "Stop", "Stops everything. Press again while stopped to return to the start.");
     connect(m_stop, &QToolButton::clicked, transport, &Transport::stop);
     m_stop->setProperty("mapTarget", "transport:stop");
+    m_stop->setObjectName("stopButton");
     lay->addWidget(m_stop);
 
     m_rec = makeButton(this, "", "Arrangement Record",
@@ -163,14 +199,18 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
         return QString("%1. %2. %3").arg(s / 16 + 1).arg((s / 4) % 4 + 1).arg(s % 4 + 1);
     });
     connect(m_loopStart, &DragValue::valueEdited, this, [this](double v) { m_transport->setLoop(v, m_transport->loopLength()); });
+    m_loopStart->setObjectName("loopStartField");
+    m_loopStart->setFixedHeight(kControlH);
     lay->addWidget(m_loopStart);
-    m_punchIn = makeButton(this, "⇥", "Punch-In",
+    m_punchIn = makeButton(this, "", "Punch-In",
         "On: Arrangement recording starts at the loop start, wherever you press Play. Audio and notes before it are left alone.", true);
     connect(m_punchIn, &QToolButton::toggled, transport, &Transport::setPunchIn);
+    m_punchIn->setObjectName("punchInButton");
     lay->addWidget(m_punchIn);
-    m_loop = makeButton(this, "⟲", "Loop", "Loops the Arrangement between Loop Start and Loop Length (drag the brace above the ruler too).", true);
+    m_loop = makeButton(this, "", "Loop", "Loops the Arrangement between Loop Start and Loop Length (drag the brace above the ruler too).", true);
     connect(m_loop, &QToolButton::toggled, transport, &Transport::setLoopEnabled);
     m_loop->setProperty("mapTarget", "transport:loop");
+    m_loop->setObjectName("loopButton");
     lay->addWidget(m_loop);
     m_loopLength = loopField("Loop Length", "How long the Arrangement loop is.", 1);
     m_loopLength->setFormatter([](double b) {
@@ -178,25 +218,28 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
         return QString("%1. %2. %3").arg(s / 16).arg((s / 4) % 4).arg(s % 4);
     });
     connect(m_loopLength, &DragValue::valueEdited, this, [this](double v) { m_transport->setLoop(m_transport->loopStart(), v); });
-    m_punchOut = makeButton(this, "⇤", "Punch-Out", "On: Arrangement recording stops at the loop end, even if playback goes on.", true);
+    m_punchOut = makeButton(this, "", "Punch-Out", "On: Arrangement recording stops at the loop end, even if playback goes on.", true);
     connect(m_punchOut, &QToolButton::toggled, transport, &Transport::setPunchOut);
+    m_punchOut->setObjectName("punchOutButton");
     lay->addWidget(m_punchOut);
+    m_loopLength->setObjectName("loopLengthField");
+    m_loopLength->setFixedHeight(kControlH);
     lay->addWidget(m_loopLength);
 
-    m_draw = makeButton(this, "✎", "Draw Mode (B)", "Click in the note editor to add notes, click a note to delete it, drag to paint.", true);
+    m_draw = makeButton(this, "", "Draw Mode (B)", "Click in the note editor to add notes, click a note to delete it, drag to paint.", true);
     connect(m_draw, &QToolButton::toggled, this, &ControlBar::drawModeChanged);
+    m_draw->setObjectName("drawButton");
     lay->addWidget(m_draw);
 
-    m_keys = makeButton(this, "⌨", "Computer MIDI Keyboard (M)",
+    m_keys = makeButton(this, "", "Computer MIDI Keyboard (M)",
         "Play the armed track (or the selected one) with A W S E D F T G Y H U J K O L P. Z / X: octave down / up. C / V: velocity down / up.", true);
     connect(m_keys, &QToolButton::toggled, this, &ControlBar::midiKeyboardToggled);
+    m_keys->setObjectName("keysButton");
     lay->addWidget(m_keys);
 
-    m_reEnable = makeButton(this, "↺ Automation", "Re-Enable Automation",
+    m_reEnable = makeButton(this, "Automation", "Re-Enable Automation",
         "You've moved an automated control by hand, so its automation is off. Click to let every envelope take over again.");
     m_reEnable->setStyleSheet(reEnableStyle());
-    refreshIcons();
-    connect(theme::notifier(), &theme::Notifier::changed, this, &ControlBar::refreshIcons);
     connect(theme::notifier(), &theme::Notifier::changed, this, [this] {   // View > Theme: the hand-made stylesheets follow
         m_position->setStyleSheet(positionStyle(m_position->property("counting").toBool()));
         m_reEnable->setStyleSheet(reEnableStyle());
@@ -204,6 +247,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_reEnable->hide();
     connect(m_reEnable, &QToolButton::clicked, project, &Project::reEnableAutomation);
     connect(project, &Project::automationChanged, this, [this] { m_reEnable->setVisible(m_project->anyAutomationOverridden()); });
+    m_reEnable->setObjectName("reEnableButton");
     lay->addWidget(m_reEnable);
 
     lay->addStretch(1);
@@ -213,11 +257,12 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_midiMap = makeButton(this, "MIDI", "MIDI Map Mode (Ctrl+M)", "Click a control or clip slot, then move a knob or hit a key or pad on your MIDI controller. Delete removes; Esc leaves.", true);
     connect(m_keyMap, &QToolButton::clicked, this, &ControlBar::keyMapToggled);
     connect(m_midiMap, &QToolButton::clicked, this, &ControlBar::midiMapToggled);
-    m_midiLight = new QLabel("●", this);
-    m_midiLight->setObjectName("dimLabel");
-    m_midiLight->setFixedWidth(10);
+    m_midiLight = new MidiLight(this);
+    m_midiLight->setObjectName("midiLight");
     InfoView::attach(m_midiLight, "MIDI Input", "Lights up when MIDI comes in from a keyboard or controller.");
+    m_keyMap->setObjectName("keyMapButton");
     lay->addWidget(m_keyMap);
+    m_midiMap->setObjectName("midiMapButton");
     lay->addWidget(m_midiMap);
     lay->addWidget(m_midiLight);
 
@@ -225,14 +270,17 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
     m_cpu->setObjectName("dimLabel");
     m_cpu->setMinimumWidth(52);
     InfoView::attach(m_cpu, "CPU Load", "Share of each audio block's time the engine needs.");
+    m_cpu->setFixedHeight(kControlH);
     lay->addWidget(m_cpu);
 
-    m_session = makeButton(this, "▦", "Session View (Tab)", "The clip launching grid.", true);
-    m_arrange = makeButton(this, "☰", "Arrangement View (Tab)", "The timeline.", true);
+    m_session = makeButton(this, "", "Session View (Tab)", "The clip launching grid.", true);
+    m_arrange = makeButton(this, "", "Arrangement View (Tab)", "The timeline.", true);
     m_session->setChecked(true);
     connect(m_session, &QToolButton::clicked, this, [this] { emit viewRequested(true); });
     connect(m_arrange, &QToolButton::clicked, this, [this] { emit viewRequested(false); });
+    m_session->setObjectName("sessionButton");
     lay->addWidget(m_session);
+    m_arrange->setObjectName("arrangeButton");
     lay->addWidget(m_arrange);
 
     connect(transport, &Transport::tick, this, [this] {
@@ -242,11 +290,7 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
             m_position->setProperty("counting", counting);
             m_position->setStyleSheet(positionStyle(counting));
         }
-        const bool lit = QDateTime::currentMSecsSinceEpoch() < m_midiLitUntil;
-        if (lit != (m_midiLight->property("lit").toBool())) {
-            m_midiLight->setProperty("lit", lit);
-            m_midiLight->setStyleSheet(lit ? "color:" + theme::accent.name() + ";" : QString());
-        }
+        static_cast<MidiLight*>(m_midiLight)->setLit(QDateTime::currentMSecsSinceEpoch() < m_midiLitUntil);
         if (m_cpuTicks++ % 30) return;   // twice a second is plenty
         audio::Engine* e = m_transport->engine();
         if (e->hasAudio()) {
@@ -264,6 +308,8 @@ ControlBar::ControlBar(Project* project, Transport* transport, QWidget* parent)
             InfoView::attach(m_cpu, "No Audio Output", e->outputName() + "\n\nThe transport still runs; nothing is heard. Check that PipeWire or PulseAudio is running, then restart Sessions.");
         }
     });
+    refreshIcons();
+    connect(theme::notifier(), &theme::Notifier::changed, this, &ControlBar::refreshIcons);
     connect(transport, &Transport::stateChanged, this, &ControlBar::refresh);
     refresh();
 }
@@ -280,12 +326,20 @@ void ControlBar::setMidiKeyboardInfo(const QString& text) {
 }
 void ControlBar::toggleDrawMode() { m_draw->toggle(); }
 
-// The transport glyphs, painted (Icons.h): a dark glyph on the lit (accent / green / red) backgrounds
+// The SVG icons (assets/controlbar, drawn in the theme's colours: SvgIcons.h): set again when the
+// theme changes so the buttons repaint. Icon-only buttons are kIconButtonW wide; the Re-Enable
+// Automation button keeps its word beside its icon.
 void ControlBar::refreshIcons() {
-    for (auto [b, g] : {std::pair{m_play, icons::Glyph::Play}, std::pair{m_stop, icons::Glyph::Stop}, std::pair{m_rec, icons::Glyph::Record}}) {
-        b->setIcon(icons::icon(g, theme::text, theme::onAccent, 12));
-        b->setIconSize(QSize(12, 12));
-        b->setMinimumWidth(26);
+    const std::pair<QToolButton*, const char*> icons[] = {
+        {m_metro, "metronome"}, {m_play, "play"}, {m_stop, "stop"}, {m_rec, "record"}, {m_punchIn, "punch-in"}, {m_loop, "loop"},
+        {m_punchOut, "punch-out"}, {m_draw, "draw"}, {m_keys, "keyboard"}, {m_reEnable, "re-enable"}, {m_session, "session"}, {m_arrange, "arrangement"}};
+    for (const auto& [b, name] : icons) {
+        b->setIcon(svgicons::themed("controlbar", name));
+        b->setIconSize(QSize(kIconPx, kIconPx));
+        b->setProperty("svgIcon", QString::fromLatin1(name));
+        if (b->text().isEmpty()) b->setFixedWidth(kIconButtonW);
+        else b->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+        b->update();
     }
 }
 

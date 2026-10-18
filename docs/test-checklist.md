@@ -1,5 +1,14 @@
 # Sessions 0.23 — things to try by hand
 
+## 0.35 · The control bar streamlined
+
+1. Look along the top bar: Follow, TAP, the tempo, 4 / 4, the metronome, 1 Bar, the position, play / stop / record, the loop fields and punch buttons, the pencil and the keyboard, KEY / MIDI, the lamp, the CPU text and the two view buttons all stand on one line at the same height, with the same gaps.
+2. The icon buttons: metronome, play / stop / record, punch-in, loop, punch-out, pencil, keyboard, the 2 × 2 grid (Session) and the lanes (Arrangement) are crisp SVG drawings, clearly bigger than before; hover each for its Info View text.
+3. Press play → the button goes green with a dark triangle; record → red with a dark disc; toggle loop, punch-in / out, the metronome, the pencil and the keyboard → orange with dark icons; toggle them off → the icons are the text colour again.
+4. View → Theme → Light (and Paper, High Contrast) → the icons follow the text colour; the lamp and fields fit the same row. Back to Dark → as before.
+5. Play a MIDI key (or the computer keyboard with M on) → the lamp next to MIDI lights orange while notes come in. View → Zoom 125 % → the icons stay sharp.
+6. Re-Enable Automation (move an automated control while playing) → the red button shows an undo arrow beside "Automation", the same height as the rest.
+
 ## 0.34 · Browser appearance and denser Osmium voice layout
 
 1. Check category and item SVG icons at 100%, 125% and 200% scale. Instruments, drums, effects, captures, samples, clips and folders have meaningful distinct symbols; filenames contain no decorative characters.

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.34.0 LANGUAGES CXX)
+project(Sessions VERSION 0.35.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -59,6 +59,7 @@ set(SESSIONS_SOURCES
     src/ui/ControlBar.cpp
     src/ui/Browser.cpp
     src/ui/BrowserIcons.cpp
+    src/ui/SvgIcons.cpp
     src/ui/SessionView.cpp
     src/ui/MixerStrip.cpp
     src/ui/ArrangementView.cpp

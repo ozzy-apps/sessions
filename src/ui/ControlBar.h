@@ -11,6 +11,7 @@
 class QToolButton;
 class QComboBox;
 class QLabel;
+class QWidget;
 
 namespace sessions {
 
@@ -52,7 +53,7 @@ private:
     QToolButton* m_play;
     QToolButton* m_stop;
     QToolButton* m_rec;
-    void refreshIcons();   // the painted play / stop / record glyphs, in the theme's colours
+    void refreshIcons();   // the SVG icons (assets/controlbar), re-set when the theme changes
     QToolButton* m_loop;
     QToolButton* m_punchIn;
     QToolButton* m_punchOut;
@@ -61,7 +62,7 @@ private:
     QToolButton* m_follow;
     QToolButton* m_keyMap;
     QToolButton* m_midiMap;
-    QLabel*      m_midiLight;
+    QWidget*     m_midiLight;   // the MIDI-in lamp (MidiLight in ControlBar.cpp)
     qint64       m_midiLitUntil = 0;
     QToolButton* m_metro;
     QToolButton* m_draw;

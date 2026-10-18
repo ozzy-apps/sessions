@@ -26,6 +26,7 @@
 #include "ui/ArrangementView.h"
 #include "widgets/DragValue.h"
 #include "ui/MainWindow.h"
+#include "ui/ControlBar.h"
 #include "widgets/Knob.h"
 #include "widgets/LevelFader.h"
 #include "ui/devices/DeviceBody.h"
@@ -2594,8 +2595,7 @@ int main(int argc, char** argv) {
         bool sampler = false;
         for (const Device& d : proj->tracks[t0].devices) sampler = sampler || d.name == "Sampler";
         CHECK(rackId && loaded && !sampler, "M8 window: a browser sample loads onto the Drum Rack's selected pad (no Sampler replaces it)");
-        QToolButton* punchIn = nullptr;
-        for (QToolButton* b : w.findChildren<QToolButton*>()) if (b->text() == QString::fromUtf8("⇥")) punchIn = b;
+        QToolButton* punchIn = w.findChild<QToolButton*>("punchInButton");   // an SVG icon since 0.35, found by name
         if (punchIn) punchIn->click();
         CHECK(punchIn && w.transport()->punchIn(), "M8 window: the Punch-In switch");
         PreferencesDialog prefs(w.engine(), w.midiInput(), {}, &w);
@@ -8606,6 +8606,61 @@ int main(int argc, char** argv) {
             p.undoStack()->undo();
             CHECK(reset && std::fabs(a.fadeOut - 1) < 0.13 && a.fadeInCurve > 0.65, "M33 view: Reset Fades clears them in one step, undo brings them back");
         }
+    }
+
+
+    // ---- Milestone 35: the control bar streamlined: one height, SVG icons in the theme's colours
+    {
+        theme::apply(theme::Kind::Dark);
+        Project cp; cp.loadDemo();
+        audio::Engine ce(&cp);
+        Transport ct(&cp, &ce);
+        ControlBar bar(&cp, &ct);
+        bar.resize(1400, 34); bar.show();
+        QApplication::processEvents();
+        int odd = 0, total = 0;
+        QStringList oddNames;
+        for (QWidget* w : bar.findChildren<QWidget*>()) {
+            if (w->objectName().isEmpty() || !w->isVisible() || w->objectName() == "dragValueEditor") continue;
+            if (!(qobject_cast<QToolButton*>(w) || qobject_cast<DragValue*>(w) || qobject_cast<QComboBox*>(w) || qobject_cast<QLabel*>(w) || w->objectName() == "midiLight")) continue;
+            ++total;
+            if (w->height() != 24) { ++odd; oddNames << w->objectName(); }
+        }
+        CHECK(total >= 20 && odd == 0, qPrintable("M35 bar: every control is 24 px tall " + oddNames.join(", ")));
+        QList<QToolButton*> iconButtons;
+        for (QToolButton* b : bar.findChildren<QToolButton*>()) if (b->property("svgIcon").isValid()) iconButtons << b;
+        auto drawn = [](const QImage& im) { int n = 0; for (int y = 0; y < im.height(); ++y) for (int x = 0; x < im.width(); ++x) if (qAlpha(im.pixel(x, y)) > 40) ++n; return n; };
+        bool sized = true, painted = true, states = true;
+        for (QToolButton* b : iconButtons) {
+            const bool iconOnly = b->text().isEmpty();
+            sized &= b->iconSize() == QSize(16, 16) && (!iconOnly || b->width() == 30);
+            const QImage off = b->icon().pixmap(QSize(16, 16), QIcon::Normal, QIcon::Off).toImage();
+            const QImage on = b->icon().pixmap(QSize(16, 16), QIcon::Normal, QIcon::On).toImage();
+            painted &= drawn(off) >= 20 && drawn(on) >= 20;
+            states &= off != on;   // the checked glyph is dark, for the lit button
+        }
+        CHECK(iconButtons.size() == 12 && sized, "M35 bar: twelve SVG icon buttons, 16 px icons, the icon-only ones 30 px wide");
+        CHECK(painted && states, "M35 bar: every icon draws something, and draws differently when checked");
+        QToolButton* play = bar.findChild<QToolButton*>("playButton");
+        const QImage darkOff = play->icon().pixmap(QSize(16, 16), QIcon::Normal, QIcon::Off).toImage();
+        theme::apply(theme::Kind::Light);
+        QApplication::processEvents();
+        const QImage lightOff = play->icon().pixmap(QSize(16, 16), QIcon::Normal, QIcon::Off).toImage();
+        theme::apply(theme::Kind::Dark);
+        QApplication::processEvents();
+        const QImage darkAgain = play->icon().pixmap(QSize(16, 16), QIcon::Normal, QIcon::Off).toImage();
+        CHECK(darkOff != lightOff && darkAgain == darkOff, "M35 bar: the icons take the theme's text colour (Light differs, back to Dark is identical)");
+        QWidget* lamp = bar.findChild<QWidget*>("midiLight");
+        const QImage dim = lamp->grab().toImage();
+        bar.flashMidiIn();
+        emit ct.tick();
+        QApplication::processEvents();
+        const QImage lit = lamp->grab().toImage();
+        CHECK(lamp && lamp->width() == 14 && lit != dim, "M35 bar: the MIDI lamp lights up on a message (and is drawn, not a text dot)");
+        const QImage grabbed = bar.grab().toImage();
+        int textRows = 0;
+        for (int y = 0; y < grabbed.height(); ++y) if (grabbed.pixelColor(play->x() + 15, y) != grabbed.pixelColor(2, 2)) ++textRows;
+        CHECK(textRows >= 20 && textRows <= 26, "M35 bar: the play button spans 24 rows of the 34 px bar, centred");
     }
 
     std::printf("%d failure(s)\n", failures);

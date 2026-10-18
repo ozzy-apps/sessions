@@ -37,5 +37,18 @@
     <file>browser/chevron-right.svg</file>
     <file>browser/chevron-down.svg</file>
     <file>browser/close.svg</file>
+    <file>controlbar/play.svg</file>
+    <file>controlbar/stop.svg</file>
+    <file>controlbar/record.svg</file>
+    <file>controlbar/metronome.svg</file>
+    <file>controlbar/loop.svg</file>
+    <file>controlbar/punch-in.svg</file>
+    <file>controlbar/punch-out.svg</file>
+    <file>controlbar/draw.svg</file>
+    <file>controlbar/keyboard.svg</file>
+    <file>controlbar/session.svg</file>
+    <file>controlbar/arrangement.svg</file>
+    <file>controlbar/re-enable.svg</file>
+    <file>controlbar/follow.svg</file>
   </qresource>
 </RCC>
