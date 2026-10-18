@@ -147,6 +147,7 @@ const std::vector<ModRoute>& presetMods(const QString& name);
 
 // Osmium shares Monolith's parameter/source indices and adds independent ADSR segment bends.
 namespace osmium {
+constexpr int kCurvePoints = 257; // 256 drawing intervals plus the final endpoint.
 constexpr int kEnvBendBase = monolith::kParams;
 constexpr int bend(int env, int segment) { return kEnvBendBase + env * 3 + segment; }
 constexpr int kParams = kEnvBendBase + monolith::kEnvs * 3;

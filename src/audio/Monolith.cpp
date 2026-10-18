@@ -301,7 +301,7 @@ private:
     float curveAt(int c, double phase) const {
         const int n = m_ctx.curveCount ? m_ctx.curveCount[c] : 0;
         if (n <= 0 || !m_ctx.curves) return 0;
-        const CurvePoint* pts = m_ctx.curves + c * kCurvePoints;
+        const CurvePoint* pts = m_ctx.curves + c * m_ctx.curveStride;
         return float(modcurve::value(pts, n, phase));
     }
     double curvePhase(int c, double beat, double origin) const {

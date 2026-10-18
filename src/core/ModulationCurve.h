@@ -19,11 +19,12 @@ inline double segment(const CurvePoint& a, const CurvePoint& b, double t) {
 }
 inline double value(const CurvePoint* points, int count, double phase) {
     if (!points || count <= 0) return 0;
-    if (phase <= points[0].x) return points[0].y;
-    for (int i = 1; i < count; ++i) if (phase <= points[i].x) {
-        const double span = points[i].x - points[i - 1].x;
-        return segment(points[i - 1], points[i], span > 1e-9 ? (phase - points[i - 1].x) / span : 1);
-    }
-    return points[count - 1].y;
+    if (count == 1 || phase <= points[0].x) return points[0].y;
+    if (phase > points[count - 1].x) return points[count - 1].y;
+    // Curves are time-sorted. Binary search keeps dense freehand curves cheap in the audio path.
+    int lo = 1, hi = count - 1;
+    while (lo < hi) { const int mid = (lo + hi) / 2; if (phase <= points[mid].x) hi = mid; else lo = mid + 1; }
+    const double span = points[lo].x - points[lo - 1].x;
+    return segment(points[lo - 1], points[lo], span > 1e-9 ? (phase - points[lo - 1].x) / span : 1);
 }
 }
