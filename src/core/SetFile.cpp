@@ -401,7 +401,7 @@ Device readDevice(const QJsonObject& o, const QString& baseDir) {
         QVector<CurvePoint> pts;
         for (const QJsonValue& pv : v.toArray()) {
             const QJsonArray pa = pv.toArray();
-            if (pa.size() < 2 || pts.size() >= monolith::kCurvePoints) continue;
+            if (pa.size() < 2 || pts.size() >= (deviceType(d.name) == DeviceType::Osmium ? osmium::kCurvePoints : monolith::kCurvePoints)) continue;
             pts.push_back({std::clamp(pa[0].toDouble(), 0.0, 1.0), std::clamp(pa[1].toDouble(), 0.0, 1.0),
                            pa.size() > 2 ? std::clamp(pa[2].toDouble(), -1.0, 1.0) : 0,
                            pa.size() > 3 ? std::clamp(pa[3].toInt(), 0, 2) : 0});

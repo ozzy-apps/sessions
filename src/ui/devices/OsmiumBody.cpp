@@ -25,6 +25,7 @@
 #include <QPushButton>
 #include <QRandomGenerator>
 #include <QScrollArea>
+#include <QScrollBar>
 #include <QScreen>
 #include <QShortcut>
 #include <QUndoStack>
@@ -44,7 +45,7 @@ constexpr double kPi = 3.141592653589793;
 
 QColor sourceColor(int s) {
     return s <= mo::SrcEnv4 ? theme::osmiumEnv : mo::curveOfSource(s) >= 0 ? theme::osmiumCurve
-         : mo::lfoOfSource(s) >= 0 ? theme::osmiumLfo : theme::osmiumGreen;
+         : mo::lfoOfSource(s) >= 0 ? theme::osmiumLfo : theme::accent;
 }
 QFont pxFont(const QWidget* w, int px, bool bold = false) {
     auto f = w->font(); f.setPixelSize(px); f.setBold(bold); return f;
@@ -102,12 +103,14 @@ class RangeKnob : public QWidget {
 public:
     RangeKnob(DeviceBody* b, int param, QString label, int diameter, std::function<int()> source,
               std::function<void(int)> focus, std::function<void(int)> select = {}) : QWidget(b), m_body(b), m_param(param), m_label(std::move(label)),
-              m_d(diameter), m_source(std::move(source)), m_focus(std::move(focus)), m_select(std::move(select)) {
-        setFixedSize(std::max(64, diameter + 12), diameter + 44);
+              m_d(std::max(64, diameter)), m_source(std::move(source)), m_focus(std::move(focus)), m_select(std::move(select)) {
+        setFixedSize(m_d + 12, m_d + 48);
         setObjectName(QString("osmiumKnob_%1").arg(param));
         setProperty("mapTarget", b->target(param));
         setAcceptDrops(true); setFocusPolicy(Qt::StrongFocus); setCursor(Qt::SizeVerCursor); setMouseTracking(true);
-        InfoView::attach(this, b->name(param), "Drag the centre to set the base value. Drag the green outer ring up/right to increase modulation, down/left to decrease or invert it. "
+        setProperty("dialDiameter", m_d);
+        setProperty("baseRadius", baseRadius()); setProperty("rangeRadius", rangeRadius());
+        InfoView::attach(this, b->name(param), "Drag the centre or inner ring to set the base value. Drag the accent outer ring up/right to increase modulation, down/left to decrease or invert it. "
                          "Click + to assign the selected source; drag a source here to assign it. Shift: fine. Right-click: sources, remove, or enter a value. Delete: reset.");
         b->watch(this);
     }
@@ -117,7 +120,14 @@ public:
         if (const Device* d = m_body->device()) for (const auto& r : d->mods) if (r.param == m_param) return r;
         return {-1, m_param, 0};
     }
-    QPointF center() const { return {width() / 2.0, 15 + m_d / 2.0}; }
+    QPointF center() const { return {width() / 2.0, 16 + m_d / 2.0}; }
+    double baseRadius() const { return m_d / 2.0 - 10; }
+    double rangeRadius() const { return m_d / 2.0 - 1; }
+    bool onRange(QPointF pt) const {
+        const auto delta = pt - center(); const double distance = QLineF(pt, center()).length();
+        const double angle = std::atan2(delta.y(), delta.x()) * 180 / kPi;
+        return distance >= rangeRadius() - 3 && distance <= rangeRadius() + 5 && !(angle > 45 && angle < 135);
+    }
     QPointF point(double v, double radius) const {
         const double a = (135 + std::clamp(v, 0.0, 1.0) * 270) * kPi / 180;
         return center() + QPointF(std::cos(a) * radius, std::sin(a) * radius);
@@ -135,37 +145,42 @@ protected:
         if (const auto* device = m_body->device(); device && osmium::factoryPreset(device->name))
             for (int k = 0; k < 8; ++k) if (m_param == mo::macro(k)) label = QString("%1 %2").arg(k + 1).arg(osmium::kMacroNames[k]);
         p.drawText(QRect(0, 0, width(), 14), Qt::AlignCenter, label);
-        const double base = m_body->pos(m_param), radius = m_d / 2.0 - 5;
-        arc(p, 0, 1, radius - 5, theme::devGridStrong, 3);
-        arc(p, 0, base, radius - 5, theme::textSoft, 3);
+        const double base = m_body->pos(m_param), radius = rangeRadius();
+        arc(p, 0, 1, baseRadius(), theme::devGridStrong, 3);
+        arc(p, 0, base, baseRadius(), theme::textSoft, 3);
+        // The full modulation track remains visible, including when no source is assigned.
+        arc(p, 0, 1, radius, theme::withAlpha(theme::accent, 55), 4);
         const ModRoute r = activeRoute();
         if (r.source >= 0) {
             const double end = std::clamp(base + r.amount, 0.0, 1.0);
             const double begin = mo::sourceBipolar(r.source) ? std::clamp(base - r.amount, 0.0, 1.0) : base;
-            arc(p, std::min(begin, end), std::max(begin, end), radius, theme::osmiumGreen, 4);
-            p.setPen(Qt::NoPen); p.setBrush(theme::osmiumGreen); p.drawEllipse(point(end, radius), 3, 3);
-            p.setPen(QPen(theme::withAlpha(theme::osmiumGreen, 90), 1));
+            arc(p, std::min(begin, end), std::max(begin, end), radius, theme::accent, 4);
+            p.setPen(Qt::NoPen); p.setBrush(theme::accent); p.drawEllipse(point(end, radius), 3, 3);
+            p.setPen(QPen(theme::withAlpha(theme::accent, 90), 1));
             p.drawLine(point(base, radius - 2), point(base, radius + 3));
-        } else { arc(p, 0, 1, radius, theme::withAlpha(theme::devGridStrong, 90), 1); }
-        p.setPen(QPen(hasFocus() ? theme::osmiumGreen : theme::devGridStrong, 1));
-        p.setBrush(theme::devDisplay); p.drawEllipse(center(), std::max(4.0, radius - 6), std::max(4.0, radius - 6));
+        }
+        p.setPen(QPen(hasFocus() ? theme::accent : theme::devGridStrong, 1));
+        const double face = baseRadius() - 5;
+        p.setBrush(theme::devDisplay); p.drawEllipse(center(), face, face);
         p.setPen(QPen(theme::textBright, 2, Qt::SolidLine, Qt::RoundCap));
-        p.drawLine(point(base, 2), point(base, std::max(4.0, radius - 8)));
+        p.drawLine(point(base, 3), point(base, face - 3));
         p.setPen(theme::text); p.setFont(pxFont(this, 10));
-        p.drawText(QRectF(0, m_d + 12, width(), 14), Qt::AlignCenter, m_body->text(m_param));
+        p.drawText(QRectF(0, m_d + 17, width(), 14), Qt::AlignCenter, m_body->text(m_param));
         const QRectF slot(4, height() - 16, width() - 8, 14);
-        p.setBrush(r.source >= 0 ? theme::withAlpha(theme::osmiumGreen, 20) : theme::devDisplay);
+        p.setBrush(r.source >= 0 ? theme::withAlpha(theme::accent, 20) : theme::devDisplay);
         p.setPen(Qt::NoPen); p.drawRoundedRect(slot, 5, 5);
-        p.setPen(r.source >= 0 ? theme::osmiumGreen : theme::textFaint); p.setFont(pxFont(this, 9));
+        p.setPen(r.source >= 0 ? theme::accent : theme::textFaint); p.setFont(pxFont(this, 9));
         p.drawText(slot, Qt::AlignCenter, r.source < 0 ? "+" : QString("%1 %2%3").arg(mo::sourceName(r.source))
                    .arg(r.amount >= 0 ? "+" : "").arg(int(std::round(r.amount * 100))));
-        if (m_drop) { p.setPen(QPen(theme::osmiumGreen, 2)); p.setBrush(Qt::NoBrush); p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 8, 8); }
+        if (m_drop) { p.setPen(QPen(theme::accent, 2)); p.setBrush(Qt::NoBrush); p.drawRoundedRect(QRectF(rect()).adjusted(1, 1, -1, -1), 8, 8); }
     }
     void mousePressEvent(QMouseEvent* e) override {
         if (e->button() != Qt::LeftButton) return;
         setFocus(); m_focus(m_param);
         if (e->position().y() >= height() - 17) { if (routeFor(m_body, m_source(), m_param).source < 0) setRoute(m_body, m_source(), m_param, 0.25); return; }
-        m_range = QLineF(e->position(), center()).length() >= m_d / 2.0 - 12 && e->position().y() < m_d + 12;
+        m_range = onRange(e->position());
+        const bool onValue = e->position().y() >= m_d + 17 && e->position().y() < height() - 17;
+        if (!m_range && !onValue && QLineF(e->position(), center()).length() > baseRadius() + 3) return;
         m_press = e->position(); m_initial = m_body->pos(m_param);
         const auto r = activeRoute();
         m_dragSource = r.source < 0 ? m_source() : r.source;
@@ -176,7 +191,9 @@ protected:
         if (m_range && r.source < 0) setRoute(m_body, m_dragSource, m_param, 0);
     }
     void mouseMoveEvent(QMouseEvent* e) override {
-        if (!m_dragging || !(e->buttons() & Qt::LeftButton)) return;
+        if (!m_dragging || !(e->buttons() & Qt::LeftButton)) {
+            setCursor(onRange(e->position()) ? Qt::SizeAllCursor : Qt::SizeVerCursor); return;
+        }
         const double fine = e->modifiers() & Qt::ShiftModifier ? 0.1 : 1;
         if (m_range) setRoute(m_body, m_dragSource, m_param, m_amount + ((e->position().x() - m_press.x()) + (m_press.y() - e->position().y())) / 150 * fine);
         else m_body->edit(m_param, m_initial + (m_press.y() - e->position().y()) / 150 * fine);
@@ -232,7 +249,7 @@ public:
         setCheckable(true); setMinimumHeight(30); setCursor(Qt::OpenHandCursor);
         setObjectName(QString("osmiumSource_%1").arg(source));
         QObject::connect(this, &QPushButton::clicked, this, std::move(select));
-        InfoView::attach(this, mo::sourceName(source), "Click to edit this source. Drag it onto a parameter to assign modulation, then drag the knob's green ring to set the range.");
+        InfoView::attach(this, mo::sourceName(source), "Click to edit this source. Drag it onto a parameter to assign modulation, then drag the knob's outer ring to set the range.");
     }
 protected:
     void mousePressEvent(QMouseEvent* e) override { m_press = e->pos(); QPushButton::mousePressEvent(e); }
@@ -304,7 +321,7 @@ class FilterPlot : public Plot {
 public:
     FilterPlot(DeviceBody* b, int f) : Plot(b, 45), m_filter(f) {
         setCursor(Qt::SizeAllCursor);
-        InfoView::attach(this, "Filter", "Drag horizontally for cutoff and vertically for resonance. The green range around Cutoff controls how far modulation opens the filter.");
+        InfoView::attach(this, "Filter", "Drag horizontally for cutoff and vertically for resonance. The accent range around Cutoff controls how far modulation opens the filter.");
     }
 protected:
     void draw(QPainter& p, const QRectF& r) override {
@@ -330,7 +347,7 @@ protected:
             const QPointF pt(r.left() + x, r.center().y() - db / 24 * r.height() / 2);
             if (x == 0) path.moveTo(pt); else path.lineTo(pt);
         }
-        curve(p, r, path, theme::osmiumGreen);
+        curve(p, r, path, theme::accent);
     }
     void mousePressEvent(QMouseEvent* e) override { if (e->button() == Qt::LeftButton) { m_body->ctx().project->beginEdit("Filter"); m_drag = true; mouseMoveEvent(e); } }
     void mouseMoveEvent(QMouseEvent* e) override {
@@ -433,15 +450,42 @@ protected:
 private: int m_env, m_drag = -1; bool m_gesture = false; QPointF m_press; double m_initial = 0;
 };
 
+// Numeric node edits share the same gesture lifetime as the graph.
+class CurveValue : public DragValue {
+public:
+    CurveValue(Project* project, QWidget* parent) : DragValue(parent), m_project(project) {}
+    ~CurveValue() override { finish(); }
+protected:
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() == Qt::LeftButton && isEnabled()) { m_project->beginEdit("Edit Curve Node"); m_gesture = true; }
+        DragValue::mousePressEvent(e);
+    }
+    void mouseReleaseEvent(QMouseEvent* e) override { DragValue::mouseReleaseEvent(e); finish(); }
+private:
+    void finish() { if (m_gesture) { m_gesture = false; m_project->endEdit(); } }
+    Project* m_project; bool m_gesture = false;
+};
+
 class CurvePlot : public Plot {
 public:
-    CurvePlot(DeviceBody* b, int c) : Plot(b, 144), m_curve(c) {
+    CurvePlot(DeviceBody* b, int c) : Plot(b, 200), m_curve(c) {
+        setMinimumHeight(180); setMaximumHeight(QWIDGETSIZE_MAX); setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setObjectName(QString("osmiumCurve_%1").arg(c)); setFocusPolicy(Qt::StrongFocus); setMouseTracking(true);
-        InfoView::attach(this, "Curve editor", "Double-click to add a point; drag points to move them. Drag a segment's diamond to bend it. "
-                         "Right-click a segment for Curve, Smooth or Hold. Delete removes the selected interior point. Alt bypasses snap. Draw mode paints a 16-step shape.");
+        InfoView::attach(this, "Curve editor", "Double-click to add or remove a node. Drag nodes or segment diamonds; Alt bypasses snap. "
+                         "Shift-click or drag a box to select several nodes. Ctrl-drag locks an axis. Arrows nudge, Shift makes fine nudges; Tab selects the next node. "
+                         "Delete removes interior nodes. Draw follows the X grid, up to 256 intervals. Zoom reveals dense details.");
     }
+    ~CurvePlot() override { finish(); }
+    std::function<void()> selectionChanged;
     Points points() const { const auto* d = m_body->device(); return d && m_curve < d->curves.size() ? d->curves[m_curve] : Points{}; }
-    void fill(const QString& label, const Points& p) { editCurve(m_body, m_curve, label, [p](Points& pts) { pts = p; }); m_selected = -1; }
+    int selected() const { return m_selected >= 0 && m_selected < points().size() && m_selection.count(m_selected) ? m_selected : -1; }
+    int segment() const { return m_segment >= 0 && m_segment + 1 < points().size() ? m_segment : -1; }
+    int selectionCount() const { int n = 0; for (int k : m_selection) if (k < points().size()) ++n; return n; }
+    void fill(const QString& label, Points p) {
+        if (p.size() > osmium::kCurvePoints) p.resize(osmium::kCurvePoints);
+        editCurve(m_body, m_curve, label, [p](Points& pts) { pts = p; });
+        m_selection.clear(); m_selected = -1; m_segment = 0; notify();
+    }
     void preset(int shape) {
         Points p;
         if (shape == 0) p = {{0, 0}, {0.5, 1}, {1, 0}};
@@ -449,7 +493,7 @@ public:
         if (shape == 2) p = {{0, 0, -0.4}, {1, 1}};
         if (shape == 3) p = {{0, 1, -0.35}, {1, 0}};
         if (shape == 4) p = {{0, 1, 0, 2}, {0.25, 0.25, 0, 2}, {0.5, 0.75, 0, 2}, {0.75, 0.4, 0, 2}, {1, 1}};
-        if (shape == 5) { for (int i = 0; i <= 8; ++i) p.push_back({i / 8.0, QRandomGenerator::global()->bounded(1.0), 0, 2}); }
+        if (shape == 5) for (int i = 0; i <= 8; ++i) p.push_back({i / 8.0, QRandomGenerator::global()->bounded(1.0), 0, 2});
         fill("Curve Shape", p);
     }
     void transform(int what) {
@@ -462,134 +506,203 @@ public:
                 p[i] = old[from]; p[i].x = 1 - old[from].x;
                 if (from > 0) { p[i].bend = -old[from - 1].bend; p[i].shape = old[from - 1].shape; }
             }
-            // Reversing a held segment moves its jump to the other end; sample it explicitly.
             if (std::any_of(old.begin(), old.end(), [](const CurvePoint& q) { return q.shape == 2; })) {
-                p.clear(); for (int i = 0; i < mo::kCurvePoints; ++i) { const double x = double(i) / (mo::kCurvePoints - 1); p.push_back({x, modcurve::value(old.constData(), int(old.size()), 1 - x)}); }
+                p.clear(); for (int i = 0; i < osmium::kCurvePoints; ++i) { const double x = double(i) / (osmium::kCurvePoints - 1); p.push_back({x, modcurve::value(old.constData(), int(old.size()), 1 - x)}); }
             }
         }
         fill(what == 0 ? "Invert Curve" : "Reverse Curve", p);
     }
     void setGrid(int steps) { m_grid = steps; update(); }
+    void setYGrid(int steps) { m_yGrid = steps; update(); }
     void setDraw(bool draw) { m_draw = draw; setCursor(draw ? Qt::CrossCursor : Qt::ArrowCursor); }
+    void setView(int zoom, int scroll) { m_zoom = zoom; m_start = double(scroll) / (1000 * zoom); update(); }
     void setShape(int shape) {
-        const int s = m_segment;
-        editCurve(m_body, m_curve, "Segment Shape", [=](Points& p) { if (s >= 0 && s + 1 < p.size()) p[s].shape = shape; });
+        const int s = segment();
+        editCurve(m_body, m_curve, "Segment Shape", [=](Points& p) { if (s >= 0) p[s].shape = shape; }); notify();
+    }
+    void setCoordinate(bool time, double value) {
+        const int k = selected(); if (k < 0 || selectionCount() != 1) return;
+        editCurve(m_body, m_curve, "Edit Curve Node", [=](Points& p) {
+            if (time) { if (k > 0 && k + 1 < p.size()) p[k].x = std::clamp(value, p[k - 1].x + gap(p, k), p[k + 1].x - gap(p, k)); }
+            else p[k].y = std::clamp(value, 0.0, 1.0);
+        }); notify();
+    }
+    void setBend(double value) {
+        const int s = segment();
+        editCurve(m_body, m_curve, "Bend Curve", [=](Points& p) { if (s >= 0) { p[s].bend = value; if (p[s].shape == 2) p[s].shape = 0; } }); notify();
     }
     static Points& clipboard() { static Points p; return p; }
 protected:
-    QPointF at(const CurvePoint& pt) const { const auto r = graph(); return {r.left() + pt.x * r.width(), r.bottom() - pt.y * r.height()}; }
-    QPointF midpoint(const Points& p, int i) const {
-        return at({(p[i].x + p[i + 1].x) * 0.5, modcurve::segment(p[i], p[i + 1], 0.5)});
-    }
+    static double gap(const Points& p, int k) { return std::min(0.00001, std::max(0.0, p[k + 1].x - p[k - 1].x) * 0.25); }
+    void notify() { update(); if (selectionChanged) selectionChanged(); }
+    void finish() { if (m_gesture) { m_gesture = false; m_body->ctx().project->endEdit(); } }
+    QPointF at(const CurvePoint& pt) const { const auto r = graph(); return {r.left() + (pt.x - m_start) * m_zoom * r.width(), r.bottom() - pt.y * r.height()}; }
+    double timeAt(double px) const { const auto r = graph(); return std::clamp(m_start + (px - r.left()) / (m_zoom * r.width()), 0.0, 1.0); }
+    double levelAt(double py) const { const auto r = graph(); return std::clamp((r.bottom() - py) / r.height(), 0.0, 1.0); }
+    double snapX(double x, Qt::KeyboardModifiers mods) const { return m_grid > 0 && !(mods & Qt::AltModifier) ? std::round(x * m_grid) / m_grid : x; }
+    double snapY(double y, Qt::KeyboardModifiers mods) const { return m_yGrid > 0 && !(mods & Qt::AltModifier) ? std::round(y * m_yGrid) / m_yGrid : y; }
+    QPointF midpoint(const Points& p, int i) const { return at({(p[i].x + p[i + 1].x) * 0.5, modcurve::segment(p[i], p[i + 1], 0.5)}); }
     int pointAt(QPointF pt) const {
         const auto p = points(); int best = -1; double dist = 10;
-        for (int i = 0; i < p.size(); ++i) { const double d = QLineF(pt, at(p[i])).length(); if (d < dist) { best = i; dist = d; } }
+        for (int i = 0; i < p.size(); ++i) { const auto q = at(p[i]); if (!graph().adjusted(-5, -5, 5, 5).contains(q)) continue;
+            const double d = QLineF(pt, q).length(); if (d < dist) { best = i; dist = d; } }
         return best;
     }
     int segmentAt(QPointF pt) const {
-        const auto p = points(); const auto r = graph(); const double x = (pt.x() - r.left()) / r.width();
+        const auto p = points(); const double x = timeAt(pt.x());
         for (int i = 0; i + 1 < p.size(); ++i) if (x >= p[i].x && x <= p[i + 1].x) return i;
         return -1;
     }
     void draw(QPainter& painter, const QRectF& r) override {
-        grid(painter, r, m_grid > 0 ? m_grid : 16); const auto p = points();
-        if (p.isEmpty()) return;
+        const int columns = m_grid > 0 ? m_grid : 32, rows = m_yGrid > 0 ? m_yGrid : 8;
+        for (int i = 0; i <= columns; ++i) {
+            const double x = at({double(i) / columns, 0}).x(); if (x < r.left() || x > r.right()) continue;
+            const int stride = std::max(1, int(std::ceil(5.0 * columns / (r.width() * m_zoom))));
+            if (i % stride != 0 && i % std::max(1, columns / 4) != 0) continue;
+            painter.setPen(QPen(theme::withAlpha(theme::devGridStrong, i % std::max(1, columns / 4) == 0 ? 190 : 65), 1)); painter.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+        }
+        for (int i = 0; i <= rows; ++i) { const double y = r.bottom() - r.height() * i / rows;
+            painter.setPen(QPen(theme::withAlpha(theme::devGridStrong, i % std::max(1, rows / 4) == 0 ? 150 : 65), 1)); painter.drawLine(QPointF(r.left(), y), QPointF(r.right(), y)); }
+        const auto p = points(); if (p.isEmpty()) return;
         QPainterPath path;
-        for (int i = 0; i <= int(r.width()); ++i) {
-            const double x = i / r.width(); const auto pt = at({x, modcurve::value(p.constData(), int(p.size()), x)});
-            if (i == 0) path.moveTo(pt); else path.lineTo(pt);
-        }
-        curve(painter, r, path, theme::osmiumCurve);
+        for (int i = 0; i <= int(r.width()); ++i) { const double x = timeAt(r.left() + i); const auto pt = at({x, modcurve::value(p.constData(), int(p.size()), x)});
+            if (i == 0) path.moveTo(pt); else path.lineTo(pt); }
+        painter.save(); painter.setClipRect(r.adjusted(-6, -6, 6, 6)); curve(painter, r, path, theme::osmiumCurve);
         for (int i = 0; i + 1 < p.size(); ++i) {
+            if ((p[i + 1].x - p[i].x) * r.width() * m_zoom < 28 && i != m_segment) continue;
             const auto mid = midpoint(p, i);
-            painter.setPen(QPen(theme::withAlpha(theme::osmiumCurve, i == m_segment ? 255 : 120), 1)); painter.setBrush(theme::devDisplay);
-            QPolygonF diamond; diamond << mid + QPointF(0, -4) << mid + QPointF(4, 0) << mid + QPointF(0, 4) << mid + QPointF(-4, 0); painter.drawPolygon(diamond);
+            painter.setPen(QPen(theme::withAlpha(theme::osmiumCurve, i == m_segment ? 255 : 130), 1)); painter.setBrush(theme::devDisplay);
+            QPolygonF diamond; diamond << mid + QPointF(0, -5) << mid + QPointF(5, 0) << mid + QPointF(0, 5) << mid + QPointF(-5, 0); painter.drawPolygon(diamond);
         }
-        for (int i = 0; i < p.size(); ++i) { painter.setBrush(i == m_selected ? theme::osmiumCurve : theme::devDisplay); painter.setPen(QPen(theme::osmiumCurve, 2)); painter.drawEllipse(at(p[i]), i == m_selected ? 5 : 4, i == m_selected ? 5 : 4); }
-        const double phase = m_body->scope(14 + m_curve);
-        if (phase > 0) { painter.setPen(QPen(theme::withAlpha(theme::textBright, 150), 1)); const double x = r.left() + phase * r.width(); painter.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom())); }
-        painter.setPen(theme::textFaint); painter.setFont(pxFont(this, 9));
-        for (int i = 0; i <= 4; ++i) painter.drawText(QRectF(r.left() + r.width() * i / 4 - 12, r.bottom() + 3, 24, 12), Qt::AlignCenter, i == 0 ? "0" : i == 4 ? "1" : QString::number(i) + "/4");
+        for (int i = 0; i < p.size(); ++i) {
+            const bool selected = m_selection.count(i); const double radius = selected ? 5 : p.size() > 65 ? 2.5 : 4;
+            painter.setBrush(selected ? theme::osmiumCurve : theme::devDisplay); painter.setPen(QPen(theme::osmiumCurve, selected ? 2 : 1.4)); painter.drawEllipse(at(p[i]), radius, radius);
+        }
+        const double phase = m_body->scope(14 + m_curve); const double x = at({phase, 0}).x();
+        painter.setPen(QPen(theme::withAlpha(theme::textBright, 100), 1)); painter.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+        if (m_box) { painter.setPen(QPen(theme::accent, 1)); painter.setBrush(theme::withAlpha(theme::accent, 25)); painter.drawRect(QRectF(m_press, m_boxEnd).normalized()); }
+        painter.restore(); painter.setPen(theme::textFaint);
+        for (int i = 0; i <= 4; ++i) { const double t = m_start + double(i) / (4 * m_zoom);
+            painter.drawText(QRectF(r.left() + r.width() * i / 4 - 22, r.bottom() + 2, 44, 13), Qt::AlignCenter, QString::number(t * 100, 'f', m_zoom > 1 ? 1 : 0) + "%"); }
     }
-    void paintAt(const QPointF& pt) {
-        const auto r = graph(); const int index = std::clamp(int(std::round((pt.x() - r.left()) / r.width() * 16)), 0, 16);
-        const double y = std::clamp((r.bottom() - pt.y()) / r.height(), 0.0, 1.0);
+    void paintAt(QPointF pt, Qt::KeyboardModifiers mods) {
+        const int steps = m_grid > 0 ? m_grid : 256;
+        const int index = std::clamp(int(std::round(timeAt(pt.x()) * steps)), 0, steps);
+        const double y = snapY(levelAt(pt.y()), mods);
         editCurve(m_body, m_curve, "Draw Curve", [=](Points& p) {
-            if (p.size() != 17) { const auto old = p; p.clear(); for (int i = 0; i <= 16; ++i) p.push_back({i / 16.0, modcurve::value(old.constData(), int(old.size()), i / 16.0)}); }
+            if (p.size() != steps + 1 || !uniform(p, steps)) { const auto old = p; p.clear(); for (int i = 0; i <= steps; ++i) p.push_back({double(i) / steps, modcurve::value(old.constData(), int(old.size()), double(i) / steps)}); }
             if (m_lastPaint >= 0 && index != m_lastPaint) for (int i = std::min(index, m_lastPaint); i <= std::max(index, m_lastPaint); ++i) {
-                const double t = double(i - m_lastPaint) / (index - m_lastPaint); p[i].y = m_lastY + (y - m_lastY) * t;
+                const double t = double(i - m_lastPaint) / (index - m_lastPaint); p[i].y = m_lastY + (y - m_lastY) * t; p[i].bend = 0; p[i].shape = 0;
             }
-            p[index].y = y;
+            p[index].y = y; p[index].bend = 0; p[index].shape = 0;
         });
-        m_lastPaint = index; m_lastY = y;
+        m_lastPaint = index; m_lastY = y; notify();
     }
+    static bool uniform(const Points& p, int steps) { for (int i = 0; i < p.size(); ++i) if (std::abs(p[i].x - double(i) / steps) > 1e-8) return false; return true; }
     void mousePressEvent(QMouseEvent* e) override {
         if (e->button() != Qt::LeftButton) return;
-        setFocus(); m_press = e->position(); m_selected = pointAt(e->position()); m_segment = segmentAt(e->position()); m_bending = false;
+        setFocus(); m_press = e->position(); const int hit = pointAt(m_press); m_segment = segmentAt(m_press); m_bending = false;
         const auto p = points();
-        if (m_selected < 0 && m_segment >= 0 && m_segment + 1 < p.size()) {
-            m_bending = QLineF(e->position(), midpoint(p, m_segment)).length() < 12 || (e->modifiers() & Qt::AltModifier);
-            m_initial = p[m_segment].bend;
+        if (m_draw) { m_selection.clear(); m_selected = -1; }
+        else if (hit >= 0) {
+            if (e->modifiers() & Qt::ShiftModifier) { if (m_selection.count(hit)) m_selection.erase(hit); else m_selection.insert(hit); }
+            else if (!m_selection.count(hit)) { m_selection.clear(); m_selection.insert(hit); }
+            m_selected = m_selection.count(hit) ? hit : m_selection.empty() ? -1 : *m_selection.begin();
+            m_segment = std::min(hit, int(p.size()) - 2);
+        } else {
+            if (m_segment >= 0 && m_segment + 1 < p.size()) {
+                m_bending = QLineF(m_press, midpoint(p, m_segment)).length() < 12 || (e->modifiers() & Qt::AltModifier);
+                m_initial = p[m_segment].bend;
+            }
+            if (!m_bending) { m_box = true; m_boxEnd = m_press; m_beforeBox = (e->modifiers() & Qt::ShiftModifier) ? m_selection : std::set<int>{}; }
         }
-        if (m_selected < 0 && !m_bending && !m_draw) { update(); return; }
-        m_body->ctx().project->beginEdit("Edit Curve"); m_gesture = true;
-        if (m_draw) { m_lastPaint = -1; paintAt(e->position()); }
-        update();
+        if (!m_box && (m_draw || m_bending || (hit >= 0 && m_selection.count(hit)))) { m_body->ctx().project->beginEdit("Edit Curve"); m_gesture = true; m_startPoints = p; }
+        if (m_draw) { m_lastPaint = -1; paintAt(m_press, e->modifiers()); }
+        notify();
+    }
+    void moveSelection(const Points& original, double dx, double dy) {
+        double minX = -1, maxX = 1, minY = -1, maxY = 1;
+        for (int k : m_selection) if (k >= 0 && k < original.size()) {
+            minY = std::max(minY, -original[k].y); maxY = std::min(maxY, 1 - original[k].y);
+            if (k > 0 && k + 1 < original.size()) {
+                if (k == 1 || !m_selection.count(k - 1)) minX = std::max(minX, original[k - 1].x + gap(original, k) - original[k].x);
+                if (k + 2 == original.size() || !m_selection.count(k + 1)) maxX = std::min(maxX, original[k + 1].x - gap(original, k) - original[k].x);
+            }
+        }
+        dx = std::clamp(dx, minX, maxX); dy = std::clamp(dy, minY, maxY);
+        editCurve(m_body, m_curve, "Move Curve Nodes", [=](Points& p) { if (p.size() != original.size()) return;
+            for (int k : m_selection) if (k >= 0 && k < p.size()) { if (k > 0 && k + 1 < p.size()) p[k].x = original[k].x + dx; p[k].y = original[k].y + dy; }
+        }); notify();
     }
     void mouseMoveEvent(QMouseEvent* e) override {
-        if (!m_gesture || !(e->buttons() & Qt::LeftButton)) return;
-        if (m_draw) { paintAt(e->position()); return; }
-        const auto r = graph(); const int k = m_selected, s = m_segment;
-        const double dy = (e->position().y() - m_press.y()) / 90;
-        double x = std::clamp((e->position().x() - r.left()) / r.width(), 0.0, 1.0);
-        const double y = std::clamp((r.bottom() - e->position().y()) / r.height(), 0.0, 1.0);
-        if (m_grid > 0 && !(e->modifiers() & Qt::AltModifier)) x = std::round(x * m_grid) / m_grid;
-        editCurve(m_body, m_curve, "Shape Curve", [=](Points& p) mutable {
-            if (m_bending && s >= 0 && s + 1 < p.size()) { p[s].bend = std::clamp(m_initial + dy * (p[s + 1].y >= p[s].y ? 1 : -1), -1.0, 1.0); if (p[s].shape == 2) p[s].shape = 0; }
-            else if (k >= 0 && k < p.size()) {
-                if (k == 0 || k == p.size() - 1) x = p[k].x;
-                else {
-                    const double gap = std::min(0.001, std::max(0.0, p[k + 1].x - p[k - 1].x) * 0.25);
-                    x = std::clamp(x, p[k - 1].x + gap, p[k + 1].x - gap);
-                }
-                p[k].x = x; p[k].y = y;
-            }
-        });
+        if (!(e->buttons() & Qt::LeftButton)) return;
+        if (m_box) {
+            m_boxEnd = e->position(); const auto bounds = QRectF(m_press, m_boxEnd).normalized(); const auto p = points(); m_selection = m_beforeBox;
+            for (int k = 0; k < p.size(); ++k) if (bounds.contains(at(p[k]))) m_selection.insert(k);
+            m_selected = m_selection.empty() ? -1 : *m_selection.begin(); notify(); return;
+        }
+        if (!m_gesture) return;
+        if (m_draw) { paintAt(e->position(), e->modifiers()); return; }
+        if (m_bending) { const auto p = points(); if (m_segment < 0 || m_segment + 1 >= p.size()) return;
+            setBend(std::clamp(m_initial + (e->position().y() - m_press.y()) / 90 * (p[m_segment + 1].y >= p[m_segment].y ? 1 : -1), -1.0, 1.0)); return; }
+        const int k = selected(); if (k < 0 || k >= m_startPoints.size()) return;
+        const auto r = graph();
+        const double targetX = m_startPoints[k].x + (e->position().x() - m_press.x()) / (r.width() * m_zoom);
+        const double targetY = m_startPoints[k].y - (e->position().y() - m_press.y()) / r.height();
+        double dx = snapX(targetX, e->modifiers()) - m_startPoints[k].x;
+        double dy = snapY(targetY, e->modifiers()) - m_startPoints[k].y;
+        if (e->modifiers() & Qt::ControlModifier) { if (std::abs(e->position().x() - m_press.x()) > std::abs(e->position().y() - m_press.y())) dy = 0; else dx = 0; }
+        moveSelection(m_startPoints, dx, dy);
     }
-    void mouseReleaseEvent(QMouseEvent*) override { if (m_gesture) { m_gesture = false; m_body->ctx().project->endEdit(); } }
+    void mouseReleaseEvent(QMouseEvent*) override { finish(); m_box = false; notify(); }
     void mouseDoubleClickEvent(QMouseEvent* e) override {
-        if (e->button() != Qt::LeftButton) return;
+        if (e->button() != Qt::LeftButton || m_draw) return;
+        finish(); m_box = false;
         const int k = pointAt(e->position());
-        if (k >= 0) { m_selected = k; removePoint(); return; }
-        const auto r = graph(); double x = std::clamp((e->position().x() - r.left()) / r.width(), 0.0, 1.0);
-        if (m_grid > 0 && !(e->modifiers() & Qt::AltModifier)) x = std::round(x * m_grid) / m_grid;
-        const double y = std::clamp((r.bottom() - e->position().y()) / r.height(), 0.0, 1.0);
-        editCurve(m_body, m_curve, "Add Curve Point", [=](Points& p) {
-            if (p.size() >= mo::kCurvePoints) return;
-            for (const auto& pt : p) if (std::abs(pt.x - x) < 0.001) return;
+        if (k >= 0) { m_selected = k; m_selection = {k}; removePoint(); return; }
+        const double x = snapX(timeAt(e->position().x()), e->modifiers()), y = snapY(levelAt(e->position().y()), e->modifiers());
+        int added = -1;
+        editCurve(m_body, m_curve, "Add Curve Point", [&](Points& p) {
+            if (p.size() >= osmium::kCurvePoints) return;
+            for (const auto& pt : p) if (std::abs(pt.x - x) < 0.00001) return;
             auto it = std::upper_bound(p.begin(), p.end(), x, [](double x, const CurvePoint& q) { return x < q.x; });
-            p.insert(it, {x, y});
+            added = int(it - p.begin()); p.insert(it, {x, y});
         });
+        if (added >= 0) { m_selected = added; m_selection = {added}; m_segment = added; } notify();
     }
     void removePoint() {
-        const int k = m_selected;
-        editCurve(m_body, m_curve, "Delete Curve Point", [=](Points& p) { if (k > 0 && k + 1 < p.size()) p.removeAt(k); });
-        m_selected = -1;
+        editCurve(m_body, m_curve, "Delete Curve Nodes", [this](Points& p) { for (auto it = m_selection.rbegin(); it != m_selection.rend(); ++it) if (*it > 0 && *it + 1 < p.size()) p.removeAt(*it); });
+        m_selection.clear(); m_selected = -1; notify();
     }
     void keyPressEvent(QKeyEvent* e) override {
-        if (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) removePoint(); else Plot::keyPressEvent(e);
+        if (e->matches(QKeySequence::SelectAll)) { m_selection.clear(); for (int i = 0; i < points().size(); ++i) m_selection.insert(i); m_selected = 0; notify(); return; }
+        if (e->key() == Qt::Key_Escape) { m_selection.clear(); m_selected = -1; notify(); return; }
+        if (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) { removePoint(); return; }
+        if (e->key() == Qt::Key_Left || e->key() == Qt::Key_Right || e->key() == Qt::Key_Up || e->key() == Qt::Key_Down) {
+            const bool fine = e->modifiers() & Qt::ShiftModifier;
+            const double dx = fine ? 1.0 / 4096 : 1.0 / (m_grid > 0 ? m_grid : 256), dy = fine ? 0.001 : m_yGrid > 0 ? 1.0 / m_yGrid : 0.01;
+            if (!m_selection.empty()) moveSelection(points(), e->key() == Qt::Key_Right ? dx : e->key() == Qt::Key_Left ? -dx : 0, e->key() == Qt::Key_Up ? dy : e->key() == Qt::Key_Down ? -dy : 0);
+            return;
+        }
+        Plot::keyPressEvent(e);
+    }
+    bool focusNextPrevChild(bool next) override {
+        const int n = int(points().size()); if (n == 0 || selected() < 0) return Plot::focusNextPrevChild(next);
+        m_selected = (m_selected + (next ? 1 : n - 1) + n) % n; m_selection = {m_selected}; m_segment = std::min(m_selected, n - 2); notify(); return true;
     }
     void contextMenuEvent(QContextMenuEvent* e) override {
-        m_segment = segmentAt(e->pos()); QMenu menu(this);
+        m_segment = segmentAt(e->pos()); const int k = pointAt(e->pos()); if (k >= 0 && !m_selection.count(k)) { m_selected = k; m_selection = {k}; } notify();
+        QMenu menu(this);
         for (int shape = 0; shape < 3; ++shape) menu.addAction(QStringList{"Curve", "Smooth", "Hold"}[shape], this, [this, shape] { setShape(shape); });
-        menu.addAction("Straighten segment", this, [this] { const int s = m_segment; editCurve(m_body, m_curve, "Straighten Segment", [=](Points& p) { if (s >= 0 && s < p.size()) p[s].bend = 0; }); });
-        menu.addSeparator(); menu.addAction("Delete point", this, [this] { removePoint(); })->setEnabled(m_selected > 0 && m_selected + 1 < points().size());
+        menu.addAction("Straighten segment", this, [this] { setBend(0); });
+        menu.addSeparator(); menu.addAction("Delete nodes", this, [this] { removePoint(); })->setEnabled(selectionCount() > 0);
         menu.exec(e->globalPos());
     }
 private:
-    int m_curve, m_selected = -1, m_segment = 0, m_grid = 16, m_lastPaint = -1;
-    bool m_bending = false, m_gesture = false, m_draw = false;
-    QPointF m_press; double m_initial = 0, m_lastY = 0;
+    int m_curve, m_selected = -1, m_segment = 0, m_grid = 32, m_yGrid = 0, m_lastPaint = -1, m_zoom = 1;
+    bool m_bending = false, m_gesture = false, m_draw = false, m_box = false;
+    std::set<int> m_selection, m_beforeBox; Points m_startPoints;
+    QPointF m_press, m_boxEnd; double m_initial = 0, m_lastY = 0, m_start = 0;
 };
 
 class LfoPlot : public Plot {
@@ -622,7 +735,7 @@ protected:
         const double w = r.width() / 16;
         for (int i = 0; i < 16; ++i) {
             const double y = (m_body->pos(mo::step(m_step, i)) * 2 - 1) * r.height() * 0.5;
-            p.fillRect(QRectF(r.left() + i * w + 2, y > 0 ? r.center().y() - y : r.center().y(), w - 4, std::max(1.0, std::abs(y))), i < count ? theme::osmiumGreen : theme::devGridStrong);
+            p.fillRect(QRectF(r.left() + i * w + 2, y > 0 ? r.center().y() - y : r.center().y(), w - 4, std::max(1.0, std::abs(y))), i < count ? theme::accent : theme::devGridStrong);
         }
     }
     void mousePressEvent(QMouseEvent* e) override { if (e->button() == Qt::LeftButton) { m_gesture = true; m_body->ctx().project->beginEdit("Draw Steps"); mouseMoveEvent(e); } }
@@ -637,7 +750,7 @@ private: int m_step; bool m_gesture = false;
 class RangePlot : public Plot {
 public:
     RangePlot(DeviceBody* b, std::function<int()> source, std::function<int()> param) : Plot(b, 68), m_source(std::move(source)), m_param(std::move(param)) {
-        InfoView::attach(this, "Modulation range", "The green interval is this source's reachable range on the selected parameter. The white line is the base value. Bipolar sources extend both sides of the base.");
+        InfoView::attach(this, "Modulation range", "The accent interval is this source's reachable range on the selected parameter. The white line is the base value. Bipolar sources extend both sides of the base.");
     }
 protected:
     void draw(QPainter& p, const QRectF& r) override {
@@ -645,7 +758,7 @@ protected:
         const double a = std::clamp(base + route.amount, 0.0, 1.0), b = mo::sourceBipolar(m_source()) ? std::clamp(base - route.amount, 0.0, 1.0) : base;
         const double lo = std::min(a, b), hi = std::max(a, b), y = r.top() + 6;
         p.setPen(QPen(theme::devGridStrong, 5, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
-        p.setPen(QPen(theme::osmiumGreen, 5, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(r.left() + r.width() * lo, y), QPointF(r.left() + r.width() * hi, y));
+        p.setPen(QPen(theme::accent, 5, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(r.left() + r.width() * lo, y), QPointF(r.left() + r.width() * hi, y));
         p.setPen(QPen(theme::textBright, 2)); p.drawLine(QPointF(r.left() + base * r.width(), y - 6), QPointF(r.left() + base * r.width(), y + 6));
         p.setFont(pxFont(this, 10)); p.setPen(theme::textSoft);
         p.drawText(QRectF(r.left(), y + 12, r.width() / 2, 16), Qt::AlignLeft, paramText(m_body->ctx().type, param, lo));
@@ -654,10 +767,30 @@ protected:
 private: std::function<int()> m_source, m_param;
 };
 
+// Reflow the five sound sections without shrinking their knobs.
+class SoundPage : public QWidget {
+public:
+    SoundPage(std::vector<QWidget*> cells, QWidget* parent) : QWidget(parent), m_cells(std::move(cells)) {
+        m_grid = new QGridLayout(this); m_grid->setContentsMargins(0, 0, 0, 0); m_grid->setSpacing(8);
+        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(520); reflow(2);
+    }
+protected:
+    void resizeEvent(QResizeEvent* e) override { QWidget::resizeEvent(e); const int columns = width() >= 1160 ? 5 : width() >= 780 ? 3 : 2; if (columns != m_columns) reflow(columns); }
+private:
+    void reflow(int columns) {
+        m_columns = columns;
+        while (auto* item = m_grid->takeAt(0)) delete item;
+        for (int c = 0; c < 5; ++c) m_grid->setColumnStretch(c, c < columns ? (columns == 5 && c < 3 ? 4 : columns == 5 ? 3 : 1) : 0);
+        for (int i = 0; i < 5; ++i) m_grid->addWidget(m_cells[size_t(i)], i / columns, i % columns);
+        setMinimumHeight(m_grid->minimumSize().height()); m_grid->activate();
+    }
+    std::vector<QWidget*> m_cells; QGridLayout* m_grid; int m_columns = 0;
+};
+
 class OsmiumEditor : public DeviceBody {
 public:
     OsmiumEditor(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
-        setObjectName("osmiumEditor"); setMinimumSize(1060, 500); setMaximumHeight(QWIDGETSIZE_MAX);
+        setObjectName("osmiumEditor"); setMinimumSize(1060, 620); setMaximumHeight(QWIDGETSIZE_MAX);
         auto* root = new QVBoxLayout(this); root->setContentsMargins(8, 6, 8, 6); root->setSpacing(5);
         auto* header = hbox(12);
         auto* title = new QLabel("OSMIUM", this); title->setObjectName("osmiumTitle"); header->addWidget(title);
@@ -683,10 +816,10 @@ public:
         });
         header->addWidget(audition); root->addLayout(header);
 
-        auto* top = hbox(8);
-        for (int o = 0; o < 3; ++o) top->addWidget(oscillator(o), 4);
-        for (int f = 0; f < 2; ++f) top->addWidget(filter(f), 3);
-        auto* soundPage = new QWidget(this); soundPage->setLayout(top);
+        std::vector<QWidget*> soundCells;
+        for (int o = 0; o < 3; ++o) soundCells.push_back(oscillator(o));
+        for (int f = 0; f < 2; ++f) soundCells.push_back(filter(f));
+        auto* soundPage = new SoundPage(std::move(soundCells), this);
 
         auto* sources = hbox(4);
         const std::vector<int> order{mo::SrcEnv1, mo::SrcEnv2, mo::SrcEnv3, mo::SrcEnv4, mo::SrcLfo1, mo::SrcLfo2, mo::SrcLfo3, mo::SrcLfo4,
@@ -719,7 +852,7 @@ public:
         auto* perfTitle = new QLabel("Performance source", m_performance); perfTitle->setAlignment(Qt::AlignCenter); perf->addWidget(perfTitle);
         auto* assign = button("Assign to selected parameter", "Connect the selected source to the destination shown in the range panel.", [this] { setRoute(this, m_source, m_focus, 0.25); });
         perf->addWidget(assign, 0, Qt::AlignCenter); perf->addStretch(); m_modulators->addWidget(m_performance);
-        m_pages->addWidget(soundPage);
+        m_pages->addWidget(scrollPage(soundPage));
         m_pages->addWidget(m_modulators);
         m_pages->addWidget(voice()); m_pages->addWidget(effects());
         pane->addWidget(m_pages); workspace->addWidget(panel, 1);
@@ -746,9 +879,9 @@ public:
         auto* macroTitle = new QLabel("MACROS", macroPanel); macroTitle->setObjectName("osmiumCaption"); macros->addWidget(macroTitle);
         for (int k = 0; k < 8; ++k) {
             auto* cell = new QWidget(macroPanel); auto* col = vbox(0);
-            col->addWidget(dial(mo::macro(k), QString::number(k + 1), 38)); cell->setLayout(col); macros->addWidget(cell, 1, Qt::AlignHCenter);
+            col->addWidget(dial(mo::macro(k), QString::number(k + 1), 84)); cell->setLayout(col); macros->addWidget(cell, 1, Qt::AlignHCenter);
         }
-        macros->addStretch(); macros->addWidget(dial(mo::Volume, "Output", 38)); root->addWidget(macroPanel);
+        macros->addStretch(); macros->addWidget(dial(mo::Volume, "Output", 64)); root->addWidget(macroPanel);
         applyStyle(); connect(theme::notifier(), &theme::Notifier::changed, this, [this] { applyStyle(); });
         selectSource(mo::SrcEnv2, false); setPage(0); refresh();
         connect(c.project, &Project::restored, this, [this] { m_ctx.track = ctx().project->indexOfTrack(ctx().trackId); refresh(); });
@@ -851,6 +984,9 @@ private:
         auto* knobs = hbox(0); knobs->addStretch(); knobs->addWidget(dial(mo::fparam(f, mo::FCutoff), "Cutoff", 52)); knobs->addWidget(dial(mo::fparam(f, mo::FReso), "Resonance", 44)); knobs->addStretch(); l->addLayout(knobs); l->addStretch();
         return box;
     }
+    void expandPlot(Plot* plot, int height) {
+        plot->setMinimumHeight(height); plot->setMaximumHeight(QWIDGETSIZE_MAX); plot->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    }
     QWidget* envelope(int e) {
         auto* w = new QWidget(this); auto* l = vbox(4); w->setLayout(l); auto* row = hbox(6);
         row->addWidget(labelledChoice(mo::eloop(e), "Loop", 66));
@@ -858,10 +994,10 @@ private:
         for (int k = 0; k < 4; ++k) row->addWidget(dial(mo::eparam(e, mo::EnvKnob(params[k])), names[k], 40));
         for (int s = 0; s < 3; ++s) row->addWidget(dial(osmium::bend(e, s), QStringList{"A bend", "D bend", "R bend"}[s], 36));
         row->addWidget(dial(mo::ecurve(e), "Level curve", 36)); row->addStretch();
-        l->addWidget(new EnvelopePlot(this, e)); l->addLayout(row); return w;
+        auto* plot = new EnvelopePlot(this, e); expandPlot(plot, 166); l->addWidget(plot, 1); l->addLayout(row); return w;
     }
     QWidget* lfo(int n) {
-        auto* w = new QWidget(this); auto* l = vbox(5); w->setLayout(l); l->addWidget(new LfoPlot(this, n)); auto* row = hbox(12);
+        auto* w = new QWidget(this); auto* l = vbox(5); w->setLayout(l); auto* plot = new LfoPlot(this, n); expandPlot(plot, 166); l->addWidget(plot, 1); auto* row = hbox(12);
         row->addWidget(labelledChoice(mo::lparam(n, mo::LRate), "Rate", 90)); row->addWidget(labelledChoice(mo::lparam(n, mo::LShape), "Shape", 104));
         row->addWidget(dial(mo::lparam(n, mo::LHz), "Free Hz", 32)); row->addWidget(dial(mo::lfade(n), "Fade in", 32));
         row->addWidget(labelledChoice(mo::lretrig(n), "Retrigger", 76)); row->addWidget(labelledChoice(mo::lmode(n), "Mode", 104)); row->addStretch(); l->addLayout(row); return w;
@@ -869,25 +1005,61 @@ private:
     QWidget* curvePage(int c) {
         auto* w = new QWidget(this); auto* l = vbox(5); w->setLayout(l);
         auto* plot = new CurvePlot(this, c); auto* toolbar = hbox(4);
-        auto* shapes = new ChoiceBox(w); shapes->setObjectName(QString("osmiumCurveShape_%1").arg(c)); shapes->addItems({"Triangle", "Sine", "Rise", "Fall", "Steps", "Random"}); shapes->setCurrentIndex(-1); shapes->setPlaceholderText("Shape"); shapes->setFixedWidth(90);
+        auto* shapes = new ChoiceBox(w); shapes->setObjectName(QString("osmiumCurveShape_%1").arg(c)); shapes->addItems({"Triangle", "Sine", "Rise", "Fall", "Steps", "Random"}); shapes->setCurrentIndex(-1); shapes->setPlaceholderText("Shape"); shapes->setFixedWidth(86);
         InfoView::attach(shapes, "Curve shape", "Replace the curve with an editable shape. Every segment can then be bent, smoothed or held.");
         connect(shapes, &QComboBox::activated, this, [plot, shapes](int i) { plot->preset(i); shapes->setCurrentIndex(-1); }); toolbar->addWidget(shapes);
-        auto* draw = button("Draw", "Paint a 16-step curve by dragging across the graph.", [] {}); draw->setCheckable(true); connect(draw, &QPushButton::toggled, plot, [plot](bool on) { plot->setDraw(on); }); toolbar->addWidget(draw);
-        auto* snap = new ChoiceBox(w); snap->setFixedWidth(76); snap->addItems({"1/16", "1/32", "1/8", "Free"});
-        connect(snap, &QComboBox::activated, plot, [plot](int i) { plot->setGrid(std::vector<int>{16, 32, 8, 0}[size_t(i)]); });
-        InfoView::attach(snap, "Snap", "Set the time grid for moving or adding nodes. Alt temporarily bypasses it."); toolbar->addWidget(snap);
-        auto* segment = new ChoiceBox(w); segment->addItems({"Curve", "Smooth", "Hold"}); segment->setCurrentIndex(-1); segment->setPlaceholderText("Segment"); segment->setFixedWidth(86);
-        InfoView::attach(segment, "Segment shape", "Click a segment in the graph, then choose its interpolation. Curve has a bend handle, Smooth eases both ends, Hold makes a step.");
-        connect(segment, &QComboBox::activated, plot, [plot, segment](int i) { plot->setShape(i); segment->setCurrentIndex(-1); }); toolbar->addWidget(segment);
+        auto* draw = button("Draw", "Paint at the X grid resolution. Free uses 256 intervals. One stroke is one undo step.", [] {});
+        draw->setObjectName(QString("osmiumCurveDraw_%1").arg(c)); draw->setCheckable(true); connect(draw, &QPushButton::toggled, plot, [plot](bool on) { plot->setDraw(on); }); toolbar->addWidget(draw);
+        auto* snap = new ChoiceBox(w); snap->setObjectName(QString("osmiumCurveGrid_%1").arg(c)); snap->setFixedWidth(87);
+        for (int n : {4, 8, 16, 32, 64, 128, 256}) snap->addItem(QString("X: 1/%1").arg(n), n);
+        snap->addItem("X: Free", 0); snap->setCurrentIndex(3);
+        connect(snap, &QComboBox::activated, plot, [plot, snap](int i) { plot->setGrid(snap->itemData(i).toInt()); });
+        InfoView::attach(snap, "Time grid", "Time snap and Draw resolution, up to 256 intervals. Alt bypasses node snapping."); toolbar->addWidget(snap);
+        auto* ySnap = new ChoiceBox(w); ySnap->setObjectName(QString("osmiumCurveYGrid_%1").arg(c)); ySnap->setFixedWidth(81); ySnap->addItem("Y: Free", 0);
+        for (int n : {4, 8, 16, 32, 64}) ySnap->addItem(QString("Y: 1/%1").arg(n), n);
+        connect(ySnap, &QComboBox::activated, plot, [plot, ySnap](int i) { plot->setYGrid(ySnap->itemData(i).toInt()); });
+        InfoView::attach(ySnap, "Level grid", "Optional level snap for nodes and drawing. Alt bypasses it."); toolbar->addWidget(ySnap);
+        auto* zoom = new ChoiceBox(w); zoom->setObjectName(QString("osmiumCurveZoom_%1").arg(c)); zoom->setFixedWidth(66);
+        for (int n : {1, 2, 4, 8}) zoom->addItem(QString("%1×").arg(n), n);
+        InfoView::attach(zoom, "Zoom", "Magnify time, then use the scrollbar to reach the rest of the curve. Saved timing stays unchanged."); toolbar->addWidget(zoom);
         toolbar->addWidget(button("Invert", "Flip the curve vertically.", [plot] { plot->transform(0); })); toolbar->addWidget(button("Reverse", "Reverse the curve in time.", [plot] { plot->transform(1); }));
-        toolbar->addWidget(button("Copy", "Copy this curve including segment shapes and bends.", [plot] { CurvePlot::clipboard() = plot->points(); }));
+        toolbar->addWidget(button("Copy", "Copy the curve including shapes and bends.", [plot] { CurvePlot::clipboard() = plot->points(); }));
         toolbar->addWidget(button("Paste", "Paste the copied curve as one undo step.", [plot] { if (!CurvePlot::clipboard().isEmpty()) plot->fill("Paste Curve", CurvePlot::clipboard()); })); toolbar->addStretch();
-        l->addLayout(toolbar); l->addWidget(plot);
+        l->addLayout(toolbar); l->addWidget(plot, 1);
+        auto* scroll = new QScrollBar(Qt::Horizontal, w); scroll->setObjectName(QString("osmiumCurveScroll_%1").arg(c)); scroll->setRange(0, 0); scroll->setPageStep(1000); scroll->setFixedHeight(12); l->addWidget(scroll);
+        connect(zoom, &QComboBox::activated, plot, [plot, zoom, scroll](int i) { const int n = zoom->itemData(i).toInt(); scroll->setRange(0, (n - 1) * 1000); plot->setView(n, scroll->value()); });
+        connect(scroll, &QScrollBar::valueChanged, plot, [plot, zoom](int value) { plot->setView(zoom->currentData().toInt(), value); });
+
+        auto* nodes = hbox(5); auto* count = new QLabel(w); count->setObjectName(QString("osmiumCurveSelection_%1").arg(c)); count->setMinimumWidth(100); nodes->addWidget(count);
+        const auto field = [&](const QString& id, const QString& label, double min, double max) {
+            nodes->addWidget(new QLabel(label, w)); auto* value = new CurveValue(ctx().project, w); value->setObjectName(QString("osmiumCurve%1_%2").arg(id).arg(c));
+            value->setRange(min, max); value->setFixedSize(62, 24); value->setEditScale(100);
+            value->setFormatter([](double v) { return QString::number(v * 100, 'f', 2) + "%"; }); nodes->addWidget(value); return value;
+        };
+        auto* x = field("X", "X", 0, 1); auto* y = field("Y", "Y", 0, 1); auto* bend = field("Bend", "Bend", -1, 1);
+        InfoView::attach(x, "Node time", "Exact time as a percentage of the curve. Drag or double-click to type. Endpoints keep their time.");
+        InfoView::attach(y, "Node level", "Exact node level from 0 to 100%. Drag or double-click to type.");
+        InfoView::attach(bend, "Segment bend", "Outgoing segment bend from -100 to +100%. Zero straightens the segment.");
+        connect(x, &DragValue::valueEdited, plot, [plot](double v) { plot->setCoordinate(true, v); });
+        connect(y, &DragValue::valueEdited, plot, [plot](double v) { plot->setCoordinate(false, v); });
+        connect(bend, &DragValue::valueEdited, plot, [plot](double v) { plot->setBend(v); });
+        auto* segment = new ChoiceBox(w); segment->setObjectName(QString("osmiumCurveSegment_%1").arg(c)); segment->addItems({"Curve", "Smooth", "Hold"}); segment->setFixedWidth(86);
+        InfoView::attach(segment, "Segment shape", "Interpolation of the selected outgoing segment. Smooth eases both ends; Hold makes a step.");
+        connect(segment, &QComboBox::activated, plot, [plot](int i) { plot->setShape(i); }); nodes->addWidget(segment);
+        auto* remove = button("Delete", "Delete selected interior nodes. Endpoints are retained.", [plot] { QKeyEvent e(QEvent::KeyPress, Qt::Key_Delete, Qt::NoModifier); QApplication::sendEvent(plot, &e); }); nodes->addWidget(remove); nodes->addStretch();
+        auto sync = [plot, count, x, y, bend, segment, remove] {
+            const auto p = plot->points(); const int k = plot->selected(), s = plot->segment(), n = plot->selectionCount();
+            count->setText(n > 1 ? QString("%1 selected / %2").arg(n).arg(p.size()) : k >= 0 ? QString("Node %1 / %2").arg(k + 1).arg(p.size()) : QString("%1 / 257 nodes").arg(p.size()));
+            x->setEnabled(n == 1 && k > 0 && k + 1 < p.size()); y->setEnabled(n == 1 && k >= 0); bend->setEnabled(s >= 0); segment->setEnabled(s >= 0); remove->setEnabled(n > 0);
+            if (k >= 0) { if (!x->editing()) x->setValue(p[k].x, false); if (!y->editing()) y->setValue(p[k].y, false); }
+            if (s >= 0) { if (!bend->editing()) bend->setValue(p[s].bend, false); segment->setCurrentIndex(p[s].shape); }
+        };
+        plot->selectionChanged = sync; m_refreshers.push_back(sync); sync(); l->addLayout(nodes);
         auto* row = hbox(12); row->addWidget(labelledChoice(mo::cparam(c, mo::CRate), "Length", 100)); row->addWidget(labelledChoice(mo::cparam(c, mo::CMode), "Mode", 100));
-        row->addWidget(labelledChoice(mo::cparam(c, mo::CRetrig), "Retrigger", 80)); row->addWidget(dial(mo::cparam(c, mo::CSmooth), "Smoothing", 24)); row->addStretch(); l->addLayout(row); return w;
+        row->addWidget(labelledChoice(mo::cparam(c, mo::CRetrig), "Retrigger", 80)); row->addWidget(dial(mo::cparam(c, mo::CSmooth), "Smoothing", 64)); row->addStretch(); l->addLayout(row); return w;
     }
     QWidget* stepper(int s) {
-        auto* w = new QWidget(this); auto* l = vbox(5); w->setLayout(l); l->addWidget(new StepPlot(this, s)); auto* row = hbox(10);
+        auto* w = new QWidget(this); auto* l = vbox(5); w->setLayout(l); auto* plot = new StepPlot(this, s); expandPlot(plot, 138); l->addWidget(plot, 1); auto* row = hbox(10);
         row->addWidget(labelledChoice(mo::sparam(s, mo::SRate), "Rate", 90)); row->addWidget(dial(mo::sparam(s, mo::SCount), "Count", 28));
         row->addWidget(dial(mo::sparam(s, mo::SGlide), "Glide", 28)); row->addWidget(labelledChoice(mo::sretrig(s), "Retrigger", 76)); row->addStretch(); l->addLayout(row);
         auto* values = hbox(3);
@@ -922,7 +1094,11 @@ private:
         }
         grid->setRowStretch((n + 6) / 7, 1); scroll->setWidget(w); return scroll;
     }
-    void addSourcePage(int source, QWidget* w) { m_sourcePages[source] = w; m_modulators->addWidget(w); }
+    QWidget* scrollPage(QWidget* w) {
+        auto* scroll = new QScrollArea(this); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(w); return scroll;
+    }
+    void addSourcePage(int source, QWidget* w) { auto* page = scrollPage(w); m_sourcePages[source] = page; m_modulators->addWidget(page); }
     void setPage(int i) { m_pages->setCurrentIndex(i); for (int k = 0; k < int(m_pagesButtons.size()); ++k) m_pagesButtons[size_t(k)]->setChecked(k == i); }
     void rebuildRoutes() {
         const auto* d = device(); if (!d) return;
@@ -999,7 +1175,7 @@ public:
         auto* title = new QLabel("OSMIUM", this); title->setStyleSheet(QString("color:%1;font-size:13px;font-weight:700;").arg(theme::text.name())); left->addWidget(title);
         left->addWidget(new WavePlot(this, 0, 58));
         auto* open = new QPushButton("Expand", this); open->setObjectName("osmiumOpenEditor"); open->setFixedHeight(28);
-        InfoView::attach(open, "Open Osmium", "Expand the instrument inside the device pane: green modulation ranges on the knobs, bendable envelopes, LFOs, curves, steppers, macros and effects.");
+        InfoView::attach(open, "Open Osmium", "Expand the instrument inside the device pane: accent modulation ranges on the knobs, bendable envelopes, LFOs, curves, steppers, macros and effects.");
         connect(open, &QPushButton::clicked, this, [this] { emit editorRequested(); });
         left->addWidget(open); left->addStretch(); root->addLayout(left, 1);
         auto* controls = hbox(2);

@@ -111,7 +111,7 @@ struct DeviceSlot {
     DeviceType type = DeviceType::Unknown;
     int        keyTrack = -1;   // sidechain: index of the track that keys it (-1: its own input, or a missing source)
     std::vector<ModRoute> mods; // Monolith: its modulation routes
-    CurvePoint curves[monolith::kCurves * monolith::kCurvePoints] = {};   // Monolith: its drawn curves
+    CurvePoint curves[monolith::kCurves * osmium::kCurvePoints] = {};   // Monolith/Osmium: preallocated drawn curves
     int        curveCount[monolith::kCurves] = {};
     SamplePtr  sample;   // Sampler
     double     slices[sampler::kMaxSlices] = {};   // Sampler: its manual slices (seconds)
@@ -448,8 +448,8 @@ void Engine::publish() {
             for (const ModRoute& r : d.mods) if (int(slot.mods.size()) < monolith::kMaxRoutes) slot.mods.push_back(r);
             for (int c = 0; c < monolith::kCurves && c < d.curves.size(); ++c) {
                 const QVector<CurvePoint>& pts = d.curves[c];
-                slot.curveCount[c] = std::min(int(pts.size()), monolith::kCurvePoints);
-                for (int k = 0; k < slot.curveCount[c]; ++k) slot.curves[c * monolith::kCurvePoints + k] = pts[k];
+                slot.curveCount[c] = std::min(int(pts.size()), deviceType(d.name) == DeviceType::Osmium ? osmium::kCurvePoints : monolith::kCurvePoints);
+                for (int k = 0; k < slot.curveCount[c]; ++k) slot.curves[c * osmium::kCurvePoints + k] = pts[k];
             }
             for (int i = 0; i < d.params.size() && i < kMaxParams; ++i) slot.params[i] = float(d.params[i].value);
             const DeviceType type = deviceType(d.name);
@@ -1366,6 +1366,7 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             dctx.modCount = int(d.mods.size());
             dctx.curves = d.curves;
             dctx.curveCount = d.curveCount;
+            dctx.curveStride = osmium::kCurvePoints;
             if (d.keyTrack >= 0 && d.keyTrack < kMaxTracks) {   // sidechain: another track's audio at the chosen tap
                 const int tapParam = sidechain::param(d.type, sidechain::Tap);
                 const int tap = std::clamp(choiceIndex(d.type, tapParam, params[tapParam]), 0, 2);

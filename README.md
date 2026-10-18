@@ -15,14 +15,14 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 Load **Instruments → Osmium**, then click **Expand**. Monolith is still available with its original panel and sound engine behavior.
 
-- Select an envelope, LFO, curve or stepper, then click a knob's **+** slot, or drag the source onto it. Drag the **green outer ring** to set the range; drag the knob's centre to set its base. Shift makes fine adjustments. The range panel shows both ends in the parameter's units and accepts an exact signed percentage.
+- Select an envelope, LFO, curve or stepper, then click a knob's **+** slot, or drag the source onto it. Drag the **accent outer ring** to set the range; drag the knob's centre or inner ring to set its base. The faded outer track previews the full range, with a clear gap between rings. All dials have larger centers, and macros are larger again (0.31.1). Shift makes fine adjustments. The range panel shows both ends in the parameter's units and accepts an exact signed percentage.
 - Shape the four envelopes with timing/level nodes and separate attack, decay and release bend diamonds. Loop repeats attack and decay while held.
-- Edit the two phrase curves with nodes, bend diamonds, Curve / Smooth / Hold segments, freehand drawing, snap, editable shapes, invert/reverse and copy/paste. Double-click to add a point; Delete removes a selected interior point. Alt bypasses snap.
+- Edit both phrase curves with up to **257 nodes**, **1/256** time grids, optional level snap, **1–8× zoom/pan**, exact **X / Y / Bend** fields, and Curve / Smooth / Hold segments (0.31.1). Freehand follows the chosen grid. Shift-click or drag a box to select nodes together; Ctrl-drag locks an axis; arrows nudge and Shift makes fine nudges. Double-click adds a node; Delete removes selected interior nodes. Alt bypasses snap. [Editing guide](docs/osmium-editing.md).
 - Four LFOs, two 16-step sequencers, eight macros, dual filters, unison, sub/noise/modulation oscillators, drive and effects share the same modulation system. **Voice & mixer** and **Effects** expose the remaining controls. Editing their modulation rings keeps the selected page open.
 - **40 Drum & Bass presets** (0.29): eight each of pads, leads/plucks, subs, reeses and wobbles, alongside the original starting patches. Type into the patch selector to search, or search **Osmium** under **Browser → Sounds**. Every preset has shaped envelopes, saved modulation/curves and eight performance macros: **Tone, Warp, Drive, Width, Space, Echo, Body, Air**. Names and modifications survive set/preset saving; loading a new sound is one undo step. See the [preset guide](docs/osmium-dnb-presets.md).
 - The editor expands inside Sessions’ device pane (0.30), with **Sound**, **Modulators**, **Voice & mixer** and **Effects** pages. Drag the divider for more space; **Device chain ▾** collapses it. Undo and panel rebuilds preserve the editor. Switching tracks hides it; returning restores it. **Audition C2** plays through the track.
 
-![Osmium curve editor](docs/screenshots/osmium/osmium-curve.png)
+![Osmium curve editor](docs/screenshots/osmium-usability/osmium-large-curve.png)
 
 Focused checks and reproducible editor captures:
 

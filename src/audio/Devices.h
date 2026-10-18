@@ -74,9 +74,10 @@ struct Context {
     // Monolith: its modulation routes (kept alive by the render state).
     const ModRoute* mods = nullptr;
     int             modCount = 0;
-    // Monolith: its drawn curves, monolith::kCurvePoints slots per curve, curveCount[c] of them used.
+    // Monolith/Osmium: curveStride slots per curve, curveCount[c] of them used.
     const CurvePoint* curves = nullptr;
     const int*        curveCount = nullptr;
+    int             curveStride = monolith::kCurvePoints; // Engine uses Osmium capacity; legacy callers retain 32.
 };
 
 class ChainMixer;

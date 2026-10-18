@@ -10,6 +10,16 @@
 6. **Filter** On, type buttons, drag the dot; **Env** +3 oct → the envelope opens the filter; **LFO** On, shape, Rate 1/4 → the line runs with the song; Pitch 12 st → vibrato; Vol 100 % → tremolo.
 7. **Warp** on with a loop whose tempo was found → change the set's tempo → the loop follows; **Re-Pitch** changes the pitch with it, **Tones** / **Complex** keep the pitch; `:2` / `x2` halve and double the BPM (the bars caption follows), double-click the field to type one; Delete clears it (Warp then does nothing).
 8. Save the set and reopen → the mode, the manual slices, the BPM, every knob come back. Open a set saved before 0.32 → the Sampler plays as it did (Classic, filter on at 20 kHz). Ctrl+Z undoes a flag drag, a slice, a tempo edit, a mode change, one step each.
+## 0.31.1 · Osmium controls and dense curves
+
+1. Expand Osmium: all dials have a comfortably sized center, with larger macros. Drag the face or inner ring: base changes, range stays fixed. Drag the outer ring: range changes, base stays fixed. The clear gap and label do not start either gesture.
+2. Unassigned knobs show a faded full modulation track. Assigned knobs retain the faded remainder and show their set range brightly. Try Dark, Light and a custom accent: the rings, slots and range inspector follow the accent. Voice & mixer and Effects stay open while editing their ranges.
+3. Sound: resize wide/narrow; sections reflow and scroll without shrinking knobs. Expand the pane vertically: curve, envelope, LFO and step canvases grow. Macros remain accessible.
+4. Curve: choose X: 1/128 or 1/256, enable Draw and paint quickly across the graph. Every skipped interval fills. Undo restores the old curve in one step. Save/reopen a set and user preset with both curves dense: no nodes are lost.
+5. Turn Draw off. Add/remove nodes by double-click, drag nodes and segment diamonds. Select one node and double-click X / Y / Bend to type exact percentages. Endpoints retain their time. Curve / Smooth / Hold updates the selected outgoing segment.
+6. Shift-click several nodes or drag a selection box. Move the group: spacing remains fixed and nodes stay ordered. Ctrl-drag constrains one axis. Arrow keys nudge; Shift-arrow is fine. Delete removes selected interior nodes; Ctrl+A includes endpoints safely. Escape clears selection; Tab cycles selected nodes, Escape then Tab leaves the graph.
+7. Set Y snap independently, then use Alt to bypass snapping. Zoom 2× / 4× / 8× and scroll to the far end: node edits and drawing retain their actual saved times. Return to 1×. Try undo/redo, preset loads and track switching throughout.
+8. Route Curve 2 to a muted oscillator's Level, draw silence in its first quarter and an active later shape. Play held notes: the late section is audible. Existing Monolith curves and factory sounds retain their previous behavior. Builds without these changes truncate curves above 32 nodes; use a build containing this branch for dense sets.
 
 ## 0.31 · Drum Buss
 
@@ -36,7 +46,7 @@
 
 1. Open Osmium's patch selector, type part of a name (for example `seismic`) → the matching sound is offered. There are 40 new sounds: eight each of Pad, Lead, Sub, Reese and Wobble; the original starting patches remain.
 2. Search `Osmium` in Browser → Sounds and load a sound → the editor's name, parameters, routes, both curves and eight macro labels match the selected factory patch. Undo/redo a patch load → the previous/next sound returns in one step and the editor stays open.
-3. Start on Curve 1, switch to Voice & mixer and assign a Curve 1 range to Detune. Select another source, return to Voice & mixer, drag Detune's centre and green ring → Voice & mixer stays visible; the source highlight may change to the ring's source. Repeat on an Effects knob. Clicking a source chip explicitly still opens its editor.
+3. Start on Curve 1, switch to Voice & mixer and assign a Curve 1 range to Detune. Select another source, return to Voice & mixer, drag Detune's centre and outer ring → Voice & mixer stays visible; the source highlight may change to the ring's source. Repeat on an Effects knob. Clicking a source chip explicitly still opens its editor.
 4. Hold open chords for the pads, play leads around MIDI 55–79, and try basses around MIDI 28–43. Turn the macros: Tone, Warp, Drive, Width, Space, Echo, Body, Air → all eight change the sound. The single-voice Glasswire Width macro and sub Width macros add chorus; default subs stay centered and dry.
 5. Play the wobbles with the project at 170/174 BPM → their curves, LFOs and stepper follow the tempo. Try short syncopated notes and longer held notes, then glide between overlapping notes.
 6. Save a modified factory sound as a user preset and save/reopen the set → the curves, envelope bends, routes and macro positions return. Unzip the portable bank and drag a `.sessionspreset` onto a MIDI track → it also plays in an existing Osmium-capable 0.27/0.28 build.
@@ -50,8 +60,8 @@ The automated tests can't plug in a keyboard, sing into a microphone or tell whe
 
 ## Osmium (0.27)
 
-1. Load Instruments → Osmium onto a MIDI track and click Expand → a floating synth opens; the rack remains compact. Play a keyboard or press Audition C2 → sound comes through the track.
-2. Env 2 initially controls Filter 1 Cutoff. Drag Cutoff's green ring → the range changes and its base stays put. Drag the centre → the base changes. Shift → fine movement. Inspect the reachable Hz values on the right.
+1. Load Instruments → Osmium onto a MIDI track and click Expand → the editor opens inside the device pane. Play a keyboard or press Audition C2 → sound comes through the track.
+2. Env 2 initially controls Filter 1 Cutoff. Drag Cutoff's outer ring → the range changes and its base stays put. Drag the centre → the base changes. Shift → fine movement. Inspect the reachable Hz values on the right.
 3. Select LFO 1 and click Cutoff's + / source slot → both sources control the same parameter. Drag its range below zero → modulation reverses. Double-click the range amount and type -42.5 → the amount reads -42.5%.
 4. Drag Curve 1 onto Position → Curve 1 becomes selected and its ring appears. Use Remove, undo and redo → the assignment and its signed amount return.
 5. Drag an envelope's peak, decay and release nodes → the times and sustain controls follow. Drag each diamond → only that segment's bend changes. Hold a note while editing and listen for the contour; toggle Loop.
