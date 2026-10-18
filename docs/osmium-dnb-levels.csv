@@ -1,0 +1,41 @@
+name,category,peak_dbfs,rms_dbfs,all_macros_peak_dbfs,side_rms,tail_rms
+Osmium Pad - Aurora,Pad,-13.36,-26.97,-5.46,0.027165,0.0026846
+Osmium Pad - Cirrus,Pad,-12.84,-27.62,-6.28,0.021783,0.0067741
+Osmium Pad - Tidal Glass,Pad,-14.67,-28.16,-6.87,0.023295,0.0010418
+Osmium Pad - Halo Choir,Pad,-14.43,-29.46,-7.77,0.017932,0.0010514
+Osmium Pad - Rainlight,Pad,-13.78,-28.15,-6.05,0.019897,0.0011682
+Osmium Pad - Blue Hour,Pad,-12.46,-26.09,-7.51,0.026304,7.4698e-05
+Osmium Pad - Suspended,Pad,-11.98,-26.06,-7.45,0.022261,0.0033906
+Osmium Pad - Night Bloom,Pad,-14.35,-29.23,-7.27,0.018285,0.0029594
+Osmium Lead - Vector,Lead,-12.46,-22.08,-10.06,0.031267,0.0012991
+Osmium Lead - Prism,Lead,-14.18,-26.74,-15.36,0.020273,0.00086017
+Osmium Lead - Signal,Lead,-12.88,-26.38,-14.77,0.020422,0.00075853
+Osmium Lead - Afterimage,Lead,-14.25,-32.72,-15.89,0.012939,0.00023338
+Osmium Lead - Razorline,Lead,-11.75,-21.14,-10.39,0.041449,0.00029138
+Osmium Lead - Glasswire,Lead,-14.34,-37.13,-16.59,0.0021007,2.4627e-06
+Osmium Lead - Kestrel,Lead,-11.29,-19.78,-8.33,0.04938,0.008606
+Osmium Lead - Neon Thread,Lead,-12.70,-22.23,-10.96,0.032501,0.0012649
+Osmium Sub - Abyss,Sub,-13.82,-18.95,-13.30,0,0
+Osmium Sub - Pressure,Sub,-12.78,-17.65,-13.06,0,0
+Osmium Sub - Rubber,Sub,-13.23,-18.65,-12.95,0,0
+Osmium Sub - Roundhouse,Sub,-13.07,-28.42,-15.77,0,0
+Osmium Sub - Velvet,Sub,-13.41,-19.27,-14.28,0,0
+Osmium Sub - Undertone,Sub,-13.04,-24.63,-14.74,0,0
+Osmium Sub - Tunnel,Sub,-12.67,-18.61,-13.27,0,0
+Osmium Sub - Low Orbit,Sub,-12.89,-18.20,-12.98,0,0
+Osmium Reese - Fracture,Reese,-12.71,-19.91,-11.91,0.044285,6.6291e-05
+Osmium Reese - Concrete,Reese,-11.89,-19.14,-11.07,0.03715,0
+Osmium Reese - Undertow,Reese,-12.70,-21.89,-12.62,0.031418,6.6464e-05
+Osmium Reese - Corrosion,Reese,-11.49,-21.85,-11.41,0.036864,5.765e-05
+Osmium Reese - Black Ice,Reese,-12.96,-20.03,-12.65,0.053569,8.4176e-05
+Osmium Reese - Viscous,Reese,-12.25,-19.00,-11.80,0.043205,0.00010107
+Osmium Reese - Iron Current,Reese,-13.35,-21.10,-13.77,0.037088,0
+Osmium Reese - Horizon,Reese,-13.28,-20.47,-10.58,0.053212,0.0009656
+Osmium Wobble - Undertow,Wobble,-13.07,-20.61,-12.87,0.026408,6.1415e-05
+Osmium Wobble - Breakwater,Wobble,-12.80,-20.45,-12.93,0.026978,6.7054e-05
+Osmium Wobble - Hydraulics,Wobble,-12.13,-17.97,-11.66,0.050681,7.1549e-05
+Osmium Wobble - Lung,Wobble,-13.31,-21.46,-13.14,0.021935,5.7481e-05
+Osmium Wobble - Torque,Wobble,-13.44,-20.81,-12.38,0.029004,6.7336e-05
+Osmium Wobble - Undertaker,Wobble,-11.61,-19.76,-11.55,0.022514,7.3596e-05
+Osmium Wobble - Relay,Wobble,-12.53,-19.88,-12.02,0.038944,8.4684e-05
+Osmium Wobble - Seismic,Wobble,-13.26,-19.04,-12.74,0.026946,8.0064e-05

@@ -3,11 +3,13 @@
 #include "audio/Wavetables.h"
 #include "audio/Devices.h"
 #include "core/ModulationCurve.h"
+#include "core/OsmiumPresets.h"
 #include "core/Transport.h"
 #include "ui/InfoView.h"
 #include "widgets/DragValue.h"
 #include <QApplication>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialog>
 #include <QDrag>
 #include <QDropEvent>
@@ -129,7 +131,10 @@ protected:
     void paintEvent(QPaintEvent*) override {
         QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
         p.setFont(pxFont(this, 10)); p.setPen(theme::textSoft);
-        p.drawText(QRect(0, 0, width(), 14), Qt::AlignCenter, m_label);
+        QString label = m_label;
+        if (const auto* device = m_body->device(); device && osmium::factoryPreset(device->name))
+            for (int k = 0; k < 8; ++k) if (m_param == mo::macro(k)) label = QString("%1 %2").arg(k + 1).arg(osmium::kMacroNames[k]);
+        p.drawText(QRect(0, 0, width(), 14), Qt::AlignCenter, label);
         const double base = m_body->pos(m_param), radius = m_d / 2.0 - 5;
         arc(p, 0, 1, radius - 5, theme::osmiumBorder, 3);
         arc(p, 0, base, radius - 5, theme::textSoft, 3);
@@ -657,10 +662,19 @@ public:
         auto* header = hbox(12);
         auto* title = new QLabel("OSMIUM", this); title->setObjectName("osmiumTitle"); header->addWidget(title);
         header->addSpacing(22);
-        auto* patches = new ChoiceBox(this); patches->setObjectName("osmiumPatch"); patches->setFixedWidth(214);
-        patches->addItems({"Init", "Basalt Bass", "Obsidian Reese", "Glacial Pad", "Pressure Sequence"});
-        InfoView::attach(patches, "Patch", "Load a starting patch. Loading a patch replaces this instrument's parameters and modulation, as one undo step.");
-        connect(patches, &QComboBox::activated, this, [this](int i) { loadPatch(i); }); header->addWidget(patches);
+        m_patches = new ChoiceBox(this); m_patches->setObjectName("osmiumPatch"); m_patches->setFixedWidth(258);
+        m_patches->addItems({"Init", "Basalt Bass", "Obsidian Reese", "Glacial Pad", "Pressure Sequence"});
+        m_patches->insertSeparator(m_patches->count());
+        for (const auto& patch : osmium::factoryPresets()) {
+            m_patches->addItem(QString::fromUtf8(patch.name).mid(7), QString::fromUtf8(patch.name));
+            m_patches->setItemData(m_patches->count() - 1, QString::fromUtf8(patch.description), Qt::ToolTipRole);
+        }
+        m_patches->setMaxVisibleItems(16); m_patches->setEditable(true); m_patches->setInsertPolicy(QComboBox::NoInsert);
+        m_patches->completer()->setFilterMode(Qt::MatchContains); m_patches->completer()->setCaseSensitivity(Qt::CaseInsensitive);
+        if (device()) { const int item = m_patches->findData(device()->name); if (item >= 0) m_patches->setCurrentIndex(item); m_presetName = device()->name; }
+        InfoView::attach(m_patches, "Patch", "Type to search 40 Drum & Bass factory presets plus the original starting patches. Loading a patch replaces the parameters, curves and routes in one undo step. "
+                         "Factory macros: Tone, Warp, Drive, Width, Space, Echo, Body and Air.");
+        connect(m_patches, &QComboBox::activated, this, [this](int i) { loadPatch(i); }); header->addWidget(m_patches);
         header->addStretch();
         auto* voices = new QLabel(this); header->addWidget(voices);
         m_refreshers.push_back([this, voices] { voices->setText(QString("%1 / 8 voices").arg(int(meter(0)))); });
@@ -749,13 +763,17 @@ public:
     void refresh() override {
         DeviceBody::refresh();
         if (!m_destination) return;
+        if (device() && device()->name != m_presetName) {
+            m_presetName = device()->name;
+            const int item = m_patches->findData(m_presetName); m_patches->setCurrentIndex(item >= 0 ? item : 0);
+        }
         m_destination->setText(name(m_focus));
         const auto r = routeFor(this, m_source, m_focus);
         m_amount->setValue(r.amount * 100, false);
         m_rangeLabel->setText(QString("%1  %2").arg(mo::sourceName(m_source), mo::sourceBipolar(m_source) ? "±" : "→"));
         rebuildRoutes();
     }
-    void selectSource(int s) {
+    void selectSource(int s, bool revealPage = true) {
         m_source = s;
         if (m_other) { const int item = m_other->findData(s); m_other->setCurrentIndex(item >= 0 ? item : 0); }
         for (const auto& [source, button] : m_sources) {
@@ -767,7 +785,7 @@ public:
             auto it = m_sourcePages.find(s);
             m_modulators->setCurrentWidget(it == m_sourcePages.end() ? m_performance : it->second);
             m_sourceTitle->setText(QString("%1%2").arg(mo::sourceName(s), s == mo::SrcEnv1 ? " · AMP" : ""));
-            setPage(0);
+            if (revealPage) setPage(0);
         }
         refresh();
     }
@@ -798,7 +816,7 @@ private:
     QFrame* card() { auto* f = new QFrame(this); f->setObjectName("osmiumCard"); return f; }
     QWidget* dial(int i, const QString& name = {}, int size = 36) {
         m_used.insert(i);
-        return new RangeKnob(this, i, name.isEmpty() ? this->name(i) : name, size, [this] { return m_source; }, [this](int p) { m_focus = p; refresh(); }, [this](int s) { selectSource(s); });
+        return new RangeKnob(this, i, name.isEmpty() ? this->name(i) : name, size, [this] { return m_source; }, [this](int p) { m_focus = p; refresh(); }, [this](int s) { selectSource(s, false); });
     }
     QWidget* choice(int i, int width = 0) {
         m_used.insert(i); const auto& p = specOf(ctx().type)->params[size_t(i)];
@@ -920,21 +938,31 @@ private:
         m_routes->addStretch();
     }
     void loadPatch(int i) {
-        const QStringList names{"Monolith", "Dub Wobble", "Neuro Reese", "Glass Pad", "Neuro Step"}; if (i < 0 || i >= names.size()) return;
+        if (i < 0 || i >= m_patches->count()) return;
+        const auto* patch = osmium::factoryPreset(m_patches->itemData(i).toString());
+        const QStringList names{"Monolith", "Dub Wobble", "Neuro Reese", "Glass Pad", "Neuro Step"}; if (!patch && i >= names.size()) return;
+        bool renamed = false;
         {
             EditScope edit(ctx().project, "Load Osmium Patch");
             Device* d = mutableDevice(this); if (!d) return;
-            const auto* spec = deviceSpec(names[i]); const auto* defaults = specOf(DeviceType::Osmium);
-            for (int p = 0; p < d->params.size(); ++p) {
-                d->params[p].value = p < int(spec->params.size()) ? spec->params[size_t(p)].def : defaults->params[size_t(p)].def;
-                ctx().project->touchTarget(ctx().project->indexOfTrack(ctx().trackId), target::device(ctx().deviceId, p));
+            const QString name = patch ? QString::fromUtf8(patch->name) : QString("Osmium");
+            renamed = d->name != name; d->name = name;
+            if (patch) osmium::applyPreset(*d, *patch);
+            else {
+                const auto* spec = deviceSpec(names[i]); const auto* defaults = specOf(DeviceType::Osmium);
+                for (int p = 0; p < d->params.size(); ++p) {
+                    d->params[p].value = p < int(spec->params.size()) ? spec->params[size_t(p)].def : defaults->params[size_t(p)].def;
+                }
+                d->mods.clear(); for (const auto& r : presetMods(names[i])) d->mods.push_back(r);
+                if (i == 0) d->mods = {{mo::SrcEnv2, mo::fparam(0, mo::FCutoff), 0.28}};
+                for (int e = 0; e < 4; ++e) { d->params[osmium::bend(e, 1)].value = 0.22; d->params[osmium::bend(e, 2)].value = 0.22; }
+                d->curves = {{{0, 0}, {0.25, 1, -0.35, 1}, {0.5, 0.15}, {0.75, 0.7, 0.3, 1}, {1, 0}}, {{0, 1, 0.35}, {0.5, 0, -0.35}, {1, 1}}};
             }
-            d->mods.clear(); for (const auto& r : presetMods(names[i])) d->mods.push_back(r);
-            if (i == 0) d->mods = {{mo::SrcEnv2, mo::fparam(0, mo::FCutoff), 0.28}};
-            for (int e = 0; e < 4; ++e) { d->params[osmium::bend(e, 1)].value = 0.22; d->params[osmium::bend(e, 2)].value = 0.22; }
-            d->curves = {{{0, 0}, {0.25, 1, -0.35, 1}, {0.5, 0.15}, {0.75, 0.7, 0.3, 1}, {1, 0}}, {{0, 1, 0.35}, {0.5, 0, -0.35}, {1, 1}}};
+            m_presetName = d->name;
+            for (int p = 0; p < d->params.size(); ++p) ctx().project->touchTarget(ctx().project->indexOfTrack(ctx().trackId), target::device(ctx().deviceId, p));
         }
         emit ctx().project->deviceChanged(); refresh();
+        if (renamed) emit ctx().project->structureChanged();
     }
     void applyStyle() {
         setStyleSheet(QString(
@@ -951,13 +979,14 @@ private:
             "QScrollArea{background:transparent;border:0;} QScrollArea>QWidget>QWidget{background:transparent;}"
         ).arg(theme::osmiumBg.name(), theme::osmiumSurface.name(), theme::osmiumInset.name(), theme::osmiumBorder.name(),
               theme::text.name(), theme::osmiumGreen.name(), theme::textFaint.name(), (theme::osmiumGreen.lightnessF() > 0.55 ? theme::ink : theme::inkLight).name()));
-        if (m_modulators) selectSource(m_source);
+        if (m_modulators) selectSource(m_source, false);
     }
     int m_source = mo::SrcEnv2, m_focus = mo::fparam(0, mo::FCutoff);
     std::set<int> m_used; std::map<int, QWidget*> m_sourcePages;
     std::vector<std::pair<int, SourceButton*>> m_sources; std::vector<QPushButton*> m_pagesButtons;
     QStackedWidget* m_pages = nullptr; QStackedWidget* m_modulators = nullptr; QWidget* m_performance = nullptr;
-    QComboBox* m_other = nullptr; QLabel* m_sourceTitle = nullptr; QLabel* m_destination = nullptr; QLabel* m_rangeLabel = nullptr;
+    QComboBox* m_other = nullptr; QComboBox* m_patches = nullptr; QString m_presetName;
+    QLabel* m_sourceTitle = nullptr; QLabel* m_destination = nullptr; QLabel* m_rangeLabel = nullptr;
     DragValue* m_amount = nullptr; QVBoxLayout* m_routes = nullptr; QString m_routesSignature;
 };
 

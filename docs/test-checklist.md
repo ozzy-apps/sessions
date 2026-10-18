@@ -1,5 +1,14 @@
 # Sessions 0.23 — things to try by hand
 
+## Osmium DnB bank and editor pages (0.29)
+
+1. Open Osmium's patch selector, type part of a name (for example `seismic`) → the matching sound is offered. There are 40 new sounds: eight each of Pad, Lead, Sub, Reese and Wobble; the original starting patches remain.
+2. Search `Osmium` in Browser → Sounds and load a sound → the editor's name, parameters, routes, both curves and eight macro labels match the selected factory patch. Undo/redo a patch load → the previous/next sound returns in one step and the editor stays open.
+3. Start on Curve 1, switch to Voice & mixer and assign a Curve 1 range to Detune. Select another source, return to Voice & mixer, drag Detune's centre and green ring → Voice & mixer stays visible; the source highlight may change to the ring's source. Repeat on an Effects knob. Clicking a source chip explicitly still opens its editor.
+4. Hold open chords for the pads, play leads around MIDI 55–79, and try basses around MIDI 28–43. Turn the macros: Tone, Warp, Drive, Width, Space, Echo, Body, Air → all eight change the sound. The single-voice Glasswire Width macro and sub Width macros add chorus; default subs stay centered and dry.
+5. Play the wobbles with the project at 170/174 BPM → their curves, LFOs and stepper follow the tempo. Try short syncopated notes and longer held notes, then glide between overlapping notes.
+6. Save a modified factory sound as a user preset and save/reopen the set → the curves, envelope bends, routes and macro positions return. Unzip the portable bank and drag a `.sessionspreset` onto a MIDI track → it also plays in an existing Osmium-capable 0.27/0.28 build.
+
 The automated tests can't plug in a keyboard, sing into a microphone or tell whether something sounds good, so this list is everything since 0.5 that needs your hands and ears. Each line says what to do and, after the →, what should happen. Note anything that doesn't, and anything that sounds wrong (clicks, crackles, noise, too loud or too quiet, a delay you can feel).
 
 ## 0. Start

@@ -1,5 +1,6 @@
 #include "DeviceSpecs.h"
 #include "Scales.h"
+#include "OsmiumPresets.h"
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -671,6 +672,12 @@ std::vector<DeviceSpec> build() {
             s.push_back(copy);
             break;
         }
+    }
+    const DeviceSpec osmiumBase = *std::find_if(s.begin(), s.end(), [](const DeviceSpec& spec) { return spec.type == T::Osmium; });
+    for (const auto& patch : osmium::factoryPresets()) {
+        DeviceSpec copy = osmiumBase; copy.name = patch.name; copy.help = patch.description;
+        for (int i = 0; i < osmium::kParams; ++i) copy.params[size_t(i)].def = patch.values[size_t(i)];
+        s.push_back(std::move(copy));
     }
     return s;
 }

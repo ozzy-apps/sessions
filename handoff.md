@@ -1,5 +1,16 @@
 # Sessions — handoff
 
+## Milestone 29 · Osmium DnB bank and page stability · 2026-10-18
+
+Complete, Sessions **0.29.0**, based on clean 0.28.0 (`292f3e1`). Claude's endless DragValue gestures, numeric editors and dialog sizing are preserved.
+
+1. Fixed Voice & mixer / Effects returning to Modulators during base-value or modulation-ring gestures. Source focus and explicit navigation are separate; theme refresh preserves the page. Explicit source-chip navigation still opens its editor.
+2. Added 40 playable factory sounds: eight each Pad, Lead, Sub, Reese and Wobble. `core/OsmiumPresets.h/.cpp` owns complete normalized parameters, curves and routes, shared by Browser Sounds and the searchable Osmium selector. Eight consistently named macros: Tone, Warp, Drive, Width, Space, Echo, Body, Air. Factory identity follows persistence and undo/redo. Original presets remain; no DSP/source/parameter indices changed.
+3. Verification complete: CTest 3/3 passed in 61.98 seconds: 1024 smoke checks, 44 Osmium UI/gesture checks and 694 bank checks. Every patch rendered at 170 and 174 BPM, pads as chords, each macro separately and all eight at maximum; finite audible output, no clipping, centered default subs and portable preset round trips checked. Shared audition reel is 116.8 seconds, with no clipped samples. Automated checks do not replace listening on hardware.
+4. Updated README, manual checklist, `docs/osmium-dnb-presets.md`, measured CSV and two reviewed screenshots. Deliverables in ignored `dist/`: `sessions_0.29.0+20261018122802_amd64.deb`, `Osmium-DnB-40-Presets.zip` (40 portable presets, guide, levels), `Osmium DnB - Audition.mp3` (common +8 dB preview gain). Test exporter can regenerate WAV/presets/guide/levels.
+
+Stack: native C++17 / Qt 6 Widgets, DeviceSpecs + Model for factory Sounds, OsmiumBody for its editor, Monolith.cpp for shared DSP. No required work remains for this milestone. Next authorized work: recorded acoustic Drum Studio kits, expanded multi-style MIDI grooves, integrated larger Osmium/Drum Studio editors using FLOW Orbit as a reference, and Ableton-like devices using Sessions theme colors. Read the next in-progress section when present.
+
 ## Milestone 27 · Osmium instrument · 2026-10-18
 
 **Last updated:** 2026-10-18 · **Milestone 28 done (an endless drag for every value field: at the screen's edge the pointer jumps to the other edge and the drag goes on; typing into a field is opaque and reads as the field does, 35 for 35 %; dialog buttons fit their text; the export Tail is a drag field)**, after **Milestone 27** (Osmium, Codex) · v0.28.0 · 50k lines · builds clean on Qt 6.4, all 1024 smoke checks pass, plus the 33 Osmium checks · ships a .deb on every build · `docs/test-checklist.md` lists what to try by hand.

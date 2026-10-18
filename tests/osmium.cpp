@@ -1,6 +1,7 @@
 // Osmium integration: real Qt gestures, undo, set/preset data and rendered audio.
 #include "core/DeviceSpecs.h"
 #include "core/ModulationCurve.h"
+#include "core/OsmiumPresets.h"
 #include "core/SetFile.h"
 #include "core/Theme.h"
 #include "core/Transport.h"
@@ -11,6 +12,7 @@
 #include "widgets/DragValue.h"
 #include <QApplication>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDialog>
 #include <QDir>
 #include <QJsonArray>
@@ -126,6 +128,22 @@ int main(int argc, char** argv) {
           "Draw mode fills skipped grid positions during a fast drag");
     CHECK(p.undoStack()->index() == undo + 1, "Freehand drawing is one undo step");
     p.undoStack()->undo(); CHECK(current().curves[0] == beforeDraw, "Undo restores the curve before freehand drawing"); draw->click();
+    // A knob's range source is focus, not a request to navigate to its editor.
+    auto pageButton = [&](const QString& label) -> QPushButton* { for (auto* b : editor->findChildren<QPushButton*>()) if (b->text() == label) return b; return nullptr; };
+    pageButton("Voice & mixer")->click();
+    auto* detune = editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::Detune));
+    QTest::mouseClick(detune, Qt::LeftButton, Qt::NoModifier, QPoint(detune->width() / 2, detune->height() - 8));
+    drag(detune, QPoint(detune->width() / 2, 31), QPoint(detune->width() / 2, 21));
+    CHECK(pageButton("Voice & mixer")->isChecked() && detune->isVisible(), "Editing Detune's base keeps Voice & mixer open");
+    envSource->click(); pageButton("Voice & mixer")->click();
+    drag(detune, QPoint(detune->width() / 2, 15), QPoint(detune->width() / 2 + 15, 0));
+    CHECK(pageButton("Voice & mixer")->isChecked() && curveSource->isChecked(), "Dragging an existing Curve range selects its source without leaving Voice & mixer");
+    pageButton("Effects")->click();
+    auto* effect = editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::fx(mo::ChorusDepth)));
+    drag(effect, QPoint(effect->width() / 2, 15), QPoint(effect->width() / 2 + 15, 0));
+    CHECK(pageButton("Effects")->isChecked() && effect->isVisible(), "Creating and dragging a modulation range keeps Effects open");
+    theme::apply(theme::Kind::Light); CHECK(pageButton("Effects")->isChecked(), "A theme refresh preserves the selected editor page"); theme::apply(theme::Kind::Dark);
+    curveSource->click(); CHECK(pageButton("Modulators")->isChecked() && curve->isVisible(), "Explicitly clicking a source still opens its modulation editor");
     std::vector<float> params(audio::kMaxParams, 0); for (int i = 0; i < current().params.size(); ++i) params[size_t(i)] = float(current().params[i].value);
     params[mo::OscRestart] = 1; params[mo::eparam(0, mo::A)] = float(editor->posFor(mo::eparam(0, mo::A), 0.5)); params[mo::ecurve(0)] = 0.5;
     params[osmium::bend(0, 0)] = 0; const auto fast = render(params, {}, {});
@@ -155,6 +173,21 @@ int main(int argc, char** argv) {
     CHECK(std::abs(current().params[mo::FDrive].value - beforeShortcut) < 1e-6, "Ctrl+Z in the floating editor undoes the instrument edit");
     QTest::keyClick(dialog, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     CHECK(std::abs(current().params[mo::FDrive].value - 0.42) < 1e-6, "Ctrl+Shift+Z in the floating editor restores the instrument edit");
+    auto* patches = editor->findChild<QComboBox*>("osmiumPatch");
+    CHECK(patches->isEditable() && patches->count() == 46, "The searchable selector contains all 40 DnB presets and the original five entries");
+    patches->completer()->setCompletionPrefix("seismic");
+    CHECK(patches->completer()->completionCount() == 1, "Preset search matches a name within its category without case sensitivity");
+    const QString oldName = current().name; const auto oldCurves = current().curves; const int oldId = current().id;
+    const auto* factory = osmium::factoryPreset("Osmium Wobble - Seismic");
+    const int nativeItem = patches->findData(QString::fromUtf8(factory->name)); undo = p.undoStack()->index();
+    patches->setCurrentIndex(nativeItem); QMetaObject::invokeMethod(patches, "activated", Q_ARG(int, nativeItem)); QApplication::processEvents();
+    CHECK(current().id == oldId && current().name == factory->name && current().mods == factory->mods && current().curves == factory->curves,
+          "Loading a factory patch preserves the instrument's identity and installs its name, routes and curves");
+    CHECK(p.undoStack()->index() == undo + 1 && sameWindow && sameWindow->isVisible(), "A complete preset load is one undo step and keeps the editor open");
+    p.undoStack()->undo(); QApplication::processEvents();
+    CHECK(current().name == oldName && current().curves == oldCurves, "Undo restores the previous sound and curves after loading a factory patch");
+    p.undoStack()->redo(); QApplication::processEvents();
+    CHECK(patches->currentData().toString() == current().name, "The patch selector follows redo and the persisted factory sound name");
     if (argc > 1) {
         const QString dir = QString::fromLocal8Bit(argv[1]); QDir().mkpath(dir);
         auto* patch = editor->findChild<QComboBox*>("osmiumPatch"); patch->setCurrentIndex(1); QMetaObject::invokeMethod(patch, "activated", Q_ARG(int, 1)); QApplication::processEvents();
@@ -173,6 +206,14 @@ int main(int argc, char** argv) {
         QApplication::processEvents(); editor->grab().save(dir + "/osmium-effects.png"); lfo->click();
         theme::apply(theme::Kind::Light); QApplication::processEvents(); editor->grab().save(dir + "/osmium-light.png"); theme::apply(theme::Kind::Dark);
         panel.grab().save(dir + "/osmium-rack.png");
+        auto factoryCapture = [&](const QString& name, int source, const QString& filename) {
+            const int at = patches->findData(name); patches->setCurrentIndex(at); QMetaObject::invokeMethod(patches, "activated", Q_ARG(int, at));
+            editor->findChild<QPushButton*>(QString("osmiumSource_%1").arg(source))->click();
+            QTest::mouseClick(knob, Qt::LeftButton, Qt::NoModifier, QPoint(knob->width() / 2, 41));
+            QApplication::processEvents(); editor->grab().save(dir + "/" + filename);
+        };
+        factoryCapture("Osmium Pad - Aurora", mo::SrcEnv2, "osmium-dnb-pad.png");
+        factoryCapture("Osmium Wobble - Undertaker", mo::SrcCurve1, "osmium-dnb-wobble.png");
     }
     { EditScope edit(&p, "Delete Osmium"); p.tracks[0].devices.clear(); }
     emit p.structureChanged(); QTest::qWait(70);

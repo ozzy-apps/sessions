@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.28.0 LANGUAGES CXX)
+project(Sessions VERSION 0.29.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -28,6 +28,7 @@ set(SESSIONS_SOURCES
     src/core/Import.cpp
     src/core/Mapping.cpp
     src/core/DeviceSpecs.cpp
+    src/core/OsmiumPresets.cpp
     src/core/ArrangementOps.cpp
     src/core/Transport.cpp
     src/core/Theme.cpp
@@ -114,6 +115,9 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     target_link_libraries(sessions_osmium PRIVATE sessions_core Qt6::Test)
     add_test(NAME osmium COMMAND sessions_osmium)
     set_tests_properties(osmium PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(sessions_osmium_bank tests/osmium_bank.cpp)
+    target_link_libraries(sessions_osmium_bank PRIVATE sessions_core)
+    add_test(NAME osmium_bank COMMAND sessions_osmium_bank)
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin)
