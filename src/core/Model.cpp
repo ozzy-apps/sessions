@@ -43,7 +43,7 @@ static bool operator==(const Device& a, const Device& b) {
     return a.id == b.id && a.name == b.name && a.kind == b.kind && a.enabled == b.enabled && a.params == b.params
         && a.samplePath == b.samplePath && a.modelPath == b.modelPath && a.pads == b.pads && a.maps == b.maps && a.mods == b.mods
         && a.chains == b.chains && a.zones == b.zones && a.rack == b.rack && a.chain == b.chain && a.folded == b.folded
-        && a.sidechainTrack == b.sidechainTrack && a.curves == b.curves;
+        && a.sidechainTrack == b.sidechainTrack && a.curves == b.curves && a.sampleBpm == b.sampleBpm && a.slices == b.slices;
 }
 static bool operator==(const Locator& a, const Locator& b) { return a.beat == b.beat && a.name == b.name; }
 static bool operator==(const EditState::Placed& a, const EditState::Placed& b) {

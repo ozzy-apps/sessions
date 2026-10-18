@@ -164,6 +164,12 @@ QJsonObject writeDevice(const Device& d, const QString& baseDir) {
     QJsonObject o{{"id", d.id}, {"name", d.name}, {"kind", kKinds[int(d.kind)]}, {"enabled", d.enabled}, {"params", params}};
     if (!d.samplePath.isEmpty()) o.insert("sample", writePath(d.samplePath, baseDir));
     if (!d.modelPath.isEmpty()) o.insert("model", writePath(d.modelPath, baseDir));   // NAM: its capture
+    if (d.sampleBpm > 0) o.insert("sampleBpm", d.sampleBpm);   // Sampler: the sample's own tempo
+    if (!d.slices.isEmpty()) {   // Sampler: its manual slices, seconds
+        QJsonArray slices;
+        for (double t : d.slices) slices.append(t);
+        o.insert("slices", slices);
+    }
     if (!d.pads.isEmpty()) {   // Drum Rack
         QJsonArray pads;
         for (const DrumPad& p : d.pads) {
@@ -356,6 +362,12 @@ Device readDevice(const QJsonObject& o, const QString& baseDir) {
     if (!d.samplePath.isEmpty()) d.sample = samples::load(d.samplePath);
     d.modelPath = readPath(o.value("model").toObject(), baseDir);
     if (!d.modelPath.isEmpty()) d.model = nam::load(d.modelPath);   // null while missing; the path stays
+    d.sampleBpm = std::clamp(num(o, "sampleBpm", 0), 0.0, 999.0);
+    for (const QJsonValue& v : o.value("slices").toArray()) {
+        const double t = v.toDouble(-1);
+        if (std::isfinite(t) && t >= 0 && d.slices.size() < sampler::kMaxSlices) d.slices.push_back(t);
+    }
+    std::sort(d.slices.begin(), d.slices.end());
     for (const QJsonValue& v : o.value("pads").toArray()) {
         if (d.pads.size() >= drumrack::kPads) break;
         const QJsonObject po = v.toObject();

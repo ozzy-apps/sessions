@@ -1,5 +1,16 @@
 # Sessions 0.23 — things to try by hand
 
+## 0.32 · Sampler
+
+1. Browser → Instruments → **Sampler** onto a MIDI track; drop a drum loop onto its panel (or double-click one in the browser). The header shows the file's name, **Warp** off, the tempo Sessions found in the BPM field (`— BPM` for a one-shot), the waveform its bars / tempo / length. The panel is 1130 px wide; the Device View scrolls.
+2. **Classic**: play a key → the ▶ flag's position plays, pitched from Root; drag ▶ and ◀ (a press within a few pixels takes the flag; elsewhere nothing moves); Loop on → the loop's orange flag and bar from **Loop** to ◀; hold a key → the white playhead goes round; **Fade** 30 % → the shaded crossfade before ◀, no click at the seam; **Snap** on → the flags sit on zero crossings; **Voices** 2 → a third note steals the oldest; **Retrig** off → repeated keys pile up voices.
+3. **1-Shot**: tap a key briefly → **Trigger** plays the whole region out; **Gate** stops it with Fade Out when you let go; Fade In 300 ms → the attack ramps.
+4. **Slice**: Slice By **Transient** → numbered slices at the hits; play C1, C#1, D1 … → one slice each; **Sensitivity** down → fewer, only the hard hits; **Beat** 1/8 at the sample's tempo → an even grid; **Region** 8 → equal parts; **Manual** → double-click the waveform to add a slice, double-click one to remove it, drag one to move it (double-clicking in another mode switches to Manual with the slices kept). **Playback**: Mono (a new key cuts the slice playing), Poly (slices ring together), Thru (a slice plays on to the end).
+5. Drag the number band above the slices onto an empty Session slot → a MIDI clip "<sample> Slices" with one note per slice from C1 up; launch it with the Sampler in Slice mode → the loop plays back as it was. Onto the Arrangement too.
+6. **Filter** On, type buttons, drag the dot; **Env** +3 oct → the envelope opens the filter; **LFO** On, shape, Rate 1/4 → the line runs with the song; Pitch 12 st → vibrato; Vol 100 % → tremolo.
+7. **Warp** on with a loop whose tempo was found → change the set's tempo → the loop follows; **Re-Pitch** changes the pitch with it, **Tones** / **Complex** keep the pitch; `:2` / `x2` halve and double the BPM (the bars caption follows), double-click the field to type one; Delete clears it (Warp then does nothing).
+8. Save the set and reopen → the mode, the manual slices, the BPM, every knob come back. Open a set saved before 0.32 → the Sampler plays as it did (Classic, filter on at 20 kHz). Ctrl+Z undoes a flag drag, a slice, a tempo edit, a mode change, one step each.
+
 ## 0.31 · Drum Buss
 
 1. Browser → Audio Effects → Drum Buss, after Drum Studio or on a group/audio track. Check the compact panel in Dark/Light and custom themes, all controls at 100/150% UI scale, and the Bass/Out meters during playback.

@@ -297,6 +297,8 @@ struct Device {
     QVector<MacroMap>    maps;         // Macros and racks: what their macro knobs turn
     QVector<ModRoute>    mods;         // Monolith: its modulation routes (envelopes, LFOs, steppers, macros … onto its knobs)
     QVector<QVector<CurvePoint>> curves;   // Monolith: its drawable curves (monolith::kCurves lists, each sorted by x; an empty one is flat 0)
+    double               sampleBpm = 0;    // Sampler (0.32): the sample's own tempo (found when it loads, or set; 0: none), what Warp stretches from
+    QVector<double>      slices;           // Sampler: the slices you placed (Slice By Manual), seconds into the sample, sorted
     QStringList          chains;       // racks: the names of their chains
     QVector<ChainZones>  zones;        // racks: each chain's key / velocity / chain-select zones (as many as chains)
     int                  rack = 0;     // a device in a rack's chain (or on a Drum Rack's pad): the rack's id (0: straight on the track)

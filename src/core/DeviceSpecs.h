@@ -152,6 +152,55 @@ constexpr int bend(int env, int segment) { return kEnvBendBase + env * 3 + segme
 constexpr int kParams = kEnvBendBase + monolith::kEnvs * 3;
 }
 
+// Sampler (reworked in 0.32, after the classic three-mode sampler): one sample, played in one of
+// three modes. Classic plays it from Root across the keyboard between Start and End, looping
+// from Loop Start with a crossfade; 1-Shot plays it whole from each key (Trigger) or while the
+// key is held (Gate) with fades instead of an envelope; Slice cuts it at its transients, on a
+// beat grid, into equal regions or where you double-click (Device::slices, seconds) and puts the
+// slices on the keys from C1 up, one at a time (Mono), together (Poly) or each playing on to
+// the end (Thru). A filter with its own envelope amount, an LFO onto pitch / filter / volume,
+// the amplitude envelope, and Warp: with it on, the sample follows the set's tempo from its own
+// (Device::sampleBpm, found when it loads; :2 / x2 and the field correct it) through the warp
+// modes of the audio clips. The 0.4 parameters keep their places (0 .. 12); the rest is appended.
+namespace sampler {
+enum Param {
+    Tune = 0, Attack, Release, Volume, Start, End, Loop, Cutoff, Reso, Decay, Sustain, Root, Velocity,   // 0 .. 12 (0.4)
+    Mode,               // 13: Classic / 1-Shot / Slice
+    LoopStart,          // 14: where the loop begins (a share of the sample, kept between Start and End)
+    Fade,               // 15: the loop's crossfade, a share of the loop
+    Snap,               // 16: Start / End / Loop Start move to zero crossings
+    Voices,             // 17: 1 .. 16
+    Retrig,             // 18: a key struck again while its note still sounds restarts that voice
+    Trigger,            // 19: 1-Shot: Trigger (the whole sample) / Gate (stops with Fade Out when the key goes up)
+    FadeIn, FadeOut,    // 20, 21: 1-Shot
+    SliceBy,            // 22: Transient / Beat / Region / Manual
+    Sensitivity,        // 23: Transient: how soft a hit still makes a slice
+    Division,           // 24: Beat: 1/4 .. 1/32 of the sample's own tempo
+    Regions,            // 25: Region: 2 .. 64 equal parts
+    Playback,           // 26: Mono / Poly / Thru
+    FilterOn, FilterType, FilterEnv,                           // 27 .. 29 (the envelope's amount in octaves)
+    LfoOn, LfoShape, LfoRate, LfoHz, LfoPitch, LfoFilter, LfoVolume,   // 30 .. 36
+    Warp, WarpMode,     // 37, 38: Re-Pitch / Tones / Texture / Complex / Complex Pro
+    Detune,             // 39: cents
+    kParams
+};
+enum Modes { Classic, OneShot, Slice };
+enum SliceModes { ByTransient, ByBeat, ByRegion, ByManual };
+enum PlaybackModes { Mono, Poly, Thru };
+enum WarpModes { RePitch, Tones, Texture, Complex, ComplexPro };
+constexpr int kMaxSlices = 128, kFirstSliceNote = 36, kMaxVoices = 16;
+// Where the slices start, in seconds into the sample, between `start` and `end` (shares of the
+// sample, the Start / End parameters); the first is always `start`. Transient: the sample's
+// transients whose strength passes `sensitivity` (1: every one); Beat: every `divisionBeats` of
+// the sample's tempo (`bpm`, or the set's `tempo` when it has none); Region: `regions` equal parts;
+// Manual: the `manual` list (sorted, seconds). At most `max` (kMaxSlices); no allocation, so the
+// audio thread can call it. Returns how many.
+int slices(const SampleData* s, int by, double sensitivity, double divisionBeats, int regions, double bpm, double tempo,
+           const double* manual, int manualCount, double start, double end, double* out, int max);
+// The strength a transient needs to make a slice at `sensitivity`.
+inline double transientThreshold(double sensitivity) { const double x = 1 - std::clamp(sensitivity, 0.0, 1.0); return x * x; }
+}
+
 // Macros: eight knobs, each turning any number of parameters of the track's other devices
 // between a minimum and a maximum (Device::maps).
 namespace macros { constexpr int kKnobs = 8; }

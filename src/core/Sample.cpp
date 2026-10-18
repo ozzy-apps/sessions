@@ -69,6 +69,7 @@ void buildPeaks(SampleData& s) {
 // to the first sample of the attack, so a slice starts right where the hit does.
 void findTransients(SampleData& s) {
     s.transients.assign(1, 0.0);
+    s.transientStrength.assign(1, 1.0f);
     const qint64 n = s.frames();
     const int hop = std::max(32, int(std::lround(s.rate * 0.005)));
     const int hops = int(n / hop);
@@ -114,7 +115,10 @@ void findTransients(SampleData& s) {
         qint64 at = w0;
         for (qint64 f = w0; f < w1; ++f) if (std::fabs(mono(f) - mono(f - 1)) >= biggest / 3) { at = f; break; }
         const double t = double(std::max<qint64>(0, at - 4)) / s.rate;
-        if (t > s.transients.back() + 0.03) s.transients.push_back(t);
+        if (t > s.transients.back() + 0.03) {
+            s.transients.push_back(t);
+            s.transientStrength.push_back(peakRise > 0 ? std::clamp(r / peakRise, 0.0f, 1.0f) : 1.0f);
+        }
     }
 }
 

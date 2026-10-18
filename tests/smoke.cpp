@@ -1088,6 +1088,13 @@ int main(int argc, char** argv) {
         p.tracks[at].clipSlots[2] = c;
         p.tracks[at].arrangement = {{8, 4, 1, c}};
         import::toSampler(p, 0, -1, wav);
+        {   // M32: the Sampler's own tempo and manual slices
+            Device& smp = p.tracks[0].devices[0];
+            smp.sampleBpm = 93.5;
+            smp.slices = {0.25, 0.7};
+            smp.params[sampler::Mode].value = choicePosition(sampler::Slice, 3);
+            smp.params[sampler::SliceBy].value = choicePosition(sampler::ByManual, 4);
+        }
         {   // M15: a NAM device whose capture sits inside the set's folder
             Device nd = p.makeDevice("NAM", DeviceKind::AudioEffect);
             nam::writeExample(dir.filePath("song/Samples/capture.nam"), 2);
@@ -1114,6 +1121,9 @@ int main(int argc, char** argv) {
               && qa.arrangement.value(0).clip == lc && qa.arrangement.value(0).offset == 1,
               "M4 sets: audio tracks and clips (warp, gain, transpose, reverse) come back, finding the moved sample");
         CHECK(q.tracks[0].devices[0].name == "Sampler" && q.tracks[0].devices[0].sample, "M4 sets: the Sampler's sample comes back");
+        CHECK(q.tracks[0].devices[0].sampleBpm == 93.5 && (q.tracks[0].devices[0].slices == QVector<double>{0.25, 0.7})
+              && choiceIndex(DeviceType::Sampler, sampler::SliceBy, q.tracks[0].devices[0].params[sampler::SliceBy].value) == sampler::ByManual,
+              "M32 sets: the Sampler's own tempo, its manual slices and its mode come back");
         CHECK(!lc->warp && lc->grain == 0 && lc->envelopes.size() == 1 && qa.monitor == Monitor::In && qa.inputChannel == 1,
               "M7 sets: Warp off, slices, clip envelopes, Monitor and Audio From come back");
         CHECK(qa.devices.size() == 1 && qa.devices[0].model && qa.devices[0].modelPath == QFileInfo(dir.filePath("moved/Samples/capture.nam")).absoluteFilePath(),
@@ -8262,6 +8272,253 @@ int main(int argc, char** argv) {
         for (QAbstractButton* b : box.buttons()) { fit &= b->width() >= b->sizeHint().width() && b->sizeHint().width() >= b->fontMetrics().horizontalAdvance(b->text()) + 20; widest = std::max(widest, b->width()); }
         CHECK((fit && widest > 110), "M28 dialogs: every button is as wide as its text plus padding (Close without Saving used to be cropped)");
         box.hide();
+    }
+
+
+    // ---- Milestone 32: the Sampler reworked: three modes, slices, filter / LFO / warp, the panel
+    {
+        namespace sp = sampler;
+        const DeviceType T = DeviceType::Sampler;
+        auto posOf = [&](int i, double real) {   // the knob position that gives a real value
+            const ParamSpec& ps = specOf(T)->params[size_t(i)];
+            switch (ps.kind) {
+            case ParamKind::Linear: case ParamKind::Int: return (real - ps.lo) / (ps.hi - ps.lo);
+            case ParamKind::Exp:    return std::log(real / ps.lo) / std::log(ps.hi / ps.lo);
+            case ParamKind::Choice: return choicePosition(int(real), int(ps.choices.size()));
+            default:                return real;
+            }
+        };
+        struct Hit { int pitch; double at, hold; };
+        // Runs a Sampler for `seconds` with `hits` (pitch, when, how long held); the left channel.
+        auto runSampler = [&](const std::vector<float>& params, double seconds, std::vector<Hit> hits, const SampleData* sample, double sampleBpm = 0, const QVector<double>* manual = nullptr) {
+            auto proc = audio::createProcessor(T, 48000);
+            audio::Context ctx; ctx.sampleRate = 48000; ctx.tempo = 120; ctx.beatsPerSample = 2.0 / 48000; ctx.playing = true;
+            ctx.sample = sample; ctx.sampleBpm = sampleBpm;
+            if (manual) { ctx.slices = manual->constData(); ctx.sliceCount = int(manual->size()); }
+            std::vector<float> out; audio::EventList ev; float l[audio::kMaxBlock], r[audio::kMaxBlock];
+            const int total = int(seconds * 48000);
+            for (int pos = 0; pos < total; pos += audio::kMaxBlock) {
+                const int n = std::min(audio::kMaxBlock, total - pos); ev.clear();
+                for (const Hit& h : hits) { const int at = int(h.at * 48000); if (at >= pos && at < pos + n) ev.add({at - pos, h.pitch, 0.9f, int(h.hold * 48000), false, false}); }
+                ctx.beat = pos * ctx.beatsPerSample; std::fill(l, l + n, 0.0f); std::fill(r, r + n, 0.0f);
+                proc->render(ev, l, r, n, params.data(), ctx);
+                for (int i = 0; i < n; ++i) out.push_back(l[i]);
+            }
+            return std::make_pair(out, proc);
+        };
+        auto crossings = [](const std::vector<float>& v, size_t a, size_t b) { int c = 0; b = std::min(b, v.size()); for (size_t i = a + 1; i < b; ++i) if ((v[i - 1] < 0) != (v[i] < 0)) ++c; return c; };
+        auto peakIn = [](const std::vector<float>& v, size_t a, size_t b) { float pk = 0; b = std::min(b, v.size()); for (size_t i = a; i < b; ++i) pk = std::max(pk, std::fabs(v[i])); return pk; };
+        auto sine = [](double seconds, double hz, double until = -1) { std::vector<float> v(size_t(seconds * 48000)); for (size_t i = 0; i < v.size(); ++i) v[i] = until < 0 || i < until * 48000 ? float(0.5 * std::sin(2 * M_PI * hz * i / 48000.0)) : 0.0f; return v; };
+
+        // the spec: the 0.4 parameters keep their places, the new ones follow
+        const DeviceSpec* ss = specOf(T);
+        CHECK(paramCount(T) == sp::kParams && QString(ss->params[sp::Start].name) == "Start" && QString(ss->params[sp::Velocity].name) == "Velocity"
+              && QString(ss->params[sp::Mode].name) == "Mode" && QString(ss->params[sp::Detune].name) == "Detune",
+              "M32 Sampler: the old 13 parameters keep their indices, 27 are appended");
+
+        // slicing a known file: four bursts a beat apart
+        SamplePtr drums = samples::load(burstsWav);
+        double at[sp::kMaxSlices];
+        CHECK(drums && drums->transientStrength.size() == drums->transients.size() && drums->transients.size() == 4, "M32 slices: a transient has a strength");
+        CHECK(sp::slices(drums.get(), sp::ByTransient, 0.5, 0.5, 8, 0, 120, nullptr, 0, 0, 1, at, sp::kMaxSlices) == 4 && near(int(at[1] * 1000), 500, 5) && near(int(at[3] * 1000), 1500, 5),
+              "M32 slices: Transient cuts the bursts file into 4, on the hits");
+        CHECK(sp::slices(drums.get(), sp::ByBeat, 0.5, 0.5, 8, 120, 120, nullptr, 0, 0, 1, at, sp::kMaxSlices) == 8 && std::fabs(at[1] - 0.25) < 1e-9, "M32 slices: Beat at 1/8 of 120 BPM: 8");
+        CHECK(sp::slices(drums.get(), sp::ByRegion, 0.5, 0.5, 6, 0, 120, nullptr, 0, 0, 1, at, sp::kMaxSlices) == 6 && std::fabs(at[3] - 1.0) < 1e-9, "M32 slices: 6 Regions");
+        const QVector<double> manual{0.3, 0.9};
+        CHECK(sp::slices(drums.get(), sp::ByManual, 0.5, 0.5, 6, 0, 120, manual.constData(), 2, 0, 1, at, sp::kMaxSlices) == 3 && at[2] == 0.9, "M32 slices: Manual: the start and the two placed");
+        CHECK(sp::slices(drums.get(), sp::ByTransient, 0.5, 0.5, 8, 0, 120, nullptr, 0, 0.4, 1, at, sp::kMaxSlices) == 3 && std::fabs(at[0] - 0.8) < 1e-9, "M32 slices: only between Start and End");
+        CHECK(sp::slices(drums.get(), sp::ByTransient, 0.0, 0.5, 8, 0, 120, nullptr, 0, 0, 1, at, sp::kMaxSlices) == 4, "M32 slices: equal hits all pass the lowest Sensitivity");
+
+        // Slice playback: Poly, Thru, Mono; the playheads
+        std::vector<float> p = defaultsOf(T);
+        p[sp::Mode] = float(posOf(sp::Mode, sp::Slice)); p[sp::Attack] = 0;
+        {
+            auto [out, proc] = runSampler(p, 1.5, {{37, 0, 1.4}}, drums.get());
+            CHECK(peakIn(out, 0, 100) > 0.4f && peakIn(out, 200, 72000) < 1e-4f && proc->scope[0].load() < 0, "M32 Slice Poly: C#1 plays the second slice (its burst) and stops at the next slice; its playhead goes");
+            p[sp::Playback] = float(posOf(sp::Playback, sp::Thru));
+            auto [thru, proc2] = runSampler(p, 1.5, {{37, 0, 1.4}}, drums.get());
+            CHECK(peakIn(thru, 0, 100) > 0.4f && peakIn(thru, 24000, 24100) > 0.4f && peakIn(thru, 48000, 48100) > 0.4f, "M32 Slice Thru: the slice plays on through the ones after it");
+            auto [playing, proc3] = runSampler(p, 0.2, {{36, 0, 1.0}}, drums.get());
+            const float head = proc3->scope[0].load();
+            CHECK(head > 0.05f && head < 0.2f, "M32 Slice: a sounding voice reports its position for the panel's playhead");
+        }
+        SamplePtr tone = samples::fromFrames(sine(1.0, 440), {}, 48000);
+        {
+            p[sp::SliceBy] = float(posOf(sp::SliceBy, sp::ByRegion)); p[sp::Regions] = float(posOf(sp::Regions, 2));
+            p[sp::Playback] = float(posOf(sp::Playback, sp::Poly));
+            auto [poly, a] = runSampler(p, 0.4, {{36, 0, 0.39}, {37, 0, 0.39}}, tone.get());
+            p[sp::Playback] = float(posOf(sp::Playback, sp::Mono));
+            auto [mono, b] = runSampler(p, 0.4, {{36, 0, 0.39}, {37, 0, 0.39}}, tone.get());
+            CHECK(rmsOf(poly, 4800, 14400) > 0.6f && rmsOf(mono, 4800, 14400) < 0.4f, "M32 Slice Mono: a new slice cuts the one playing (Poly: both sound)");
+            auto [none, c] = runSampler(p, 0.2, {{40, 0, 0.19}}, tone.get());
+            CHECK(peakIn(none, 0, 9600) == 0.0f, "M32 Slice: a key past the last slice is silent");
+        }
+        // 1-Shot: Trigger vs Gate, the fades
+        {
+            std::vector<float> q = defaultsOf(T); q[sp::Mode] = float(posOf(sp::Mode, sp::OneShot));
+            auto [trig, a] = runSampler(q, 1.0, {{60, 0, 0.2}}, tone.get());
+            q[sp::Trigger] = float(posOf(sp::Trigger, 1));
+            auto [gate, b] = runSampler(q, 1.0, {{60, 0, 0.2}}, tone.get());
+            CHECK(rmsOf(trig, 24000, 28800) > 0.2f && rmsOf(gate, 24000, 28800) < 1e-3f && rmsOf(gate, 4800, 9000) > 0.2f, "M32 1-Shot: Trigger plays the sample out after a short key, Gate stops with the key");
+            q[sp::FadeIn] = float(posOf(sp::FadeIn, 0.3));
+            auto [faded, c] = runSampler(q, 0.5, {{60, 0, 0.4}}, tone.get());
+            CHECK(rmsOf(faded, 0, 960) < 0.05f && rmsOf(faded, 14400, 15360) > 0.3f, "M32 1-Shot: Fade In brings the sample up over its time");
+        }
+        // Classic: the loop goes round from Loop Start; the crossfade; Start / End still (M6 covers Start)
+        SamplePtr halfTone = samples::fromFrames(sine(1.0, 440, 0.5), {}, 48000);   // a tone, then silence
+        {
+            std::vector<float> q = defaultsOf(T); q[sp::Loop] = 1; q[sp::LoopStart] = 0.6f;
+            auto [late, a] = runSampler(q, 1.5, {{60, 0, 1.45}}, halfTone.get());
+            q[sp::LoopStart] = 0;
+            auto [whole, b] = runSampler(q, 1.5, {{60, 0, 1.45}}, halfTone.get());
+            CHECK(rmsOf(late, 50400, 67200) < 1e-4f && rmsOf(whole, 50400, 67200) > 0.2f, "M32 Classic: the loop goes round from Loop Start (in the silence: quiet; at 0: the tone again)");
+            q[sp::LoopStart] = 0.2f; q[sp::Fade] = 0.5f; q[sp::End] = 0.5f;
+            auto [xf, c] = runSampler(q, 1.5, {{60, 0, 1.45}}, halfTone.get());
+            CHECK(rmsOf(xf, 50400, 67200) > 0.2f, "M32 Classic: a crossfaded loop keeps sounding");
+            q = defaultsOf(T); q[sp::Voices] = float(posOf(sp::Voices, 2)); q[sp::Retrig] = 0;
+            auto [two, d] = runSampler(q, 0.2, {{60, 0, 1}, {62, 0.01, 1}, {64, 0.02, 1}, {65, 0.03, 1}}, tone.get());
+            q[sp::Voices] = float(posOf(sp::Voices, 8)); q[sp::Retrig] = 1;
+            auto [same, e] = runSampler(q, 0.2, {{60, 0, 1}, {60, 0.05, 1}, {60, 0.1, 1}}, tone.get());
+            q[sp::Retrig] = 0;
+            auto [each, f] = runSampler(q, 0.2, {{60, 0, 1}, {60, 0.05, 1}, {60, 0.1, 1}}, tone.get());
+            CHECK(std::lround(d->meter[0].load()) == 2 && std::lround(e->meter[0].load()) == 1 && std::lround(f->meter[0].load()) == 3,
+                  "M32 Classic: Voices caps what sounds; Retrig restarts a key's voice, off starts another");
+        }
+        // Warp: a 60 BPM sample at 120 plays twice as fast: Re-Pitch an octave up, Tones / Complex at pitch
+        {
+            std::vector<float> q = defaultsOf(T); q[sp::Warp] = 1; q[sp::Attack] = 0;
+            auto [rp, a] = runSampler(q, 1.0, {{60, 0, 0.95}}, tone.get(), 60);
+            q[sp::WarpMode] = float(posOf(sp::WarpMode, sp::Tones));
+            auto [tn, b] = runSampler(q, 1.0, {{60, 0, 0.95}}, tone.get(), 60);
+            q[sp::WarpMode] = float(posOf(sp::WarpMode, sp::Complex));
+            auto [cx, c] = runSampler(q, 1.0, {{60, 0, 0.95}}, tone.get(), 60);
+            q[sp::Warp] = 0;
+            auto [off, d] = runSampler(q, 1.0, {{60, 0, 0.95}}, tone.get(), 60);
+            CHECK(near(crossings(rp, 4800, 14400), 352, 6) && rmsOf(rp, 30000, 48000) < 1e-4f, "M32 Warp Re-Pitch: twice as fast, an octave up, over in half a second");
+            CHECK(near(crossings(tn, 4800, 14400), 176, 20) && rmsOf(tn, 4800, 14400) > 0.1f && rmsOf(tn, 30000, 48000) < 1e-3f, "M32 Warp Tones: twice as fast at the same pitch");
+            CHECK(near(crossings(cx, 4800, 14400), 176, 20) && rmsOf(cx, 4800, 14400) > 0.1f && rmsOf(cx, 30000, 48000) < 1e-3f, "M32 Warp Complex: twice as fast at the same pitch");
+            CHECK(near(crossings(off, 4800, 14400), 176, 6) && rmsOf(off, 40000, 47000) > 0.2f, "M32 Warp off: the sample plays at its own speed");
+        }
+        // the filter and the LFO
+        SamplePtr hiTone = samples::fromFrames(sine(1.0, 4000), {}, 48000);
+        {
+            std::vector<float> q = defaultsOf(T); q[sp::Attack] = 0;
+            auto [open, a] = runSampler(q, 0.5, {{60, 0, 0.45}}, hiTone.get());
+            q[sp::Cutoff] = float(posOf(sp::Cutoff, 200));
+            auto [lp, b] = runSampler(q, 0.5, {{60, 0, 0.45}}, hiTone.get());
+            q[sp::FilterOn] = 0;
+            auto [off, c] = runSampler(q, 0.5, {{60, 0, 0.45}}, hiTone.get());
+            q[sp::FilterOn] = 1; q[sp::FilterType] = float(posOf(sp::FilterType, 1)); q[sp::Cutoff] = float(posOf(sp::Cutoff, 12000));
+            auto [hp, d] = runSampler(q, 0.5, {{60, 0, 0.45}}, hiTone.get());
+            CHECK(rmsOf(lp, 4800, 14400) < 0.02f * rmsOf(open, 4800, 14400) && rmsOf(off, 4800, 14400) > 0.3f && rmsOf(hp, 4800, 14400) < 0.3f * rmsOf(off, 4800, 14400),
+                  "M32 Filter: LP at 200 Hz silences a 4 kHz tone, Off passes it, HP at 12 kHz dims it");
+            q = defaultsOf(T); q[sp::Attack] = 0; q[sp::LfoOn] = 1; q[sp::LfoPitch] = 1; q[sp::LfoHz] = float(posOf(sp::LfoHz, 4));
+            auto [bend, e] = runSampler(q, 1.0, {{60, 0, 0.95}}, tone.get());
+            q[sp::LfoPitch] = 0; q[sp::LfoVolume] = 1; q[sp::LfoHz] = float(posOf(sp::LfoHz, 2));
+            auto [trem, f] = runSampler(q, 1.0, {{60, 0, 0.95}}, tone.get());
+            CHECK(crossings(bend, 1440, 4320) > 2 * crossings(bend, 7440, 10320) && rmsOf(trem, 5000, 7000) > 3 * rmsOf(trem, 17000, 19000),
+                  "M32 LFO: 12 semitones onto the pitch swings it up and down; onto the volume it's a tremolo");
+        }
+        // Loading: the sample's tempo is found; the slices as a MIDI clip
+        const QString loopWav = audioDir.filePath("drum loop 120.wav");
+        {   // two bars at 120: kicks on the beats, snares on 2 and 4, hats on the eighths
+            std::vector<float> v(48000 * 4, 0.0f);
+            uint32_t rng = 1;
+            auto noise = [&] { rng = rng * 1664525u + 1013904223u; return float(rng >> 8) / float(1 << 24) * 2 - 1; };
+            for (int beat = 0; beat < 8; ++beat) {
+                const size_t s0 = size_t(beat * 24000);
+                for (int i = 0; i < 12000; ++i) { const double t = i / 48000.0; v[s0 + i] += float(0.8 * std::exp(-t * 18) * std::sin(2 * M_PI * (50 + 120 * std::exp(-t * 40)) * t)); }
+                if (beat % 2 == 1) for (int i = 0; i < 8000; ++i) { const double t = i / 48000.0; v[s0 + i] += float(0.5 * std::exp(-t * 25) * (0.6 * noise() + 0.4 * std::sin(2 * M_PI * 190 * t))); }
+                for (int h = 0; h < 2; ++h) for (int i = 0; i < 2400; ++i) { const double t = i / 48000.0; v[s0 + size_t(h * 12000) + i] += float(0.25 * std::exp(-t * 90) * noise()); }
+            }
+            writeMonoWav(loopWav, v, 48000);
+        }
+        Project lp; lp.scenes = {"1"}; lp.addTrack("Sampler", QColor("#f2905e"));
+        lp.tracks[0].devices = {lp.makeDevice("Sampler", DeviceKind::Instrument)};
+        lp.tracks[0].devices[0].slices = {0.5};
+        QString why;
+        CHECK(import::toSampler(lp, 0, -1, loopWav, &why) && near(int(lp.tracks[0].devices[0].sampleBpm), 120, 1) && lp.tracks[0].devices[0].slices.isEmpty(),
+              "M32 load: a sample brings its tempo along (120 for the loop), and the old manual slices go");
+        {
+            Device& d = lp.tracks[0].devices[0];
+            d.params[sp::Mode].value = choicePosition(sp::Slice, 3);
+            const ClipPtr clip = import::slicesToClip(lp, d, 120);
+            CHECK(clip && clip->notes.size() == 16 && clip->notes[0].pitch == 36 && clip->notes[15].pitch == 51 && std::fabs(clip->notes[2].start - 1.0) < 0.02
+                  && std::fabs(clip->notes[1].length - 0.5) < 0.05 && clip->length == 8 && clip->name.endsWith("Slices"),
+                  "M32 slices to clip: one note per slice from C1 at the slice's beat, two bars long");
+        }
+        // the panel: the modes, the strip, the flags, manual slices, the tempo buttons
+        {
+            audio::Engine le(&lp);
+            Transport lt(&lp, &le);
+            const int deviceId = lp.tracks[0].devices[0].id;
+            auto dev = [&]() -> Device& { return lp.tracks[0].devices[0]; };
+            dev().params[sp::Mode].value = choicePosition(sp::Classic, 3);
+            DevicePanel panel(&lp, &lt, 0, dev(), nullptr, {});
+            panel.show(); QApplication::processEvents();
+            devui::DeviceBody* body = panel.body();
+            auto* mode = body->findChild<QWidget*>("samplerMode");
+            auto* strip = body->findChild<QStackedWidget*>("samplerStrip");
+            auto* wave = body->findChild<QWidget*>("samplerWave");
+            auto* bpm = body->findChild<DragValue*>("samplerBpm");
+            CHECK(mode && strip && wave && bpm && body->findChild<QWidget*>("samplerSliceBy") && body->findChild<QWidget*>("samplerPlayback")
+                  && body->findChild<QWidget*>("samplerTrigger") && body->findChild<QWidget*>("samplerWarp") && body->findChild<QWidget*>("samplerWarpMode")
+                  && body->findChild<QWidget*>("samplerFilterOn") && body->findChild<QWidget*>("samplerLfoOn") && body->findChild<QWidget*>("samplerLoop")
+                  && body->width() > 1000 && body->minimumSizeHint().height() <= devui::kBodyHeight,
+                  "M32 panel: the mode column, the strip, the waveform, the tempo field and the named controls are there, and it fits the device height");
+            CHECK(strip->currentIndex() == 0 && bpm->text().contains("BPM") && bpm->value() > 100, "M32 panel: Classic shows its strip; the field reads the sample's tempo");
+            QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, QPoint(27, 50));
+            QApplication::processEvents();
+            CHECK(choiceIndex(T, sp::Mode, dev().params[sp::Mode].value) == sp::Slice && strip->currentIndex() == 2, "M32 panel: clicking the third mode button picks Slice, the strip follows");
+            QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, QPoint(27, 30));
+            QApplication::processEvents();
+            CHECK(choiceIndex(T, sp::Mode, dev().params[sp::Mode].value) == sp::OneShot && strip->currentIndex() == 1, "M32 panel: the second button is 1-Shot");
+            QTest::mouseClick(mode, Qt::LeftButton, Qt::NoModifier, QPoint(27, 8));
+            QApplication::processEvents();
+            // the start flag: press on it, drag right
+            const int steps0 = lp.undoStack()->count();
+            QTest::mousePress(wave, Qt::LeftButton, Qt::NoModifier, QPoint(3, 60));
+            QTest::mouseMove(wave, QPoint(60, 60));
+            QTest::mouseMove(wave, QPoint(110, 60));
+            QTest::mouseRelease(wave, Qt::LeftButton, Qt::NoModifier, QPoint(110, 60));
+            QApplication::processEvents();
+            CHECK(dev().params[sp::Start].value > 0.2 && dev().params[sp::Start].value < 0.3 && lp.undoStack()->count() == steps0 + 1, "M32 panel: dragging the ▶ flag moves Start, one undo step");
+            QTest::mousePress(wave, Qt::LeftButton, Qt::NoModifier, QPoint(300, 60));   // nowhere near a flag: nothing moves
+            QTest::mouseRelease(wave, Qt::LeftButton, Qt::NoModifier, QPoint(300, 60));
+            CHECK(dev().params[sp::Start].value < 0.3 && dev().params[sp::End].value == 1, "M32 panel: a press away from the flags leaves them");
+            // manual slices: double-click adds one, double-click on it removes it
+            {
+                EditScope edit(&lp, "Slice");
+                Device* d = devui::findDevice(&lp, 0, deviceId);
+                d->params[sp::Mode].value = choicePosition(sp::Slice, 3);
+                d->params[sp::SliceBy].value = choicePosition(sp::ByManual, 4);
+                d->params[sp::Start].value = 0;
+            }
+            emit lp.deviceChanged();
+            QApplication::processEvents();
+            QTest::mouseDClick(wave, Qt::LeftButton, Qt::NoModifier, QPoint(220, 60));
+            QApplication::processEvents();
+            const QVector<double> added = dev().slices;
+            CHECK(added.size() == 1 && added[0] > 1.8 && added[0] < 2.2, "M32 panel: double-clicking the waveform in Manual adds a slice there");
+            QTest::mouseDClick(wave, Qt::LeftButton, Qt::NoModifier, QPoint(220, 60));
+            QApplication::processEvents();
+            CHECK(dev().slices.isEmpty(), "M32 panel: double-clicking a slice removes it");
+            // :2 / x2 and Warp
+            const double bpm0 = dev().sampleBpm;
+            QTest::mouseClick(body->findChild<QToolButton*>("samplerHalf"), Qt::LeftButton);
+            QApplication::processEvents();
+            const double halved = dev().sampleBpm;
+            QTest::mouseClick(body->findChild<QToolButton*>("samplerDouble"), Qt::LeftButton);
+            QApplication::processEvents();
+            CHECK(std::fabs(halved - bpm0 / 2) < 1e-9 && std::fabs(dev().sampleBpm - bpm0) < 1e-9, "M32 panel: :2 halves the sample's tempo, x2 doubles it");
+            QTest::mouseClick(body->findChild<QWidget*>("samplerWarp"), Qt::LeftButton);
+            QApplication::processEvents();
+            CHECK(dev().params[sp::Warp].value == 1, "M32 panel: the Warp button switches warping on");
+            lp.undoStack()->undo();
+            const bool warpUndone = dev().params[sp::Warp].value == 0 && std::fabs(dev().sampleBpm - bpm0) < 1e-9;
+            lp.undoStack()->undo();
+            CHECK(warpUndone && std::fabs(dev().sampleBpm - halved) < 1e-9, "M32 panel: Warp and the tempo edits undo one by one");
+        }
     }
 
     std::printf("%d failure(s)\n", failures);

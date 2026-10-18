@@ -114,6 +114,9 @@ struct DeviceSlot {
     CurvePoint curves[monolith::kCurves * monolith::kCurvePoints] = {};   // Monolith: its drawn curves
     int        curveCount[monolith::kCurves] = {};
     SamplePtr  sample;   // Sampler
+    double     slices[sampler::kMaxSlices] = {};   // Sampler: its manual slices (seconds)
+    int        sliceCount = 0;
+    double     sampleBpm = 0;                      // Sampler: the sample's own tempo
     SamplePtr  pads[drumrack::kPads];   // Drum Rack
     DeviceKind kind = DeviceKind::AudioEffect;
     bool  enabled = true;
@@ -438,6 +441,9 @@ void Engine::publish() {
             slot.chains = std::min(int(d.chains.size()), racks::kChains);
             slot.enabled = d.enabled;
             slot.sample = d.sample;
+            slot.sampleBpm = d.sampleBpm;
+            slot.sliceCount = std::min(int(d.slices.size()), sampler::kMaxSlices);
+            for (int k = 0; k < slot.sliceCount; ++k) slot.slices[k] = d.slices[k];
             for (int k = 0; k < d.pads.size() && k < drumrack::kPads; ++k) slot.pads[k] = d.pads[k].sample;
             for (const ModRoute& r : d.mods) if (int(slot.mods.size()) < monolith::kMaxRoutes) slot.mods.push_back(r);
             for (int c = 0; c < monolith::kCurves && c < d.curves.size(); ++c) {
@@ -1350,6 +1356,9 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             paramsOf(di, params);
             Context dctx = ctx;
             dctx.sample = d.sample.get();
+            dctx.slices = d.slices;
+            dctx.sliceCount = d.sliceCount;
+            dctx.sampleBpm = d.sampleBpm;
             dctx.pads = d.pads;
             dctx.ir = d.ir.get();
             dctx.nam = d.nam.get();

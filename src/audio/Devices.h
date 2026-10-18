@@ -56,6 +56,10 @@ struct Context {
     // mod wheel (CC 1) and channel pressure (0..1). Monolith bends by its Bend Range and offers them as sources.
     float  bend = 0, wheel = 0, pressure = 0;
     const SampleData* sample = nullptr;   // the device's sample (Sampler), kept alive by the render state
+    // Sampler (0.32): its manual slices (seconds, sorted; kept alive by the render state) and the sample's own tempo (0: none).
+    const double* slices = nullptr;
+    int           sliceCount = 0;
+    double        sampleBpm = 0;
     const SamplePtr* pads = nullptr;      // Drum Rack: its 16 pads' samples (null entries are empty pads)
     // Drum Rack, when pads hold chains (bit k = pad k): hits on padSample pads start sample voices
     // (the others' instruments play them); voices of padPlay pads are rendered in this call (the

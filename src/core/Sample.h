@@ -32,6 +32,9 @@ struct SampleData {
     // Onsets (drum hits, plucks, syllables), in seconds from the start; always begins with 0.
     // Beats-mode warping slices the audio here (Clip::grain == 0).
     std::vector<double> transients;
+    // How hard each onset is, 0 .. 1 of the sharpest in the file (the first entry, the start, is
+    // 1): the Sampler's Slice By Transient keeps the ones above its Sensitivity.
+    std::vector<float> transientStrength;
 
     qint64 frames() const { return qint64(left.size()); }
     double seconds() const { return rate > 0 ? double(frames()) / rate : 0.0; }

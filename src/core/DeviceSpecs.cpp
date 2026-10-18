@@ -462,8 +462,22 @@ std::vector<DeviceSpec> build() {
             lin("Tune", -24, 24, 0.5, U::Semitones), expo("Attack", 0.001, 1, 0, U::Seconds), expo("Release", 0.05, 4, 0.4, U::Seconds),
             {"Volume", P::FaderDb, 0, 1, 0.75, U::Db, {}, {}},
             pct("Start", 0), pct("End", 1), onOff("Loop", false), expo("Cutoff", 30, 20000, 1, U::Hz), pct("Reso", 0),
-            expo("Decay", 0.01, 10, 1, U::Seconds), pct("Sustain", 1), whole("Root", 24, 96, nl(60, 24, 96), U::Note), pct("Velocity", 1)},
-         "Plays a sample across the keyboard from its root note. Drop a sample on it; set where it starts, ends and loops."},
+            expo("Decay", 0.01, 10, 1, U::Seconds), pct("Sustain", 1), whole("Root", 24, 96, nl(60, 24, 96), U::Note), pct("Velocity", 1),
+            // 0.32: the modes (sampler:: in DeviceSpecs.h; the 13 above keep their places)
+            pick("Mode", {"Classic", "1-Shot", "Slice"}, 0), pct("Loop Start", 0), pct("Fade", 0), onOff("Snap", false),
+            whole("Voices", 1, 16, nl(8, 1, 16), U::None), onOff("Retrig", true),
+            pick("Trigger", {"Trigger", "Gate"}, 0), expo("Fade In", 0.001, 2, 0, U::Seconds), expo("Fade Out", 0.001, 2, ne(0.01, 0.001, 2), U::Seconds),
+            pick("Slice By", {"Transient", "Beat", "Region", "Manual"}, 0), pct("Sensitivity", 0.5),
+            pick("Division", {"1/4", "1/8", "1/16", "1/32"}, 1, {1, 0.5, 0.25, 0.125}), whole("Regions", 2, 64, nl(8, 2, 64), U::None),
+            pick("Playback", {"Mono", "Poly", "Thru"}, 1),
+            onOff("Filter", true), pick("Filter Type", {"LP", "HP", "BP", "Notch"}, 0), lin("Filter Env", -6, 6, 0.5, U::Octaves),
+            onOff("LFO", false), pick("LFO Shape", kLfoShapes, 0), pick("LFO Rate", kLfoRateNames, 8, kLfoRateBeats),
+            expo("LFO Hz", 0.02, 30, ne(2, 0.02, 30), U::Hz), lin("LFO > Pitch", 0, 12, 0, U::Semitones), lin("LFO > Filter", 0, 4, 0, U::Octaves), pct("LFO > Vol", 0),
+            onOff("Warp", false), pick("Warp Mode", {"Re-Pitch", "Tones", "Texture", "Complex", "Complex Pro"}, 0),
+            lin("Detune", -50, 50, 0.5, U::Cents)},
+         "Plays a sample three ways. Classic: across the keyboard from its root note, between Start and End, looping from Loop Start. "
+         "1-Shot: the whole sample from each key, or while the key is held. Slice: cut at its transients, on a beat grid, into regions or where you double-click, "
+         "one slice per key from C1 up. Filter, LFO and envelope on all of them; Warp follows the set's tempo. Drop a sample on it."},
         {"Organ", T::Organ, K::Instrument, {
             whole("16'", 0, 8, 1, U::None), whole("5 1/3'", 0, 8, 1, U::None), whole("8'", 0, 8, 1, U::None),
             whole("4'", 0, 8, 0, U::None), whole("2 2/3'", 0, 8, 0, U::None), whole("2'", 0, 8, 0, U::None),
@@ -947,6 +961,49 @@ double paramValue(DeviceType type, int i, double v) {
     if (!s || i < 0 || i >= int(s->params.size())) return std::clamp(v, 0.0, 1.0);
     return paramValue(s->params[size_t(i)], v);
 }
+
+// ---- Sampler slices (sampler:: in DeviceSpecs.h)
+
+namespace sampler {
+int slices(const SampleData* s, int by, double sensitivity, double divisionBeats, int regions, double bpm, double tempo,
+           const double* manual, int manualCount, double start, double end, double* out, int max) {
+    if (!s || s->frames() < 2 || max <= 0) return 0;
+    const double dur = s->seconds();
+    const double t0 = std::clamp(start, 0.0, 1.0) * dur, t1 = std::max(t0, std::clamp(end, 0.0, 1.0) * dur);
+    int n = 0;
+    auto add = [&](double t) {
+        if (n >= max || !std::isfinite(t) || t < t0 - 1e-9 || t >= t1 - 1e-6) return;
+        if (n > 0 && t <= out[n - 1] + 1e-4) return;
+        out[n++] = t;
+    };
+    add(t0);
+    switch (by) {
+    case ByBeat: {
+        const double perBeat = 60.0 / (bpm > 0 ? bpm : std::max(1.0, tempo));
+        const double step = std::max(1e-3, divisionBeats) * perBeat;
+        for (double t = t0 + step; t < t1 && n < max; t += step) add(t);
+        break;
+    }
+    case ByRegion: {
+        const int r = std::clamp(regions, 1, max);
+        for (int k = 1; k < r; ++k) add(t0 + (t1 - t0) * k / r);
+        break;
+    }
+    case ByManual:
+        for (int k = 0; k < manualCount && manual; ++k) add(manual[k]);
+        break;
+    default: {   // transients
+        const double thr = transientThreshold(sensitivity);
+        for (size_t k = 0; k < s->transients.size(); ++k) {
+            const float strength = k < s->transientStrength.size() ? s->transientStrength[k] : 1.0f;
+            if (strength >= thr) add(s->transients[k]);
+        }
+        break;
+    }
+    }
+    return n;
+}
+} // namespace sampler
 
 QString paramText(DeviceType type, int i, double v) {
     const DeviceSpec* s = specOf(type);

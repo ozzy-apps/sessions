@@ -4,6 +4,7 @@
 #include "audio/Builtin.h"
 #include "audio/Nam.h"
 #include "Presets.h"
+#include "Tempo.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
@@ -91,9 +92,33 @@ bool toSampler(Project& p, int track, int deviceId, const QString& path, QString
     if (!d) { if (error) *error = "That device isn't a Sampler."; return false; }
     d->samplePath = s->path;
     d->sample = s;
+    d->sampleBpm = tempo::detect(*s).bpm;   // what Warp stretches from (0: no steady beat; the panel's field sets one)
+    d->slices.clear();                      // manual slices belonged to the old sample
     emit p.structureChanged();
     emit p.deviceChanged();
     return true;
+}
+
+ClipPtr slicesToClip(Project& p, const Device& d, double tempo) {
+    using namespace sampler;
+    const DeviceType type = deviceType(d.name);
+    if (type != DeviceType::Sampler || !d.sample || d.params.size() < kParams) return nullptr;
+    auto pos = [&](int i) { return d.params[i].value; };
+    double at[kMaxSlices];
+    const int n = slices(d.sample.get(), choiceIndex(type, SliceBy, pos(SliceBy)), pos(Sensitivity), paramValue(type, Division, pos(Division)),
+                         int(paramValue(type, Regions, pos(Regions))), d.sampleBpm, tempo, d.slices.constData(), int(d.slices.size()),
+                         pos(Start), pos(End), at, kMaxSlices);
+    if (n <= 0) return nullptr;
+    const double dur = d.sample->seconds();
+    const double end = std::clamp(pos(End), 0.0, 1.0) * dur;
+    const double perBeat = 60.0 / (d.sampleBpm > 0 ? d.sampleBpm : std::max(1.0, tempo));   // the slices' beats at the sample's own tempo
+    const double total = std::max(0.25, std::ceil((end - at[0]) / perBeat - 1e-6));
+    ClipPtr c = p.newClip(QFileInfo(d.samplePath).completeBaseName() + " Slices", total);
+    for (int k = 0; k < n; ++k) {
+        const double b0 = (at[k] - at[0]) / perBeat, b1 = ((k + 1 < n ? at[k + 1] : end) - at[0]) / perBeat;
+        c->notes.push_back(Note{kFirstSliceNote + k, b0, std::max(1.0 / 32, b1 - b0), 0.8, 1.0});
+    }
+    return c;
 }
 
 namespace {

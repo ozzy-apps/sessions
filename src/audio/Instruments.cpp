@@ -3,6 +3,7 @@
 
 #include "DeviceKit.h"
 #include "Wavetables.h"
+#include "Stretch.h"
 #include "core/Sample.h"
 
 namespace sessions::audio {
@@ -239,83 +240,295 @@ public:
 };
 
 // ===========================================================================
-// Sampler: plays its sample from Root (pitched by the key), between Start and
-// End, looping that stretch if Loop is on; ADSR, filter and velocity. With no
-// sample it's a soft tone.
+// Sampler (0.32; sampler:: in DeviceSpecs.h): one sample in three modes.
+// Classic plays it from Root across the keyboard between Start and End,
+// looping from Loop Start with a crossfade (Fade); 1-Shot plays the whole
+// region from every key with Fade In / Fade Out instead of the envelope
+// (Trigger plays it out, Gate stops when the key goes up); Slice cuts it at
+// its transients / on a grid / into regions / where you double-clicked and
+// puts the slices on the keys from C1 (Mono: one at a time, Poly: together,
+// Thru: each plays on to the end). A filter with an envelope amount, one LFO
+// (synced or free) onto pitch / filter / volume, and Warp: with it on and a
+// tempo known for the sample, playback follows the set's tempo, Re-Pitch by
+// changing the speed, the other modes through a Stretcher per voice (the
+// audio clips' Tones / Texture / Complex / Complex Pro). Every voice keeps
+// one clock, its read position in sample frames; with a Stretcher that
+// position is turned into the clip beat the Stretcher reads at. With no
+// sample it's a soft tone, as before.
 // ===========================================================================
 
 struct SamplerParams : SynthParams {
+    // 0.4
     float tune = 0, attack = 0.001f, release = 0.4f, start = 0, end = 1, cutoff = 20000, q = 0.7f;
     float decay = 10, sustain = 1, root = 60, velAmt = 1;
-    bool  loop = false, filter = false;
+    bool  loop = false;
+    // 0.32
+    int   mode = 0, trigger = 0, playback = 1, filterType = 0, lfoShapeI = 0, warpMode = 0, voices = 8;
+    float loopStart = 0, fade = 0, fadeIn = 0.001f, fadeOut = 0.01f, filterEnv = 0, lfoPitch = 0, lfoFilter = 0, lfoVol = 0, detune = 0;
+    bool  snap = false, retrig = true, filterOn = true, lfoOn = false, warp = false;
     const SampleData* sample = nullptr;
-    void update(const float* p, float rate, const Context& ctx) {
+    double sampleBpm = 0, tempo = 120, secPerBeat = 0.5;
+    double slices[sampler::kMaxSlices] = {};
+    int    sliceCount = 0;
+    double lfoPhase = 0, lfoInc = 0;   // this block's LFO phase in cycles, and its advance per frame
+    float  lfo = 0;                    // its value at the block's start (-1 .. 1), 0 with the LFO off
+
+    void update(const float* p, float rate, const Context& ctx, double& freePhase, int frames) {
+        using namespace sampler;
         constexpr T t = T::Sampler;
         sr = rate;
-        tune = pv(t, p, 0); attack = pv(t, p, 1); release = pv(t, p, 2); gain = faderGain(p[3]);
-        start = p[4]; end = p[5]; loop = pb(p, 6);
-        cutoff = pv(t, p, 7); q = 0.6f + p[8] * p[8] * 12.0f; filter = p[7] < 0.995f || p[8] > 0.01f;
-        decay = pv(t, p, 9); sustain = p[10]; root = pv(t, p, 11); velAmt = p[12];
-        sample = ctx.sample;
+        tune = pv(t, p, Tune); attack = pv(t, p, Attack); release = pv(t, p, Release); gain = faderGain(p[Volume]);
+        start = p[Start]; end = p[End]; loop = pb(p, Loop);
+        cutoff = pv(t, p, Cutoff); q = 0.6f + p[Reso] * p[Reso] * 12.0f;
+        decay = pv(t, p, Decay); sustain = p[Sustain]; root = pv(t, p, Root); velAmt = p[Velocity];
+        mode = pc(t, p, Mode); loopStart = p[LoopStart]; fade = p[Fade]; snap = pb(p, Snap);
+        voices = std::clamp(int(std::lround(pv(t, p, Voices))), 1, kMaxVoices); retrig = pb(p, Retrig);
+        trigger = pc(t, p, Trigger); fadeIn = pv(t, p, FadeIn); fadeOut = pv(t, p, FadeOut);
+        playback = pc(t, p, Playback);
+        filterOn = pb(p, FilterOn); filterType = pc(t, p, FilterType); filterEnv = pv(t, p, FilterEnv);
+        lfoOn = pb(p, LfoOn); lfoShapeI = pc(t, p, LfoShape);
+        lfoPitch = pv(t, p, LfoPitch); lfoFilter = pv(t, p, LfoFilter); lfoVol = p[LfoVolume];
+        warp = pb(p, Warp); warpMode = pc(t, p, sampler::WarpMode); detune = pv(t, p, Detune);
+        sample = ctx.sample; sampleBpm = ctx.sampleBpm; tempo = ctx.tempo > 1 ? ctx.tempo : 120; secPerBeat = 60.0 / tempo;
+        sliceCount = sampler::slices(sample, pc(t, p, SliceBy), p[Sensitivity], pv(t, p, Division), int(std::lround(pv(t, p, Regions))),
+                            sampleBpm, tempo, ctx.slices, ctx.sliceCount, start, end, this->slices, kMaxSlices);
+        // the LFO: synced to the song's beat, or free-running
+        const double beats = pv(t, p, LfoRate);
+        if (beats > 0) { lfoPhase = ctx.beat / beats; lfoInc = ctx.beatsPerSample / beats; }
+        else { lfoPhase = freePhase; lfoInc = pv(t, p, LfoHz) / rate; freePhase = std::fmod(freePhase + lfoInc * frames, 1.0); }
+        lfo = lfoOn ? lfoShape(lfoShapeI, lfoPhase) : 0.0f;
     }
 };
+
+// The nearest zero crossing of the mono mix to frame f within [lo, hi], searching 2048 frames out; f when there's none.
+static double zeroCrossing(const SampleData& s, double f, double lo, double hi) {
+    const qint64 n = s.frames();
+    const qint64 c = std::clamp<qint64>(qint64(std::llround(f)), 1, n - 1);
+    auto sign = [&s](qint64 i) { return s.left[size_t(i)] + s.right[size_t(i)] >= 0; };
+    for (qint64 d = 0; d < 2048; ++d)
+        for (qint64 i : {c - d, c + d})
+            if (i > 0 && i < n && double(i) >= lo && double(i) <= hi && sign(i) != sign(i - 1)) return double(i);
+    return f;
+}
 
 struct SamplerVoice {
     Osc osc; Adsr amp; Svf fl, fr;
     float vel = 0, velGain = 1; int gate = 0, pitch = 60; uint32_t age = 0;
-    double pos = 0;                      // sample mode: read position in frames
-    const SampleData* playing = nullptr; // the sample this voice started on
+    bool   alive = false, releasing = false;
+    int    kind = 0;                       // sampler::Classic / OneShot / Slice
+    double pos = 0;                        // the read position in sample frames (the voice's clock)
+    double a = 0, b = 0, la = 0;           // the region's start and end, and the loop's start, in frames
+    double fadeFrames = 0;                 // Classic: the loop crossfade
+    bool   loop = false;
+    float  rel = 1;                        // 1-Shot Gate: the fade-out after the key went up
+    float  cut = 1, cutInc = 0;            // a 4 ms fade when the voice is choked (Mono) or stolen
+    double ratio = 1;                      // the pitch, as a rate factor
+    bool   warped = false, stretch = false;
+    WarpMarker markers[2];                 // the sample's beats onto its seconds, for the Stretcher
+    Stretcher* st = nullptr;
+    const SampleData* playing = nullptr;   // the sample this voice started on
 
-    bool active() const { return amp.active(); }
-    void start(int p, float v, int dur, const SamplerParams& P) {
-        if (!amp.active()) { osc.phase = 0; fl.reset(); fr.reset(); }
+    bool active() const { return alive; }
+    void start(int p, float v, int dur, const SamplerParams& P, int slice) {
+        using namespace sampler;
+        if (!alive) { osc.phase = 0; fl.reset(); fr.reset(); amp.kill(); }
+        alive = true; releasing = false; rel = 1; cut = 1; cutInc = 0;
         pitch = p; vel = v; gate = dur;
         velGain = 1 - P.velAmt + P.velAmt * v;
+        kind = P.mode;
         playing = P.sample;
-        pos = playing ? std::clamp(double(P.start), 0.0, 1.0) * double(std::max<qint64>(0, playing->frames() - 1)) : 0;
+        const double cents = P.tune + P.detune / 100.0;
+        ratio = std::exp2((kind == Slice ? cents : pitch - P.root + cents) / 12.0);
         amp.on();
-    }
-    void release() { gate = 0; amp.off(); }
-    void kill() { amp.kill(); }
-    void render(float* L, float* R, int n, const SamplerParams& P) {
-        amp.set(P.attack, P.decay, P.sustain, P.release, P.sr);
-        if (P.filter) { fl.set(P.cutoff, P.q, P.sr); fr.set(P.cutoff, P.q, P.sr); }
-        if (playing && playing == P.sample) { renderSample(L, R, n, P); return; }
-        if (playing) { kill(); return; }   // the sample was swapped while the note rang: stop it
-        const float dt = mtof(float(pitch) + P.tune + 60.0f - P.root) / P.sr;
-        for (int i = 0; i < n; ++i) {
-            if (gate > 0 && --gate == 0) release();
-            float y = (0.6f * osc.triAt() + 0.4f * osc.sineAt()) * amp.next() * velGain * 0.25f;
-            osc.advance(dt);
-            if (P.filter) y = fl.lp(y);
-            L[i] += y; R[i] += y;
+        if (!playing || playing->frames() < 4) { pos = 0; warped = stretch = false; return; }
+        const SampleData& s = *playing;
+        const double last = double(s.frames() - 1);
+        const double ra = std::clamp(double(P.start), 0.0, 1.0) * last;
+        const double rb = std::max(std::min(last, ra + 2.0), std::clamp(double(P.end), 0.0, 1.0) * last);
+        a = ra; b = rb; la = ra; loop = false; fadeFrames = 0;
+        if (kind == Classic) {
+            loop = P.loop;
+            la = std::clamp(std::clamp(double(P.loopStart), 0.0, 1.0) * last, a, std::max(a, b - 2.0));
+            fadeFrames = std::min(double(P.fade) * (b - la), la);
+        } else if (kind == Slice) {
+            a = std::clamp(P.slices[slice] * s.rate, ra, rb);
+            b = P.playback == Thru || slice + 1 >= P.sliceCount ? rb : std::clamp(P.slices[slice + 1] * s.rate, a + 1, rb);
+        }
+        if (P.snap) {
+            a = zeroCrossing(s, a, ra, rb); b = std::max(a + 2.0, zeroCrossing(s, b, ra, rb));
+            if (kind == Classic) la = std::clamp(zeroCrossing(s, la, a, b), a, std::max(a, b - 2.0));
+        }
+        pos = a;
+        warped = P.warp && P.sampleBpm > 0;
+        stretch = warped && P.warpMode != RePitch && st;
+        if (stretch) {
+            st->reset();
+            markers[0] = {0, 0};
+            markers[1] = {s.seconds() * P.sampleBpm / 60.0, s.seconds()};
         }
     }
-    void renderSample(float* L, float* R, int n, const SamplerParams& P) {
+    void release() {
+        gate = 0;
+        if (kind == sampler::OneShot) releasing = true;
+        else amp.off();
+    }
+    void choke(float sr) { if (cutInc == 0) cutInc = -1.0f / std::max(1.0f, 0.004f * sr); }
+    void kill() { alive = false; amp.kill(); cutInc = 0; }
+
+    void render(float* L, float* R, int n, const SamplerParams& P) {
+        using namespace sampler;
+        if (!alive) return;
+        amp.set(P.attack, P.decay, P.sustain, P.release, P.sr);
+        if (playing != P.sample) { kill(); return; }   // the sample was swapped (or removed) while the note rang: stop it
+        // the filter, once a block: the envelope's and the LFO's octaves on the cutoff
+        const float envNow = kind == OneShot ? rel : amp.level;
+        if (P.filterOn) {
+            const float fc = P.cutoff * std::exp2(P.filterEnv * envNow + P.lfoFilter * P.lfo);
+            fl.set(fc, P.q, P.sr); fr.set(fc, P.q, P.sr);
+        }
+        const float lfoPitch = std::exp2(P.lfoPitch * P.lfo / 12.0f);
+        if (!playing) {   // the tone
+            const float dt = mtof(float(pitch) + P.tune + 60.0f - P.root) / P.sr * lfoPitch;
+            for (int i = 0; i < n; ++i) {
+                if (gate > 0 && --gate == 0) release();
+                float y = (0.6f * osc.triAt() + 0.4f * osc.sineAt()) * amp.next() * velGain * 0.25f;
+                osc.advance(dt);
+                if (!amp.active()) { kill(); return; }
+                if (P.filterOn) y = fl.run(P.filterType, y);
+                L[i] += y; R[i] += y;
+            }
+            return;
+        }
         const SampleData& s = *playing;
         const qint64 frames = s.frames();
         if (frames < 4) { kill(); return; }
-        const double last = double(frames - 1);
-        const double a = std::clamp(double(P.start), 0.0, 1.0) * last;
-        const double b = std::max(std::min(last, a + 2.0), std::clamp(double(P.end), 0.0, 1.0) * last);
-        const double step = s.rate / P.sr * std::exp2((pitch - P.root + P.tune) / 12.0);
+        double step = s.rate / P.sr * ratio * lfoPitch;
+        if (warped) step = s.rate / P.sr * (P.tempo / P.sampleBpm) * (stretch ? 1.0 : ratio * lfoPitch);
+        StretchSource src;
+        if (stretch) {
+            src.sample = &s; src.markers = markers; src.nMarkers = 2; src.secPerBeat = P.secPerBeat;
+            src.ratio = ratio * lfoPitch; src.mode = StretchMode(P.warpMode);
+        }
+        const double beatsPerFrame = P.sampleBpm / 60.0 / s.rate;   // the sample's own beats per sample frame (the Stretcher's clock)
+        const double fadeInFrames = std::max(1.0, double(P.fadeIn) * s.rate), fadeOutFrames = std::max(1.0, double(P.fadeOut) * s.rate);
+        const float relInc = 1.0f / std::max(1.0f, P.fadeOut * P.sr);
+        const bool oneShotTrigger = kind == OneShot && P.trigger == 0;
+        auto read = [&s, frames](double at, float& l, float& r) {
+            const qint64 k = std::clamp<qint64>(qint64(at), 0, frames - 2);
+            const float f = float(at - double(k));
+            l = s.left[size_t(k)] + (s.left[size_t(k + 1)] - s.left[size_t(k)]) * f;
+            r = s.right[size_t(k)] + (s.right[size_t(k + 1)] - s.right[size_t(k)]) * f;
+        };
         for (int i = 0; i < n; ++i) {
-            if (gate > 0 && --gate == 0) release();
+            if (gate > 0 && --gate == 0 && !oneShotTrigger) release();
             if (pos >= b) {
-                if (P.loop && b - a > 8) pos = a + std::fmod(pos - a, b - a);
-                else { kill(); return; }   // the sample ended
+                if (loop && b - la > 8) pos = la + std::fmod(pos - la, b - la);
+                else { kill(); return; }   // the sample (or the slice) ended
             }
-            const qint64 k = std::clamp<qint64>(qint64(pos), 0, frames - 2);
-            const float f = float(pos - double(k));
-            const float g = amp.next() * velGain;
-            float l = s.left[size_t(k)] + (s.left[size_t(k + 1)] - s.left[size_t(k)]) * f;
-            float r = s.right[size_t(k)] + (s.right[size_t(k + 1)] - s.right[size_t(k)]) * f;
-            if (P.filter) { l = fl.lp(l); r = fr.lp(r); }
+            float g;
+            if (kind == OneShot) {
+                g = float(std::min(1.0, (pos - a) / fadeInFrames));
+                if (oneShotTrigger) g *= float(std::clamp((b - pos) / fadeOutFrames, 0.0, 1.0));
+                if (releasing) { rel -= relInc; if (rel <= 0) { kill(); return; } g *= rel; }
+            } else {
+                g = amp.next();
+                if (!amp.active()) { kill(); return; }
+            }
+            if (cutInc != 0) { cut += cutInc; if (cut <= 0) { kill(); return; } g *= cut; }
+            g *= velGain;
+            if (P.lfoVol > 0) g *= 1.0f - P.lfoVol * 0.5f * (1.0f - lfoShape(P.lfoShapeI, P.lfoPhase + P.lfoInc * i));
+            float l, r;
+            if (stretch) st->sample(src, pos * beatsPerFrame, P.sr, l, r);
+            else {
+                read(pos, l, r);
+                if (loop && fadeFrames > 1 && pos > b - fadeFrames) {   // the loop's crossfade: blend in the audio before the loop's start
+                    const float w = float((pos - (b - fadeFrames)) / fadeFrames);
+                    float l2, r2;
+                    read(pos - (b - la), l2, r2);
+                    l += (l2 - l) * w; r += (r2 - r) * w;
+                }
+            }
+            if (P.filterOn) { l = fl.run(P.filterType, l); r = fr.run(P.filterType, r); }
             L[i] += l * g;
             R[i] += r * g;
             pos += step;
         }
     }
+};
+
+class Sampler : public DeviceProcessor {
+public:
+    explicit Sampler(float sr) : m_sr(sr) {
+        m_params.sr = sr;
+        for (int v = 0; v < sampler::kMaxVoices; ++v) m_voices[v].st = &m_stretch[v];
+    }
+    void render(const EventList& ev, float* L, float* R, int frames, const float* params, const Context& ctx) override {
+        m_params.update(params, m_sr, ctx, m_lfoFree, frames);
+        std::fill(m_l, m_l + frames, 0.0f);
+        std::fill(m_r, m_r + frames, 0.0f);
+        int pos = 0, i = 0;
+        while (pos < frames) {
+            while (i < ev.count && ev.ev[i].offset <= pos) handle(ev.ev[i++]);
+            const int end = i < ev.count ? std::min(frames, ev.ev[i].offset) : frames;
+            for (SamplerVoice& v : m_voices) if (v.active()) v.render(m_l + pos, m_r + pos, end - pos, m_params);
+            pos = end;
+        }
+        const float coef = onePoleCoef(0.01f, m_sr);
+        for (int k = 0; k < frames; ++k) {
+            const float g = m_gain.next(m_params.gain, coef);
+            L[k] += m_l[k] * g;
+            R[k] += m_r[k] * g;
+        }
+        int sounding = 0;
+        const double total = m_params.sample ? double(std::max<qint64>(1, m_params.sample->frames() - 1)) : 1.0;
+        for (int v = 0; v < sampler::kMaxVoices; ++v) {
+            const SamplerVoice& voice = m_voices[v];
+            sounding += voice.active() ? 1 : 0;
+            scope[v].store(voice.active() && voice.playing ? float(voice.pos / total) : -1.0f, std::memory_order_relaxed);   // the panel's playheads
+        }
+        meter[0].store(float(sounding), std::memory_order_relaxed);
+        meter[1].store(float(m_params.lfoPhase - std::floor(m_params.lfoPhase)), std::memory_order_relaxed);   // the LFO display's line
+    }
+    void panic() override { for (SamplerVoice& v : m_voices) v.kill(); }
+
+private:
+    void handle(const NoteEvent& e) {
+        using namespace sampler;
+        const SamplerParams& P = m_params;
+        if (e.allOff) { for (SamplerVoice& v : m_voices) if (v.active()) v.release(); return; }
+        if (e.noteOff) {
+            for (SamplerVoice& v : m_voices)
+                if (v.active() && v.pitch == e.pitch && v.gate > 0 && !(v.kind == OneShot && P.trigger == 0)) v.release();
+            return;
+        }
+        int slice = 0;
+        if (P.mode == Slice && P.sample) {
+            slice = e.pitch - kFirstSliceNote;
+            if (slice < 0 || slice >= P.sliceCount) return;   // no slice on that key
+            if (P.playback == Mono) for (SamplerVoice& v : m_voices) if (v.active()) v.choke(m_sr);
+        }
+        SamplerVoice* pick = nullptr;
+        if (P.retrig && P.mode != Slice)   // the key struck again while its note still sounds: that voice starts over
+            for (SamplerVoice& v : m_voices) if (v.active() && v.pitch == e.pitch) { pick = &v; break; }
+        if (!pick) {
+            int sounding = 0;
+            for (const SamplerVoice& v : m_voices) sounding += v.active() ? 1 : 0;
+            if (sounding < P.voices) for (SamplerVoice& v : m_voices) if (!v.active()) { pick = &v; break; }
+            if (!pick) { pick = &m_voices[0]; for (SamplerVoice& v : m_voices) if (v.active() && v.age < pick->age) pick = &v; }   // steal the oldest
+        }
+        pick->age = ++m_age;
+        pick->start(e.pitch, e.velocity, std::max(1, e.duration), P, slice);
+        m_params.lastPitch = e.pitch;
+    }
+
+    float         m_sr;
+    SamplerVoice  m_voices[sampler::kMaxVoices];
+    Stretcher     m_stretch[sampler::kMaxVoices];
+    SamplerParams m_params;
+    uint32_t      m_age = 0;
+    Smoothed      m_gain;
+    double        m_lfoFree = 0;
+    float         m_l[kMaxBlock] = {}, m_r[kMaxBlock] = {};
 };
 
 // ===========================================================================
@@ -938,7 +1151,7 @@ std::shared_ptr<DeviceProcessor> createInstrument(DeviceType type, float sr) {
     case T::Monolith:       return createMonolith(sr);
     case T::Osmium:         return createOsmium(sr);
     case T::DrumStudio:     return createDrumStudio(sr);
-    case T::Sampler:        return std::make_shared<PolySynth<SamplerVoice, SamplerParams, 8>>(sr);
+    case T::Sampler:        return std::make_shared<Sampler>(sr);
     case T::Organ:          return std::make_shared<Organ>(sr);
     case T::Bass:           return std::make_shared<Bass>(sr);
     case T::Electric:       return std::make_shared<Electric>(sr);

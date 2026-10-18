@@ -27,6 +27,11 @@ int toArrangement(Project& p, int track, double beat, const QVector<ClipPtr>& cl
 // one, a Sampler replaces the track's instrument. False (and why) for other tracks or a bad file.
 bool toSampler(Project& p, int track, int deviceId, const QString& path, QString* error = nullptr);
 
+// A MIDI clip of a Sampler's slices (0.32): one note per slice from C1 up, at the beat the slice
+// falls on at the sample's own tempo (the set's `tempo` when it has none), each as long as its
+// slice; the clip is a whole number of beats. nullptr when the device isn't a Sampler with a sample.
+ClipPtr slicesToClip(Project& p, const Device& d, double tempo);
+
 // Loads a sample onto a Drum Rack's pad (0..15), named after the file. False (and why) if the
 // device isn't a Drum Rack on that track or the file doesn't load. Emits structureChanged.
 bool toDrumPad(Project& p, int track, int deviceId, int pad, const QString& path, QString* error = nullptr);

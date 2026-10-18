@@ -8,6 +8,7 @@
 #include "core/Scales.h"
 #include "core/Transport.h"
 #include "core/Import.h"
+#include "core/Presets.h"
 #include "ui/Browser.h"
 #include "ui/DeviceDrag.h"
 #include "ui/InfoView.h"
@@ -26,6 +27,9 @@
 #include <QMenu>
 #include <QMimeData>
 #include <QStackedWidget>
+#include <QStandardPaths>
+#include <QDir>
+#include <QUrl>
 #include <QPropertyAnimation>
 #include <QGridLayout>
 #include <QLabel>
@@ -359,103 +363,613 @@ public:
 
 // ============================================================================ Sampler
 
-// The sample's waveform with its start and end (drag them) and the loop between them.
-class SampleDisplay : public Display {
+// The Sampler's panel (0.32), after the classic three-mode sampler: the mode buttons stacked at
+// the left, the waveform across the top with the sample's name and its markers, a strip of
+// controls under it that changes with the mode, then Filter, LFO, Amp and the global knobs.
+
+namespace {
+
+// Hover help on a knob cell goes onto its Knob (the cell itself is a plain QWidget).
+void help(QWidget* cell, const QString& title, const QString& body) {
+    InfoView::attach(cell, title, body);
+    for (DragValue* v : cell->findChildren<DragValue*>()) InfoView::attach(v, title, body);
+}
+
+// The three modes, stacked: Classic / 1-Shot / Slice.
+class ModeColumn : public QWidget {
 public:
-    SampleDisplay(DeviceBody* b, int w, int h) : Display(b, w, h) {
-        setCursor(Qt::SizeHorCursor);
-        InfoView::attach(this, "Sample", "Drop an audio file here. Drag the start and end markers; with Loop on, the stretch between them repeats while the key is held.");
+    ModeColumn(DeviceBody* b, int param) : QWidget(b), m_body(b), m_param(param) {
+        setFixedSize(54, 3 * kRow + 2 * 2);
+        setCursor(Qt::PointingHandCursor);
+        setObjectName("samplerMode");
+        setProperty("mapTarget", b->target(param));
+        InfoView::attach(this, "Mode", "Classic plays the sample across the keyboard between Start and End, looping from Loop Start. "
+                                       "1-Shot plays the whole region from every key, with fades. Slice cuts it up and puts one slice on each key from C1.");
+        b->watch(this);
+    }
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        QFont f = font(); f.setPointSizeF(7); f.setBold(true); p.setFont(f);
+        const int cur = m_body->pick(m_param);
+        static const char* names[] = {"Classic", "1-Shot", "Slice"};
+        for (int k = 0; k < 3; ++k) {
+            const QRectF r(0.5, 0.5 + k * (kRow + 2), width() - 1, kRow - 1);
+            p.setPen(QPen(col::separator, 1));
+            p.setBrush(k == cur ? col::buttonOn : col::button);
+            p.drawRoundedRect(r, 2, 2);
+            p.setPen(k == cur ? col::buttonOnText : col::buttonText);
+            p.drawText(r, Qt::AlignCenter, names[k]);
+        }
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        const int k = std::clamp(int(e->position().y()) / (kRow + 2), 0, 2);
+        m_body->edit(m_param, choicePosition(k, 3));
+    }
+private:
+    static constexpr int kRow = 18;
+    DeviceBody* m_body;
+    int m_param;
+};
+
+// The LFO's shape, one cycle across, scaled by the biggest of its three amounts; the line is where it is now.
+class SamplerLfoDisplay : public Display {
+public:
+    SamplerLfoDisplay(DeviceBody* b, int w, int h) : Display(b, w, h) {
+        InfoView::attach(this, "LFO", "The LFO's shape, one cycle across; the line shows where it is now. Rate syncs it to the song, or Free runs it at the Hz knob.");
     }
 protected:
     void draw(QPainter& p, const QRectF& r) override {
+        using namespace sampler;
+        p.setPen(QPen(col::grid, 1));
+        p.drawLine(QPointF(r.left(), r.center().y()), QPointF(r.right(), r.center().y()));
+        const int shape = m_body->pick(LfoShape);
+        const double amt = 0.25 + 0.75 * std::max({m_body->pos(LfoPitch), m_body->pos(LfoFilter), m_body->pos(LfoVolume)});
+        QPainterPath path;
+        for (int i = 0; i <= int(r.width()); ++i) {
+            const double ph = double(i) / r.width() * 0.9999;
+            const double v = shape == 5 ? dsp::lfoShape(5, std::floor(ph * 4) + 3.0) : dsp::lfoShape(shape, ph);
+            const QPointF pt(r.left() + i, r.center().y() - v * amt * (r.height() / 2 - 3));
+            if (i == 0) path.moveTo(pt); else path.lineTo(pt);
+        }
+        p.setPen(QPen(m_body->on(LfoOn) ? col::cyan : col::gridText, 1.4));
+        p.drawPath(path);
+        if (m_body->on(LfoOn)) {
+            const double x = r.left() + std::clamp(double(m_body->meter(1)), 0.0, 1.0) * r.width();
+            p.setPen(QPen(col::handle, 1));
+            p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+        }
+    }
+};
+
+} // namespace
+
+// The sample's waveform with its name, the start / end flags (drag them), in Classic the loop's
+// start flag, bar and crossfade, in Slice the slices (numbered; in Manual double-click to add or
+// remove one, drag one to move it; drag the number band out to make a MIDI clip of them), and a
+// playhead for every voice that's sounding.
+class SampleDisplay : public Display {
+public:
+    SampleDisplay(DeviceBody* b, int w, int h) : Display(b, w, h) {
+        setMouseTracking(true);
+        setObjectName("samplerWave");
+        InfoView::attach(this, "Sample", "Drop an audio file here. Drag the ▶ start and ◀ end flags; in Classic the loop's flag too. "
+                                         "Slice: double-click to add or remove a slice (Slice By Manual), drag a slice to move it, drag the number band onto a MIDI track or the Session View for a clip of the slices.");
+        b->animate(this);
+    }
+    // A MIDI clip of the slices (import::slicesToClip at the set's tempo), or nullptr.
+    ClipPtr sliceClip() const {
+        const Device* d = m_body->device();
+        return d ? import::slicesToClip(*m_body->ctx().project, *d, m_body->ctx().project->tempo) : nullptr;
+    }
+    // The slices as drawn: seconds into the sample.
+    int slices(double* out) const {
+        using namespace sampler;
+        const Device* d = m_body->device();
+        if (!d || !d->sample) return 0;
+        const DeviceType t = m_body->ctx().type;
+        return sampler::slices(d->sample.get(), m_body->pick(SliceBy), m_body->pos(Sensitivity), m_body->real(Division), int(m_body->real(Regions)),
+                               d->sampleBpm, m_body->ctx().project->tempo, d->slices.constData(), int(d->slices.size()),
+                               m_body->pos(Start), m_body->pos(End), out, kMaxSlices) + 0 * int(t);
+    }
+
+protected:
+    void draw(QPainter& p, const QRectF& r) override {
+        using namespace sampler;
         const Device* d = m_body->device();
         const SamplePtr s = d ? d->sample : nullptr;
         if (!s || s->frames() < 2) {
-            p.setPen(d && !d->samplePath.isEmpty() ? theme::record : col::gridText);
+            p.setPen(d && !d->samplePath.isEmpty() ? theme::devMissing : col::gridText);
             p.drawText(r, Qt::AlignCenter, d && !d->samplePath.isEmpty() ? "Missing: " + QFileInfo(d->samplePath).fileName() : "Drop a sample here");
             return;
         }
+        const int mode = m_body->pick(Mode);
         const double dur = s->seconds();
-        const double mid = r.center().y() + 4, half = r.height() / 2 - 10;
+        const double mid = r.center().y() + 5, half = r.height() / 2 - 12;
         for (int x = 0; x < int(r.width()); ++x) {
             float lo, hi;
             s->range(dur * x / r.width(), dur * (x + 1) / r.width(), lo, hi);
             p.fillRect(QRectF(r.left() + x, mid - hi * half, 1, std::max(1.0, double(hi - lo) * half)), col::cyan);
         }
-        const double xs = r.left() + m_body->pos(4) * r.width(), xe = r.left() + m_body->pos(5) * r.width();
-        p.fillRect(QRectF(r.left(), r.top(), std::max(0.0, xs - r.left()), r.height()), QColor(0, 0, 0, 150));
-        p.fillRect(QRectF(xe, r.top(), std::max(0.0, r.right() - xe), r.height()), QColor(0, 0, 0, 150));
-        if (m_body->on(6)) p.fillRect(QRectF(xs, r.top() + 12, xe - xs, 3), col::curve);
+        const double xs = xOf(m_body->pos(Start), r), xe = xOf(m_body->pos(End), r);
+        p.fillRect(QRectF(r.left(), r.top(), std::max(0.0, xs - r.left()), r.height()), theme::outOfClip);
+        p.fillRect(QRectF(xe, r.top(), std::max(0.0, r.right() - xe), r.height()), theme::outOfClip);
+        if (mode == Classic) {   // the loop: from its flag to the end, with the crossfade shaded before the end
+            const double xl = std::clamp(xOf(m_body->pos(LoopStart), r), xs, xe);
+            const bool loop = m_body->on(Loop);
+            const double fadeW = m_body->pos(Fade) * (xe - xl);
+            if (loop && fadeW > 1) p.fillRect(QRectF(xe - fadeW, r.top() + kBand, fadeW, r.height() - kBand), col::curveFill);
+            p.fillRect(QRectF(xl, r.top() + kBand, xe - xl, 3), loop ? col::curve : theme::inactive);
+            p.setPen(QPen(loop ? col::curve : theme::inactive, 1));
+            p.drawLine(QPointF(xl, r.top() + kBand), QPointF(xl, r.bottom()));
+            p.setBrush(loop ? col::curve : theme::inactive);
+            p.setPen(Qt::NoPen);
+            p.drawRect(QRectF(xl, r.top() + kBand, 6, 6));
+        }
+        if (mode == Slice) {   // the slices, numbered in the band
+            double at[kMaxSlices];
+            const int n = slices(at);
+            QFont f = p.font(); f.setPointSizeF(6); p.setFont(f);
+            for (int k = 0; k < n; ++k) {
+                const double x = r.left() + at[k] / dur * r.width();
+                const double x1 = k + 1 < n ? r.left() + at[k + 1] / dur * r.width() : xe;
+                p.setPen(QPen(k == m_hoverSlice ? col::handle : col::curve, 1, k == 0 ? Qt::SolidLine : Qt::SolidLine));
+                p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+                if (x1 - x > 12) {
+                    p.setPen(col::curve);
+                    p.drawText(QRectF(x + 2, r.top(), x1 - x - 2, kBand), Qt::AlignLeft | Qt::AlignVCenter, QString::number(k + 1));
+                }
+            }
+            p.setPen(col::gridText);
+            p.drawText(r.adjusted(4, 1, -4, -2), Qt::AlignBottom | Qt::AlignRight, QString("%1 slice%2 · %3 s").arg(n).arg(n == 1 ? "" : "s").arg(dur, 0, 'f', 2));
+        } else {
+            QString caption = QString("%1 s").arg(dur, 0, 'f', 2);
+            if (d->sampleBpm > 0) {
+                const double bars = dur * d->sampleBpm / 60 / 4;
+                caption = QString("%1 bar%2 · %3 BPM · ").arg(bars, 0, 'f', bars == std::floor(bars) ? 0 : 2).arg(bars == 1 ? "" : "s").arg(d->sampleBpm, 0, 'f', 1) + caption;
+            }
+            p.setPen(col::gridText);
+            p.drawText(r.adjusted(4, 1, -4, -2), Qt::AlignTop | Qt::AlignRight, caption);
+        }
+        // the start and end flags
         for (double x : {xs, xe}) {
-            p.setPen(QPen(col::handle, 1));
-            p.drawLine(QPointF(x, r.top() + 10), QPointF(x, r.bottom()));
-            QPainterPath flag;
             const bool start = x == xs;
-            flag.moveTo(x, r.top() + 10); flag.lineTo(x + (start ? 7 : -7), r.top() + 14); flag.lineTo(x, r.top() + 18); flag.closeSubpath();
+            p.setPen(QPen(col::handle, 1));
+            p.drawLine(QPointF(x, r.top() + kBand), QPointF(x, r.bottom()));
+            QPainterPath flag;
+            flag.moveTo(x, r.top() + kBand); flag.lineTo(x + (start ? 7 : -7), r.top() + kBand + 4); flag.lineTo(x, r.top() + kBand + 8); flag.closeSubpath();
             p.fillPath(flag, col::handle);
         }
-        p.setPen(col::value);
-        p.drawText(r.adjusted(4, 1, -4, -2), Qt::AlignTop | Qt::AlignLeft, p.fontMetrics().elidedText(QFileInfo(d->samplePath).fileName(), Qt::ElideMiddle, int(r.width()) - 60));
-        p.setPen(col::gridText);
-        p.drawText(r.adjusted(4, 1, -4, -2), Qt::AlignTop | Qt::AlignRight, QString("%1 s").arg(dur, 0, 'f', 2));
+        // the voices' playheads
+        p.setPen(QPen(theme::playhead, 1));
+        for (int v = 0; v < kMaxVoices; ++v) {
+            const float at = m_body->scope(v);
+            if (at >= 0 && at <= 1) p.drawLine(QPointF(r.left() + at * r.width(), r.top() + kBand), QPointF(r.left() + at * r.width(), r.bottom()));
+        }
     }
+
     void mousePressEvent(QMouseEvent* e) override {
+        using namespace sampler;
         const QRectF r = inner();
-        const double xs = r.left() + m_body->pos(4) * r.width(), xe = r.left() + m_body->pos(5) * r.width();
-        m_drag = std::fabs(e->position().x() - xs) <= std::fabs(e->position().x() - xe) ? 4 : 5;
-        mouseMoveEvent(e);
+        const double x = e->position().x();
+        const Device* d = m_body->device();
+        m_press = e->position();
+        m_drag = Drag::None;
+        if (!d || !d->sample) return;
+        const int mode = m_body->pick(Mode);
+        if (mode == Slice) {
+            const int k = sliceAt(e->position());
+            if (k > 0 && m_body->pick(SliceBy) == ByManual) { m_drag = Drag::Slice; m_slice = manualIndex(k); return; }
+            if (e->position().y() < r.top() + kBand) { m_drag = Drag::Out; return; }
+        }
+        const double xs = xOf(m_body->pos(Start), r), xe = xOf(m_body->pos(End), r), xl = xOf(m_body->pos(LoopStart), r);
+        double best = 8;   // a flag within 8 px of the press
+        if (std::fabs(x - xs) < best) { best = std::fabs(x - xs); m_drag = Drag::Start; }
+        if (std::fabs(x - xe) < best) { best = std::fabs(x - xe); m_drag = Drag::End; }
+        if (mode == Classic && std::fabs(x - xl) < best) m_drag = Drag::LoopStart;
+        if (m_drag != Drag::None) mouseMoveEvent(e);
     }
     void mouseMoveEvent(QMouseEvent* e) override {
-        if (!(e->buttons() & Qt::LeftButton)) return;
+        using namespace sampler;
         const QRectF r = inner();
-        double v = (e->position().x() - r.left()) / r.width();
-        if (m_drag == 4) v = std::min(v, m_body->pos(5) - 0.002);
-        else v = std::max(v, m_body->pos(4) + 0.002);
-        m_body->editMany({{m_drag, v}}, m_drag);
+        if (!(e->buttons() & Qt::LeftButton)) {
+            const int h = m_body->pick(Mode) == Slice ? sliceAt(e->position()) : -1;
+            if (h != m_hoverSlice) { m_hoverSlice = h; update(); }
+            setCursor(h > 0 && m_body->pick(SliceBy) == ByManual ? Qt::SizeHorCursor : e->position().y() < r.top() + kBand && m_body->pick(Mode) == Slice ? Qt::OpenHandCursor : Qt::SizeHorCursor);
+            return;
+        }
+        const double v = std::clamp((e->position().x() - r.left()) / r.width(), 0.0, 1.0);
+        switch (m_drag) {
+        case Drag::Start:     m_body->editMany({{Start, std::min(v, m_body->pos(End) - 0.002)}}, 1); break;
+        case Drag::End:       m_body->editMany({{End, std::max(v, m_body->pos(Start) + 0.002)}}, 2); break;
+        case Drag::LoopStart: m_body->editMany({{LoopStart, std::clamp(v, m_body->pos(Start), m_body->pos(End) - 0.002)}}, 3); break;
+        case Drag::Slice:     moveSlice(m_slice, v); break;
+        case Drag::Out:
+            if ((e->position() - m_press).manhattanLength() > 8) { m_drag = Drag::None; dragOut(); }
+            break;
+        default: break;
+        }
     }
+    void mouseDoubleClickEvent(QMouseEvent* e) override {
+        using namespace sampler;
+        const Device* d = m_body->device();
+        if (!d || !d->sample || m_body->pick(Mode) != Slice) return;
+        if (m_body->pick(SliceBy) != ByManual) {   // switch to Manual, keeping the slices as they are
+            double at[kMaxSlices];
+            const int n = slices(at);
+            QVector<double> keep;
+            for (int k = 1; k < n; ++k) keep.push_back(at[k]);
+            setSlices(keep, "Manual Slices");
+            m_body->edit(SliceBy, choicePosition(ByManual, 4));
+            return;
+        }
+        const int k = sliceAt(e->position());
+        QVector<double> list = d->slices;
+        if (k > 0) {   // remove it
+            const int mi = manualIndex(k);
+            if (mi >= 0 && mi < list.size()) list.removeAt(mi);
+            setSlices(list, "Remove Slice");
+        } else {
+            const QRectF r = inner();
+            const double t = std::clamp((e->position().x() - r.left()) / r.width(), 0.0, 1.0) * d->sample->seconds();
+            list.push_back(t);
+            std::sort(list.begin(), list.end());
+            setSlices(list, "Add Slice");
+        }
+    }
+    void leaveEvent(QEvent*) override { if (m_hoverSlice >= 0) { m_hoverSlice = -1; update(); } }
+
 private:
-    int m_drag = 4;
+    enum class Drag { None, Start, End, LoopStart, Slice, Out };
+    static constexpr int kBand = 11;   // the top band: slice numbers, the flags' heads
+
+    double xOf(double share, const QRectF& r) const { return r.left() + std::clamp(share, 0.0, 1.0) * r.width(); }
+    // The slice whose line is within 5 px of `pos` (as drawn), or -1.
+    int sliceAt(const QPointF& pos) const {
+        const Device* d = m_body->device();
+        if (!d || !d->sample) return -1;
+        double at[sampler::kMaxSlices];
+        const int n = slices(at);
+        const QRectF r = inner();
+        const double dur = d->sample->seconds();
+        int best = -1; double bd = 5;
+        for (int k = 0; k < n; ++k) {
+            const double dx = std::fabs(r.left() + at[k] / dur * r.width() - pos.x());
+            if (dx < bd) { bd = dx; best = k; }
+        }
+        return best;
+    }
+    // The index in Device::slices of drawn slice k (Manual mode: slice 0 is the start, the rest the list in order within the region).
+    int manualIndex(int k) const {
+        const Device* d = m_body->device();
+        if (!d || !d->sample) return -1;
+        double at[sampler::kMaxSlices];
+        const int n = slices(at);
+        if (k <= 0 || k >= n) return -1;
+        for (int i = 0; i < d->slices.size(); ++i) if (std::fabs(d->slices[i] - at[k]) < 1e-9) return i;
+        return -1;
+    }
+    void setSlices(QVector<double> list, const QString& label, quintptr mergeKey = 0) {
+        Project* project = m_body->ctx().project;
+        {
+            EditScope edit(project, label, mergeKey);
+            Device* d = findDevice(project, m_body->ctx().track, m_body->ctx().deviceId);   // after the snapshot (see DeviceBody::edit)
+            if (!d) return;
+            d->slices = std::move(list);
+        }
+        emit project->deviceChanged();
+    }
+    void moveSlice(int mi, double share) {
+        const Device* d = m_body->device();
+        if (!d || !d->sample || mi < 0 || mi >= d->slices.size()) return;
+        QVector<double> list = d->slices;
+        list[mi] = share * d->sample->seconds();
+        std::sort(list.begin(), list.end());
+        setSlices(list, "Move Slice", deviceMergeKey(m_body->ctx().deviceId, 230 + (mi & 15)));
+    }
+    // The slices as a MIDI clip, dragged out as a clip file (what the Session View, the Arrangement and the browser already take).
+    void dragOut() {
+        ClipPtr clip = sliceClip();
+        if (!clip) return;
+        const QString dir = QStandardPaths::writableLocation(QStandardPaths::TempLocation) + "/sessions-slices";
+        QDir().mkpath(dir);
+        const QString path = dir + "/" + clip->name + "." + presets::kClipSuffix;
+        QString error;
+        if (!presets::saveClip(path, clip->name, *clip, &error)) { InfoView::notify("Can't drag the slices", error); return; }
+        auto* mime = new QMimeData;
+        mime->setUrls({QUrl::fromLocalFile(path)});
+        auto* drag = new QDrag(this);
+        drag->setMimeData(mime);
+        QPixmap pm(90, 16);
+        pm.fill(Qt::transparent);
+        {
+            QPainter p(&pm);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setBrush(col::curve); p.setPen(Qt::NoPen);
+            p.drawRoundedRect(pm.rect(), 3, 3);
+            p.setPen(theme::ink);
+            QFont f = font(); f.setPointSizeF(7); p.setFont(f);
+            p.drawText(pm.rect(), Qt::AlignCenter, QString("%1 slices").arg(clip->notes.size()));
+        }
+        drag->setPixmap(pm);
+        drag->exec(Qt::CopyAction);
+    }
+
+    Drag    m_drag = Drag::None;
+    int     m_slice = -1, m_hoverSlice = -1;
+    QPointF m_press;
 };
 
 class SamplerBody : public DeviceBody {
 public:
     SamplerBody(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
+        using namespace sampler;
         auto* root = rootRow(this);
+
+        // ---- the modes and the volume
+        auto* left = vbox(4);
+        left->addWidget(new ModeColumn(this, Mode));
+        left->addStretch(1);
+        QWidget* vol = knob(Volume, 24);
+        help(vol, "Volume", "The Sampler's output level.");
+        left->addWidget(vol, 0, Qt::AlignHCenter);
+        root->addLayout(left);
+
+        // ---- the sample: a header, the waveform, the strip for the mode
         auto* smp = vbox(3);
-        smp->addWidget(new SampleDisplay(this, 290, 112));
-        auto* r = hbox(0);
-        r->addWidget(knob(4, 20));
-        r->addWidget(knob(5, 20));
-        r->addWidget(toggle(6, "Loop", 38), 0, Qt::AlignVCenter);
-        r->addSpacing(6);
-        r->addWidget(knob(11, 20));
-        r->addWidget(knob(0, 20));
-        r->addStretch(1);
-        smp->addLayout(r);
+        auto* head = hbox(4);
+        m_name = new QLabel(this);
+        m_name->setStyleSheet(QString("color:%1;font-size:9px;font-weight:600;background:transparent;border:0;").arg(col::value.name()));
+        m_name->setMinimumWidth(60);
+        InfoView::attach(m_name, "Sample", "The loaded sample. Drop another onto the panel to replace it.");
+        head->addWidget(m_name, 1);
+        QWidget* warp = toggle(Warp, "Warp", 40);
+        warp->setObjectName("samplerWarp");
+        InfoView::attach(warp, "Warp", "On: the sample follows the set's tempo from its own (the BPM field; found when it loads). Off: it plays at its own speed.");
+        head->addWidget(warp);
+        m_bpm = new DragValue(this);
+        m_bpm->setObjectName("samplerBpm");
+        m_bpm->setRange(0, 999);
+        m_bpm->setDefault(0);
+        m_bpm->setDragSensitivity(2400);
+        m_bpm->setMinimumChars(7);
+        m_bpm->setFixedWidth(62);
+        m_bpm->setFormatter([](double v) { return v > 0 ? QString("%1 BPM").arg(v, 0, 'f', 1) : QString("— BPM"); });
+        InfoView::attach(m_bpm, "Sample Tempo", "The sample's own tempo, what Warp stretches from: found when the sample loads; drag or double-click to type it when the guess is wrong. Delete clears it.");
+        connect(m_bpm, &DragValue::valueEdited, this, [this](double v) { setSampleBpm(v < 20 ? 0 : v, "Sample Tempo", deviceMergeKey(m_ctx.deviceId, 229)); });
+        head->addWidget(m_bpm);
+        auto* half = new QToolButton(this);
+        half->setText(":2"); half->setObjectName("samplerHalf"); half->setFixedSize(22, 16); half->setFocusPolicy(Qt::NoFocus);
+        InfoView::attach(half, "Half Tempo", "Halves the sample's tempo: twice the bars, and with Warp on it plays twice as slow.");
+        connect(half, &QToolButton::clicked, this, [this] { if (const Device* d = device(); d && d->sampleBpm > 0) setSampleBpm(d->sampleBpm / 2, ":2"); });
+        head->addWidget(half);
+        auto* twice = new QToolButton(this);
+        twice->setText("x2"); twice->setObjectName("samplerDouble"); twice->setFixedSize(22, 16); twice->setFocusPolicy(Qt::NoFocus);
+        InfoView::attach(twice, "Double Tempo", "Doubles the sample's tempo: half the bars, and with Warp on it plays twice as fast.");
+        connect(twice, &QToolButton::clicked, this, [this] { if (const Device* d = device(); d && d->sampleBpm > 0) setSampleBpm(d->sampleBpm * 2, "x2"); });
+        head->addWidget(twice);
+        QWidget* wm = chooser(sampler::WarpMode, 82);
+        wm->setObjectName("samplerWarpMode");
+        InfoView::attach(wm, "Warp Mode", "How the sample is stretched with Warp on. Re-Pitch changes the speed and the pitch with it, like a record; "
+                                          "Tones (lines, bass), Texture (pads), Complex (mixes) and Complex Pro keep the pitch, like the audio clips' warp modes.");
+        head->addWidget(wm);
+        smp->addLayout(head);
+        m_wave = new SampleDisplay(this, 440, 96);
+        smp->addWidget(m_wave);
+
+        m_strip = new QStackedWidget(this);
+        m_strip->setObjectName("samplerStrip");
+        m_strip->setFixedHeight(54);
+        m_strip->setStyleSheet("background:transparent;");
+        {   // Classic
+            auto* page = new QWidget(m_strip);
+            auto* row = hbox(2);
+            row->setContentsMargins(0, 0, 0, 0);
+            page->setLayout(row);
+            QWidget* st = knob(Start, 20, "Start");   help(st, "Start", "Where the sample starts playing, as a share of it. Drag the ▶ flag in the waveform too.");
+            QWidget* ls = knob(LoopStart, 20, "Loop");  help(ls, "Loop Start", "Where the loop goes back to, between Start and End (the flag with the bar in the waveform).");
+            QWidget* en = knob(End, 20, "End");       help(en, "End", "Where the sample stops (the ◀ flag): with Loop on, where the loop goes round.");
+            QWidget* fd = knob(Fade, 20, "Fade");     help(fd, "Fade", "The loop's crossfade, as a share of the loop: the end of the loop blends into what comes before its start, so it goes round without a click.");
+            for (QWidget* w : {st, ls, en, fd}) row->addWidget(w);
+            auto* tg = vbox(2);
+            QWidget* lp = toggle(Loop, "Loop", 42);    lp->setObjectName("samplerLoop"); InfoView::attach(lp, "Loop", "On: while the key is held, the stretch from Loop Start to End repeats.");
+            QWidget* sn = toggle(Snap, "Snap", 42);    InfoView::attach(sn, "Snap", "On: Start, End and Loop Start move to the nearest zero crossings of the audio, so the edges don't click.");
+            QWidget* rt = toggle(Retrig, "Retrig", 42); InfoView::attach(rt, "Retrig", "On: a key struck again while its note still sounds restarts that voice instead of starting another.");
+            tg->addWidget(lp); tg->addWidget(sn); tg->addWidget(rt);
+            row->addLayout(tg);
+            auto* vc = vbox(1);
+            vc->addWidget(section("Voices"), 0, Qt::AlignHCenter);
+            QWidget* voices = field(Voices, 30);
+            InfoView::attach(voices, "Voices", "How many notes sound at once (1 to 16); the oldest makes way for a new one.");
+            vc->addWidget(voices, 0, Qt::AlignHCenter);
+            vc->addStretch(1);
+            row->addLayout(vc);
+            row->addStretch(1);
+            m_strip->addWidget(page);
+        }
+        {   // 1-Shot
+            auto* page = new QWidget(m_strip);
+            auto* row = hbox(6);
+            page->setLayout(row);
+            QWidget* tr = choices(Trigger, {}, {}, 100);
+            tr->setObjectName("samplerTrigger");
+            InfoView::attach(tr, "Trigger / Gate", "Trigger: a key plays the whole sample, however briefly it's pressed. Gate: the sample stops, with Fade Out, when the key goes up.");
+            row->addWidget(tr, 0, Qt::AlignVCenter);
+            QWidget* fi = knob(FadeIn, 20, "Fade In");   help(fi, "Fade In", "How long the sample takes to come up to full level from each key.");
+            QWidget* fo = knob(FadeOut, 20, "Fade Out"); help(fo, "Fade Out", "Trigger: the fade before the sample's end. Gate: the fade when the key goes up.");
+            row->addWidget(fi); row->addWidget(fo);
+            row->addStretch(1);
+            m_strip->addWidget(page);
+        }
+        {   // Slice
+            auto* page = new QWidget(m_strip);
+            auto* row = hbox(6);
+            page->setLayout(row);
+            auto* by = vbox(1);
+            by->addWidget(section("Slice By"));
+            QWidget* sb = chooser(SliceBy, 78);
+            sb->setObjectName("samplerSliceBy");
+            InfoView::attach(sb, "Slice By", "Where the slices go: at the sample's transients (Sensitivity says how soft a hit still counts), every beat division of its tempo, "
+                                             "in equal regions, or where you double-click (Manual). The slices sit on the keys from C1 up.");
+            by->addWidget(sb);
+            by->addStretch(1);
+            row->addLayout(by);
+            m_sens = knob(Sensitivity, 20, "Sens");  help(m_sens, "Sensitivity", "Transient slicing: higher finds softer hits too, lower keeps only the hardest.");
+            row->addWidget(m_sens);
+            m_div = new QWidget(page);
+            auto* dv = vbox(1); m_div->setLayout(dv);
+            dv->addWidget(section("Division"));
+            QWidget* div = chooser(Division, 50);
+            InfoView::attach(div, "Division", "Beat slicing: a slice every 1/4, 1/8, 1/16 or 1/32 of the sample's own tempo (the set's when it has none).");
+            dv->addWidget(div);
+            dv->addStretch(1);
+            row->addWidget(m_div);
+            m_regions = knob(Regions, 20, "Regions"); help(m_regions, "Regions", "Region slicing: the sample cut into this many equal parts.");
+            row->addWidget(m_regions);
+            m_manualHint = new QLabel("Double-click the waveform to add or remove a slice", page);
+            m_manualHint->setStyleSheet(QString("color:%1;font-size:9px;background:transparent;border:0;").arg(col::label.name()));
+            m_manualHint->setWordWrap(true);
+            m_manualHint->setFixedWidth(96);
+            row->addWidget(m_manualHint);
+            auto* pb = vbox(1);
+            pb->addWidget(section("Playback"));
+            QWidget* play = choices(Playback, {}, {}, 102);
+            play->setObjectName("samplerPlayback");
+            InfoView::attach(play, "Playback", "Mono: a new slice cuts the one playing. Poly: slices play together, each to the next slice. Thru: each slice plays on to the end of the sample.");
+            pb->addWidget(play);
+            pb->addStretch(1);
+            row->addLayout(pb);
+            row->addStretch(1);
+            m_strip->addWidget(page);
+        }
+        smp->addWidget(m_strip);
         smp->addStretch(1);
         root->addLayout(smp);
         root->addWidget(vline(this));
+
+        // ---- Filter
         auto* flt = vbox(3);
-        flt->addWidget(section("Filter"));
-        flt->addWidget(new FilterDisplay(this, 120, 68, 7, 8, -1, 0));
-        flt->addLayout(knobRow(this, {7, 8}, 22));
+        auto* fh = hbox(4);
+        fh->addWidget(section("Filter"));
+        QWidget* fon = toggle(FilterOn, "On", 26);
+        fon->setObjectName("samplerFilterOn");
+        InfoView::attach(fon, "Filter", "Switches the filter in or out of the sound.");
+        fh->addWidget(fon);
+        QWidget* ft = choices(FilterType, {}, filterIcon, 72);
+        InfoView::attach(ft, "Filter Type", "Low-pass, high-pass, band-pass or notch.");
+        fh->addWidget(ft);
+        fh->addStretch(1);
+        flt->addLayout(fh);
+        flt->addWidget(new FilterDisplay(this, 140, 60, Cutoff, Reso, FilterType, 0));
+        auto* fr = hbox(0);
+        QWidget* fq = knob(Cutoff, 20, "Freq"); help(fq, "Frequency", "The filter's cutoff. Drag the dot in the display too.");
+        QWidget* rs = knob(Reso, 20, "Res");    help(rs, "Resonance", "A peak at the cutoff.");
+        QWidget* fe = knob(FilterEnv, 20, "Env", true); help(fe, "Filter Envelope", "How far the amplitude envelope opens (or closes) the filter, in octaves.");
+        fr->addWidget(fq); fr->addWidget(rs); fr->addWidget(fe); fr->addStretch(1);
+        flt->addLayout(fr);
         flt->addStretch(1);
         root->addLayout(flt);
         root->addWidget(vline(this));
+
+        // ---- LFO
+        auto* lfo = vbox(3);
+        auto* lh = hbox(4);
+        lh->addWidget(section("LFO"));
+        QWidget* lon = toggle(LfoOn, "On", 26);
+        lon->setObjectName("samplerLfoOn");
+        InfoView::attach(lon, "LFO", "Switches the LFO on: it moves the pitch, the filter and the volume by the three amounts.");
+        lh->addWidget(lon);
+        QWidget* shapes = choices(LfoShape, {}, lfoIcon, 132);
+        InfoView::attach(shapes, "LFO Shape", "Sine, triangle, saw up, saw down, square, or a new random value every cycle.");
+        lh->addWidget(shapes);
+        lh->addStretch(1);
+        lfo->addLayout(lh);
+        lfo->addWidget(new SamplerLfoDisplay(this, 190, 38));
+        auto* lr = hbox(2);
+        auto* rate = vbox(1);
+        rate->addWidget(section("Rate"), 0, Qt::AlignHCenter);
+        QWidget* lrate = chooser(LfoRate, 54);
+        InfoView::attach(lrate, "LFO Rate", "A note length of the song's tempo, or Free: the Hz knob.");
+        rate->addWidget(lrate);
+        rate->addStretch(1);
+        lr->addLayout(rate);
+        QWidget* hz = knob(LfoHz, 18, "Hz");          help(hz, "LFO Hz", "The LFO's speed when Rate is Free.");
+        QWidget* lp = knob(LfoPitch, 18, "Pitch");    help(lp, "LFO > Pitch", "How far the LFO bends the pitch, in semitones.");
+        QWidget* lf = knob(LfoFilter, 18, "Filter");  help(lf, "LFO > Filter", "How far the LFO moves the filter's cutoff, in octaves.");
+        QWidget* lv = knob(LfoVolume, 18, "Vol");     help(lv, "LFO > Vol", "How much the LFO turns the volume down and up: a tremolo.");
+        for (QWidget* w : {hz, lp, lf, lv}) lr->addWidget(w);
+        lr->addStretch(1);
+        lfo->addLayout(lr);
+        lfo->addStretch(1);
+        root->addLayout(lfo);
+        root->addWidget(vline(this));
+
+        // ---- Amp
         auto* amp = vbox(3);
         amp->addWidget(section("Amp"));
-        amp->addWidget(new AdsrDisplay(this, 148, 62, 1, 9, 10, 2));
-        amp->addLayout(knobRow(this, {1, 9, 10, 2}, 18, {"A", "D", "S", "R"}));
+        amp->addWidget(new AdsrDisplay(this, 140, 62, Attack, Decay, Sustain, Release));
+        auto* ar = hbox(0);
+        QWidget* ka = knob(Attack, 18, "A");  help(ka, "Attack", "How long a note takes to reach full level (Classic and Slice; 1-Shot uses its fades).");
+        QWidget* kd = knob(Decay, 18, "D");   help(kd, "Decay", "How long it takes to fall to the Sustain level.");
+        QWidget* ks = knob(Sustain, 18, "S"); help(ks, "Sustain", "The level while the key is held.");
+        QWidget* kr = knob(Release, 18, "R"); help(kr, "Release", "How long the sound takes to die away after the key goes up.");
+        for (QWidget* w : {ka, kd, ks, kr}) ar->addWidget(w);
+        ar->addStretch(1);
+        amp->addLayout(ar);
         amp->addStretch(1);
         root->addLayout(amp);
         root->addWidget(vline(this));
-        auto* glob = vbox(2);
-        glob->addWidget(knob(12, 22, "Vel"));
-        glob->addWidget(knob(3, 26));
-        glob->addStretch(1);
+
+        // ---- pitch and velocity
+        auto* glob = new QGridLayout;
+        glob->setContentsMargins(0, 0, 0, 0);
+        glob->setSpacing(0);
+        QWidget* tune = knob(Tune, 20, "Transp"); help(tune, "Transpose", "Shifts the pitch in semitones (every mode).");
+        QWidget* det = knob(Detune, 20, "Detune", true); help(det, "Detune", "Fine tuning, in cents.");
+        QWidget* rootK = knob(Root, 20, "Root");  help(rootK, "Root", "The key that plays the sample at its own pitch (Classic and 1-Shot).");
+        QWidget* velK = knob(Velocity, 20, "Vol<Vel"); help(velK, "Vol < Vel", "How much a note's velocity sets its level: 0 % every note the same, 100 % the full range.");
+        glob->addWidget(tune, 0, 0); glob->addWidget(det, 0, 1); glob->addWidget(rootK, 1, 0); glob->addWidget(velK, 1, 1);
+        glob->setRowStretch(2, 1);
         root->addLayout(glob);
-        setFixedWidth(674);
+        setFixedWidth(root->sizeHint().width());
     }
+
+    void refresh() override {
+        using namespace sampler;
+        DeviceBody::refresh();
+        const Device* d = device();
+        m_strip->setCurrentIndex(std::clamp(pick(Mode), 0, 2));
+        const int by = pick(SliceBy);
+        m_sens->setVisible(by == ByTransient);
+        m_div->setVisible(by == ByBeat);
+        m_regions->setVisible(by == ByRegion);
+        m_manualHint->setVisible(by == ByManual);
+        const QString name = d && !d->samplePath.isEmpty() ? QFileInfo(d->samplePath).fileName() : QString("No sample");
+        m_name->setText(m_name->fontMetrics().elidedText(name, Qt::ElideMiddle, 150));
+        m_name->setToolTip(d ? d->samplePath : QString());
+        if (!m_bpm->editing()) m_bpm->setValue(d ? d->sampleBpm : 0, false);
+    }
+
+private:
+    void setSampleBpm(double bpm, const QString& label, quintptr mergeKey = 0) {
+        {
+            EditScope edit(m_ctx.project, label, mergeKey);
+            Device* d = findDevice(m_ctx.project, m_ctx.track, m_ctx.deviceId);   // after the snapshot (see DeviceBody::edit)
+            if (!d) return;
+            d->sampleBpm = std::clamp(bpm, 0.0, 999.0);
+        }
+        emit m_ctx.project->deviceChanged();
+    }
+
+    QLabel*         m_name;
+    DragValue*      m_bpm;
+    SampleDisplay*  m_wave;
+    QStackedWidget* m_strip;
+    QWidget*        m_sens;
+    QWidget*        m_div;
+    QWidget*        m_regions;
+    QLabel*         m_manualHint;
 };
 
 // ============================================================================ Organ
