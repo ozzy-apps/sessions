@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg"
+     width="320" height="320" viewBox="0 0 320 320"
+     fill="#222221" fill-rule="evenodd"
+     role="img" aria-labelledby="sessions-icon-title sessions-icon-desc">
+  <title id="sessions-icon-title">Sessions icon</title>
+  <desc id="sessions-icon-desc">Six rounded session-track segments forming the Sessions DAW icon.</desc>
+  <g id="sessions-icon" transform="translate(33.5 56.5)">
+    <g id="session-tracks">
+      <g id="track-top">
+        <path id="top-left" d="M 50 0 H 162 Q 170 0 170 8 V 49 Q 170 57 162 57 H 4 Q 0 57 0 53 C 0 24 22 0 50 0 Z"/>
+        <rect id="top-right" x="184" y="0" width="68" height="57" rx="8"/>
+      </g>
+      <g id="track-middle">
+        <path id="middle-left" d="M 4 73 H 162 Q 170 73 170 81 V 123 Q 170 131 162 131 H 50 C 22 131 0 107 0 78 Q 0 73 4 73 Z"/>
+        <path id="middle-right" d="M 192 73 H 201 C 230 73 253 96 253 125 V 127 Q 253 131 249 131 H 192 Q 184 131 184 123 V 81 Q 184 73 192 73 Z"/>
+      </g>
+      <g id="track-bottom">
+        <path id="bottom-left" d="M 8 148 H 132 Q 140 148 140 156 V 199 Q 140 207 132 207 H 27 C 12 207 0 195 0 180 V 156 Q 0 148 8 148 Z"/>
+        <path id="bottom-right" d="M 163 148 H 249 Q 253 148 253 152 V 156 C 253 184 231 207 203 207 H 163 Q 155 207 155 199 V 156 Q 155 148 163 148 Z"/>
+      </g>
+    </g>
+  </g>
+</svg>

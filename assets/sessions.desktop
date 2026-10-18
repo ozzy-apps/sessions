@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Sessions
+Comment=Clip-based music sequencer
+Exec=sessions %f
+Icon=sessions
+Terminal=false
+Categories=AudioVideo;Audio;Music;
+MimeType=application/x-sessions-set;
+StartupWMClass=sessions

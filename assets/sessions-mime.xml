@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Installed as /usr/share/mime/packages/sessions.xml; dpkg's shared-mime-info trigger updates the database. -->
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="application/x-sessions-set">
+    <comment>Sessions set</comment>
+    <sub-class-of type="application/json"/>
+    <glob pattern="*.sessions"/>
+  </mime-type>
+</mime-info>
