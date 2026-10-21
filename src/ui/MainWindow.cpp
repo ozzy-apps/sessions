@@ -23,6 +23,7 @@
 #include "audio/Nam.h"
 #include "audio/Engine.h"
 #include "audio/MidiInput.h"
+#include "core/ApcKey25.h"
 #include "MapOverlay.h"
 #include "Preferences.h"
 #include "AppIcon.h"
@@ -117,6 +118,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_mapper = new Mapper(m_project, m_transport, this);
     m_midi = new audio::MidiInput(this);
     m_surface = new ControlSurface(m_project, m_transport, m_mapper, this);
+    m_apc = new ApcKey25(m_project, m_transport, m_mapper, this);
+    m_apc->setSender([this](const QString& port, const QByteArray& message) { m_midi->send(port, message); });
 
     auto* central = new QWidget(this);
     auto* root = new QVBoxLayout(central);
@@ -247,6 +250,25 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_midi, &audio::MidiInput::machineControl, this, [this](const QString& source, int command) {
         if (m_mapper->mode() == Mapper::Mode::Off) m_surface->machineControl(source, command);
     });
+    // The APC Key 25: its pads play the Session View's box, its lights follow (ApcKey25.h).
+    m_apc->setDeviceChoice([this] {
+        const QList<int> selected = m_deviceView->selection();
+        if (!selected.isEmpty()) return selected.first();
+        return m_deviceView->expandedEditor() ? m_deviceView->expandedEditor()->ctx().deviceId : 0;
+    });
+    connect(m_midi, &audio::MidiInput::portsChanged, this, &MainWindow::updateApc);
+    connect(m_apc, &ApcKey25::boxChanged, this, [this] {
+        updateApcBox();
+        if (!m_apc->connected()) return;
+        m_session->grid()->ensureVisible(m_apc->firstScene() + ApcKey25::kRows - 1);   // the box's scenes come into view
+        m_session->grid()->ensureVisible(m_apc->firstScene());
+    });
+    connect(m_apc, &ApcKey25::clipChosen, this, [this](int t, int s) { selectTrack(t); selectClip(m_project->tracks[t].clipSlots[s]); showClipView(true); });
+    connect(m_apc, &ApcKey25::trackChosen, this, &MainWindow::selectTrack);
+    connect(m_apc, &ApcKey25::sceneLaunched, this, [this](int scene) { m_session->grid()->ensureVisible(scene); });
+    connect(m_apc, &ApcKey25::message, this, [this](const QString& title, const QString& text) { m_info->show(title, text); });
+    connect(m_project, &Project::structureChanged, this, &MainWindow::updateApcBox);
+    connect(m_project, &Project::restored, this, &MainWindow::updateApcBox);
     connect(m_clipTab, &QToolButton::clicked, this, [this] { showClipView(true); });
     connect(m_deviceTab, &QToolButton::clicked, this, [this] { showClipView(false); });
 
@@ -317,9 +339,18 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         const int request = ++m_previewRequest;   // only the last file clicked plays
         samples::loadAsync({path}, this, [this, path, request](QVector<SamplePtr> loaded, QStringList errors) {
             if (request != m_previewRequest) return;
-            if (loaded.value(0)) m_engine->previewSample(loaded[0]);
-            else m_info->show("Can't preview " + QFileInfo(path).fileName(), errors.value(0));
+            if (loaded.value(0)) { m_engine->previewSample(loaded[0]); m_browser->previewStarted(path); }
+            else { m_browser->previewEnded(); m_info->show("Can't preview " + QFileInfo(path).fileName(), errors.value(0)); }
         });
+    });
+    connect(m_browser, &Browser::previewStopRequested, this, [this] {
+        ++m_previewRequest;   // a file still loading doesn't start afterwards
+        m_engine->stopPreview();
+    });
+    m_browser->setPreviewProbe([this] {
+        if (m_engine->previewPlaying()) return true;
+        m_engine->stopPreview();   // played to its end: let the sample go
+        return false;
     });
     setAcceptDrops(true);
 
@@ -335,6 +366,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_engine->setInputDevice(PreferencesDialog::inputDevice());
     m_transport->setCountInBars(PreferencesDialog::countInBars());
     m_engine->start();
+    updateApc();
 
     selectClip(m_project->selectedClip);
     showSession(true);
@@ -353,6 +385,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+    m_apc->darken();        // the controller's lights go out with the window
+    m_apc->setSender({});
     m_engine->shutdown();   // stop the audio thread before anything it reads goes away
     // The project and transport are deleted after this destructor has run, and the undo
     // stack's clear() still emits cleanChanged: nothing may call back into this window.
@@ -769,6 +803,7 @@ void MainWindow::openStartupSet() {
 void MainWindow::showPreferences() {
     PreferencesDialog dlg(m_engine, m_midi, [this] { restartReopeningSet(); }, this);
     connect(&dlg, &PreferencesDialog::midiControllerSettingsChanged, m_surface, &ControlSurface::reloadSettings);
+    connect(&dlg, &PreferencesDialog::midiControllerSettingsChanged, this, &MainWindow::updateApc);
     dlg.exec();
     m_transport->setCountInBars(PreferencesDialog::countInBars());
 }
@@ -1223,25 +1258,56 @@ bool MainWindow::eventFilter(QObject* obj, QEvent* ev) {
 
 // ---- MIDI from keyboards and controllers --------------------------------
 
+void MainWindow::updateApc() {
+    QVector<ApcKey25::Port> ports;
+    for (const audio::MidiInput::Port& p : m_midi->ports()) ports.push_back({p.id, p.name});
+    m_apc->setEnabled(QSettings("Sessions", "Sessions").value("midi/controller", "auto").toString() != "off");
+    m_apc->setPorts(ports);
+    updateApcBox();
+}
+
+void MainWindow::updateApcBox() {
+    if (m_apc->connected()) m_session->grid()->setControllerBox(m_apc->boxTracks(), m_apc->firstScene(), ApcKey25::kRows);
+    else m_session->grid()->setControllerBox({}, 0, 0);
+}
+
 void MainWindow::midiNoteOn(int channel, int pitch, int velocity) {
     if (m_mapper->note(channel, pitch, true, velocity)) return;
+    if (m_apc->takesNote(m_midi->sourceName(), channel, pitch)) {   // the APC's pads and buttons never play notes
+        if (m_mapper->mode() == Mapper::Mode::Off) m_apc->note(m_midi->sourceName(), channel, pitch, velocity, true);
+        return;
+    }
     const int key = channel << 8 | pitch;
     if (m_midiHeld.contains(key)) { m_sustained.remove(key); releaseMidiNote(key); }   // played again while held by the pedal
     const QList<int> targets = keyboardTargets();
     for (int t : targets) m_transport->noteOn(t, pitch, velocity / 127.0);
     m_midiHeld.insert(key, targets);
+    showHeldKeys();
 }
 
 void MainWindow::midiNoteOff(int channel, int pitch) {
     if (m_mapper->note(channel, pitch, false, 0)) return;
+    if (m_apc->takesNote(m_midi->sourceName(), channel, pitch)) {
+        if (m_mapper->mode() == Mapper::Mode::Off) m_apc->note(m_midi->sourceName(), channel, pitch, 0, false);
+        return;
+    }
     const int key = channel << 8 | pitch;
     if (!m_midiHeld.contains(key)) return;
-    if (m_sustain) { m_sustained.insert(key); return; }   // the pedal holds it
+    if (m_sustain) { m_sustained.insert(key); showHeldKeys(); return; }   // the pedal holds it (the key is up)
     releaseMidiNote(key);
 }
 
 void MainWindow::releaseMidiNote(int key) {
     for (int t : m_midiHeld.take(key)) m_transport->noteOff(t, key & 0x7F);
+    showHeldKeys();
+}
+
+// The piano roll lights the keys you're holding down (not the ones the pedal sustains).
+void MainWindow::showHeldKeys() {
+    QSet<int> pitches;
+    for (auto it = m_midiHeld.cbegin(); it != m_midiHeld.cend(); ++it) if (!m_sustained.contains(it.key())) pitches.insert(it.key() & 0x7F);
+    for (const HeldKey& h : m_heldKeys) pitches.insert(h.pitch);
+    m_clipView->pianoRoll()->setHeldPitches(pitches);
 }
 
 void MainWindow::midiPitchBend(int, int value) {
@@ -1253,8 +1319,10 @@ void MainWindow::midiPressure(int, int value) {
 }
 
 void MainWindow::midiControl(int channel, int controller, int value) {
-    if (m_mapper->controlChange(channel, controller, value)) return;
-    if (m_mapper->mode() == Mapper::Mode::Off && m_surface->controlChange(m_midi->sourceName(), channel, controller, value)) return;
+    const QString source = m_midi->sourceName();
+    if (m_mapper->controlChange(channel, controller, value, m_apc->isRelativeKnob(source, channel, controller))) return;
+    if (m_mapper->mode() == Mapper::Mode::Off && m_surface->controlChange(source, channel, controller, value)) return;
+    if (m_mapper->mode() == Mapper::Mode::Off && m_apc->controlChange(source, channel, controller, value)) return;
     if (controller == 1) for (int t : keyboardTargets()) m_transport->perform(t, 1, value / 127.0);   // the mod wheel
     if (controller == 64) {   // sustain pedal
         m_sustain = value >= 64;
@@ -1332,6 +1400,7 @@ bool MainWindow::midiKey(QKeyEvent* k, bool press) {
             const HeldKey h = m_heldKeys.take(key);
             for (int t : h.tracks) m_transport->noteOff(t, h.pitch);
         }
+        showHeldKeys();
         return true;
     }
     if (!press) return key == Qt::Key_Z || key == Qt::Key_X || key == Qt::Key_C || key == Qt::Key_V;
@@ -1350,6 +1419,7 @@ bool MainWindow::midiKey(QKeyEvent* k, bool press) {
 void MainWindow::releaseMidiKeys() {
     for (const HeldKey& h : m_heldKeys) for (int t : h.tracks) m_transport->noteOff(t, h.pitch);
     m_heldKeys.clear();
+    showHeldKeys();
 }
 
 // ---- edit commands ------------------------------------------------------

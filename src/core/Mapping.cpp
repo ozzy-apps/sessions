@@ -94,19 +94,42 @@ void Mapper::learn(const Mapping& m) {
     emit changed();
 }
 
-bool Mapper::controlChange(int channel, int cc, int value) {
-    if (m_mode == Mode::Midi && !m_selected.isEmpty()) { learn({Mapping::MidiCC, channel, cc, m_selected}); return true; }
+bool Mapper::looksRelative(const QVector<int>& values) {
+    if (values.size() < 2) return false;
+    bool repeats = false, up = false, down = false;
+    for (int i = 0; i < values.size(); ++i) {
+        const int v = values[i];
+        if (v >= 1 && v <= 15) up = true;
+        else if (v >= 113 && v <= 127) down = true;
+        else return false;   // an absolute knob passes through the middle
+        if (i > 0 && values[i - 1] == v) repeats = true;   // an absolute knob never sends the same value twice running
+    }
+    return repeats || (up && down);
+}
+
+bool Mapper::controlChange(int channel, int cc, int ccValue, bool relative) {
     const int key = channel << 8 | cc;
+    if (m_mode == Mode::Midi && !m_selected.isEmpty()) {
+        if (key != m_learnKey || m_selected != m_learnTarget) { m_learnKey = key; m_learnTarget = m_selected; m_learnValues.clear(); }
+        m_learnValues.push_back(ccValue);
+        Mapping m{Mapping::MidiCC, channel, cc, m_selected};
+        m.relative = mapping::isContinuous(m_selected) && (relative || looksRelative(m_learnValues));
+        learn(m);
+        return true;
+    }
     const int last = m_lastCC.value(key, 0);
-    m_lastCC.insert(key, value);
+    m_lastCC.insert(key, ccValue);
     bool handled = false;
     const QVector<Mapping> ms = m_project->mappings;
     for (const Mapping& m : ms) {
         if (m.source != Mapping::MidiCC || m.channel != channel || m.number != cc) continue;
         handled = true;
-        if (mapping::isContinuous(m.target)) setValue(m.target, value / 127.0);
-        else if (value >= 64 && last < 64) trigger(m.target, true);
-        else if (value < 64 && last >= 64) trigger(m.target, false);
+        if (mapping::isContinuous(m.target) && (m.relative || relative)) {   // an endless knob steps the value (also a map learned as absolute)
+            const int delta = ccValue < 64 ? ccValue : ccValue - 128;
+            setValue(m.target, value(m.target) + delta / 127.0);
+        } else if (mapping::isContinuous(m.target)) setValue(m.target, ccValue / 127.0);
+        else if (ccValue >= 64 && last < 64) trigger(m.target, true);
+        else if (ccValue < 64 && last >= 64) trigger(m.target, false);
     }
     return handled;
 }
@@ -192,6 +215,26 @@ void Mapper::setValue(const QString& tgt, double v) {
         EditScope e(m_project, "Tempo", mixerMergeKey(0, 99));
         m_project->setTempo(60 + std::round(v * 127));   // the CC's 128 steps: 60 .. 187 BPM
     }
+}
+
+double Mapper::value(const QString& tgt) const {
+    const QStringList p = tgt.split(':');
+    if (p.value(0) == "track" || p.value(0) == "device") {
+        const Track* t = m_project->trackAt(trackIndex(p.value(1).toInt()));
+        if (!t) return 0;
+        if (p.value(0) == "device") {
+            for (const Device& d : t->devices) if (d.id == p.value(2).toInt()) return d.params.value(p.value(3).toInt()).value;
+            return 0;
+        }
+        if (p.value(2) == "volume") return t->volume;
+        if (p.value(2) == "pan") return (t->pan + 1) / 2;
+        if (p.value(2) == "send") return t->sends.value(p.value(3).toInt());
+        return 0;
+    }
+    if (tgt == "main:volume") return m_project->mainVolume;
+    if (tgt == "main:cue") return m_project->cueVolume;
+    if (tgt == "tempo") return std::clamp((m_project->tempo - 60) / 127.0, 0.0, 1.0);
+    return 0;
 }
 
 void Mapper::trigger(const QString& tgt, bool on) {

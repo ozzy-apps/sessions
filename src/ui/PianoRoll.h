@@ -11,6 +11,8 @@
 //    start / loopStart): drag ▶ to begin playing elsewhere, ◀ for the length.
 //  - velocity lane: drag stems; selected notes move together
 //  - keyboard: click a key to select all notes of that pitch
+//  - keys you play (a MIDI keyboard, the computer keyboard, a key clicked here) light up in the
+//    record red on the keyboard, with a faint band along their rows
 //  - scale (from the clip's Notes tab): in-scale rows are lit, the root marked;
 //    Fold shows only the rows in the scale, or only rows that hold notes
 
@@ -50,6 +52,8 @@ public:
     void   setFollow(bool on);          // independent from Arrangement follow
     bool   follow() const { return m_follow; }
     void   clampView();   // the view never runs off before 1.1.1 or far past the clip's end
+    void   setHeldPitches(const QSet<int>& pitches);   // the keys being played now (MainWindow)
+    QSet<int> litPitches() const;                       // what the keyboard shows lit: those and a key held here
     static constexpr int kRulerH = 16;   // the ruler's height: the brace in its top 5 px, the markers below
 
 signals:
@@ -120,6 +124,8 @@ private:
     int        m_velAnchor = -1;
     bool       m_editOpen = false;
     int        m_lastPreviewPitch = -1;
+    QSet<int>  m_held;            // played on a keyboard
+    int        m_keyDown = -1;    // a key held down here with the mouse
 };
 
 } // namespace sessions

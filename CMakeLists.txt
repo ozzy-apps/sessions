@@ -28,6 +28,7 @@ set(SESSIONS_SOURCES
     src/core/Import.cpp
     src/core/Mapping.cpp
     src/core/ControlSurface.cpp
+    src/core/ApcKey25.cpp
     src/core/DeviceSpecs.cpp
     src/core/OsmiumPresets.cpp
     src/core/ArrangementOps.cpp
@@ -152,7 +153,7 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
     add_executable(sessions_group_fades tests/group_fades.cpp)
     target_link_libraries(sessions_group_fades PRIVATE sessions_core)
     add_test(NAME group_fades COMMAND sessions_group_fades)
-    foreach(workflow IN ITEMS arrangement_workflow clip_follow control_surface)
+    foreach(workflow IN ITEMS arrangement_workflow clip_follow control_surface apc_key25)
         add_executable(sessions_${workflow} tests/${workflow}.cpp)
         target_link_libraries(sessions_${workflow} PRIVATE sessions_core Qt6::Test)
         add_test(NAME ${workflow} COMMAND sessions_${workflow})

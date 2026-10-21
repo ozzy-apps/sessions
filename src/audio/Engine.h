@@ -154,6 +154,11 @@ public:
 
     // Browser preview: plays a sample once on the main output at the cue level (nullptr stops it).
     void previewSample(const SamplePtr& sample);
+    void stopPreview() { if (m_preview) previewSample(nullptr); }
+    // A preview was started and the audio thread hasn't reached its end (or hasn't picked it up yet).
+    bool previewPlaying() const {
+        return m_preview && (m_fbPreviewSerial.load(std::memory_order_acquire) != m_previewSerial || m_fbPreviewOn.load(std::memory_order_acquire));
+    }
 
     // ---- audio input (UI thread)
     // The capture stream opens while it's wanted (an armed or monitoring audio track) and
@@ -332,6 +337,8 @@ private:
     std::atomic<double>  m_fbCountIn{0};
     std::atomic<quint64> m_doneSeq{0};
     std::atomic<quint64> m_fbGeneration{0};
+    std::atomic<quint64> m_fbPreviewSerial{0};   // the preview serial the audio thread plays (or finished)
+    std::atomic<bool>    m_fbPreviewOn{false};   // and whether it's still sounding
     std::atomic<float>   m_cpu{0};
     struct AtomicStatus {
         std::atomic<int> playingSlot{-1}, queuedSlot{-2};

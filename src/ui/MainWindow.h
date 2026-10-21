@@ -37,6 +37,7 @@ class InfoView;
 class ThemeEditor;
 class OverviewBar;
 class ControlSurface;
+class ApcKey25;
 struct ArrangementClip;
 
 class MainWindow : public QMainWindow {
@@ -61,6 +62,9 @@ public:
     audio::Engine*   engine() const { return m_engine; }
     Mapper*          mapper() const { return m_mapper; }
     ControlSurface*  controlSurface() const { return m_surface; }
+    ApcKey25*        apcKey25() const { return m_apc; }
+    Browser*         browser() const { return m_browser; }
+    ClipView*        clipView() const { return m_clipView; }
     MapOverlay*      mapOverlay() const { return m_overlay; }
     // MIDI Map / Key Map mode (Ctrl+M / Ctrl+K; Esc leaves): clicks select a control instead of using it.
     void             setMapMode(Mapper::Mode mode);
@@ -151,6 +155,7 @@ private:
     void midiPitchBend(int channel, int value);      // to the tracks the keyboard plays
     void midiPressure(int channel, int value);
     void releaseMidiNote(int key);
+    void showHeldKeys();                             // the piano roll lights the keys held down
     // Computer MIDI keyboard.
     void setMidiKeyboard(bool on);
     bool midiKey(QKeyEvent* k, bool press);
@@ -208,6 +213,9 @@ private:
     // MIDI input and mappings
     audio::MidiInput* m_midi = nullptr;
     ControlSurface* m_surface = nullptr;
+    ApcKey25*       m_apc = nullptr;
+    void            updateApc();      // ports and profile (MIDI ports came or went, Preferences)
+    void            updateApcBox();   // the Session View's outline of the pads
     Mapper*         m_mapper = nullptr;
     MapOverlay*     m_overlay = nullptr;
     QAction*        m_keyMapAction = nullptr;

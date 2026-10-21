@@ -518,7 +518,11 @@ QByteArray toJson(const EditState& s, const Extras& x, const QString& baseDir) {
     if (!x.mappings.isEmpty()) {
         QJsonArray maps;
         for (const Mapping& m : x.mappings)
-            maps.append(QJsonObject{{"source", kSources[int(m.source)]}, {"channel", m.channel}, {"number", m.number}, {"target", m.target}});
+        {
+            QJsonObject o{{"source", kSources[int(m.source)]}, {"channel", m.channel}, {"number", m.number}, {"target", m.target}};
+            if (m.relative) o.insert("relative", true);   // absent: absolute (older sets)
+            maps.append(o);
+        }
         root.insert("mappings", maps);
     }
     return QJsonDocument(root).toJson(QJsonDocument::Indented);
@@ -583,6 +587,7 @@ bool fromJson(const QByteArray& json, EditState& stateOut, Extras& extrasOut, QS
         const QJsonObject m = v.toObject();
         Mapping map{Mapping::Source(wordIndex(kSources, m.value("source"), 0)), std::clamp(integer(m, "channel", 0), 0, 15),
                     integer(m, "number", 0), text(m, "target")};
+        map.relative = flag(m, "relative", false);
         if (!map.target.isEmpty()) x.mappings.push_back(map);
     }
     for (const QJsonValue& v : root.value("scenes").toArray()) s.scenes.push_back(v.toString());

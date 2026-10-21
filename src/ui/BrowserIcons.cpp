@@ -11,7 +11,7 @@ namespace {
 const char* name(Symbol s) {
     static const char* names[] = {"sounds", "drums", "instrument", "audio-effect", "guitar", "midi-effect", "impulse", "library",
         "folder", "folder-open", "add-folder", "project", "sample", "capture", "clip", "preset", "rack", "sampler", "wavetable", "fm", "oscillator",
-        "search", "headphones", "chevron-right", "chevron-down", "close"};
+        "search", "headphones", "chevron-right", "chevron-down", "close", "stop"};
     return names[int(s)];
 }
 QByteArray svg(Symbol symbol) {

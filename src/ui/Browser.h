@@ -12,7 +12,9 @@
 // Laid out: a sidebar (Categories, then Places: User Library (your presets), your
 // sample folders, the current set's folder and Add Folder…) next to the content pane. Folders are
 // remembered in QSettings "browser/folders"; right-click one to remove it. Clicking a
-// sample previews it when the headphones Preview control is on. The sidebar divider is resizable;
+// sample previews it when the headphones Preview control is on; while one plays, the bar beside it
+// names it and offers Stop. Esc in the list, turning Preview off, loading an item or clicking one
+// that isn't a sample stops it too. The sidebar divider is resizable;
 // category/item decoration uses the embedded theme-colored SVGs in BrowserIcons.
 //
 // The content pane is a tree (0.22): a sample folder shows its subfolders as nodes you open and
@@ -24,6 +26,7 @@
 #include <QWidget>
 
 #include <QSet>
+#include <functional>
 
 class QLineEdit;
 class QListWidget;
@@ -33,6 +36,7 @@ class QTreeWidgetItem;
 class QMimeData;
 class QToolButton;
 class QLabel;
+class QTimer;
 
 namespace sessions {
 
@@ -60,9 +64,17 @@ public:
     void showCategory(const QString& name);  // e.g. irCategory()
     void addIrFolder(const QString& dir);    // an IR folder (import::addIrFolder); shows it
 
+    // Preview state, from the window: `probe` says whether the engine still plays the preview.
+    void setPreviewProbe(std::function<bool()> probe) { m_previewProbe = std::move(probe); }
+    void previewStarted(const QString& path);   // shows the name and Stop until the probe says it ended
+    void previewEnded();                        // hides them (no signal)
+    void stopPreview();                         // the user's Stop: previewStopRequested(), then previewEnded()
+    QString previewing() const { return m_previewing; }   // the playing preview's path ("" = none)
+
 signals:
     void itemActivated(const QString& name, QChar kind);
     void previewRequested(const QString& path);   // a sample was clicked with Preview on
+    void previewStopRequested();                  // Stop, Esc, Preview off, or another item chosen
 
 private:
     void rebuild();
@@ -73,6 +85,7 @@ private:
     QTreeWidgetItem* node(QTreeWidgetItem* parent, const QString& text, const QString& key, const QString& path = {});   // a folder: open when it was
     void addFiles(QTreeWidgetItem* parent, const QString& dir, const QStringList& rel, const QString& filter);   // a folder's files as a tree
     void itemMenu(const QPoint& pos);
+    bool eventFilter(QObject* watched, QEvent* event) override;
 
     QLineEdit*   m_search;
     QListWidget* m_categories;
@@ -82,6 +95,12 @@ private:
     QLabel* m_location;
     QLabel* m_count;
     QLabel* m_previewName;
+    QToolButton* m_previewStop;
+    QTimer* m_previewTimer;
+    QString m_previewing;
+    bool    m_previewPending = false;   // requested, not started yet (the file is loading)
+    std::function<bool()> m_previewProbe;
+    void    showPreviewName();
     QString      m_category = "Instruments";
     QStringList  m_folders;
     QString      m_projectFolder;

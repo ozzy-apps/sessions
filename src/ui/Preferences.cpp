@@ -249,7 +249,7 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     controllerForm->setSpacing(6);
     auto* profile = new QComboBox(controller);
     profile->setObjectName("controllerProfile");
-    profile->addItem("Automatic: Nektar Impact LX49+ / LX61+", "auto");
+    profile->addItem("Automatic: Nektar Impact LX49+ / LX61+, Akai APC Key 25", "auto");
     profile->addItem("Off", "off");
     profile->setCurrentIndex(std::max(0, profile->findData(settings().value("midi/controller", "auto"))));
     controllerForm->addRow("Profile", profile);
@@ -286,7 +286,8 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     });
     rows->addWidget(row("Control surface", controller,
         "LX49+/61+: select User Preset 2 (GM Mixer), Global MIDI channel 16. Faders 1–8: volume; knobs: pan; buttons: mute; fader 9: Master. "
-        "Transport accepts MMC. Custom MIDI Maps take priority.", midiTab));
+        "Transport accepts MMC. APC Key 25 (either model): the pads launch the clips in the red box on the Session View; "
+        "Shift + track buttons 1–4 move it, 5–8 set the knobs to Volume, Pan, Send or Device. Custom MIDI Maps take priority.", midiTab));
     rows->addStretch(1);
     connect(m_ports, &QListWidget::itemChanged, this, [this](QListWidgetItem* it) {
         m_midi->setEnabled(it->data(Qt::UserRole).toString(), it->checkState() == Qt::Checked);

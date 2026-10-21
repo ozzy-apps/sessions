@@ -106,6 +106,8 @@ Clip slots keep the same size however big the window is; drag the divider betwee
 
 **Panes** (0.17): drag the divider right of the browser to make it wider. The Device View's pane is exactly as high as the devices need and its divider is fixed; the Clip View's pane (the piano roll) can be dragged as high as you like, and comes back at that height.
 
+**Played keys** light up on the piano roll's keyboard in the record red, with a faint band along their rows, while you hold them: from a MIDI keyboard, the computer MIDI keyboard or a key clicked there. A key the sustain pedal holds goes dark when you let go.
+
 ## MIDI keyboards and controllers
 
 Plug in a MIDI keyboard and play: Sessions connects every MIDI input it finds (Edit → Preferences → MIDI lists them), and plays the armed track or the selected one. Recording works as with the computer keyboard, and the sustain pedal holds notes. The ● next to KEY / MIDI in the control bar lights up when MIDI comes in.
@@ -115,6 +117,10 @@ Plug in a MIDI keyboard and play: Sessions connects every MIDI input it finds (E
 **MIDI Map** (Ctrl+M or the MIDI button): click a fader, knob, button, clip slot or scene, then move a knob or hit a pad on your controller, and it's mapped. **Key Map** (Ctrl+K or KEY) does the same with computer keys, handy for launching clips. Delete removes a mapping, Esc leaves the mode, and mappings are saved with the set.
 
 **Nektar Impact LX49+ / LX61+** (0.38): automatic input profile for User Preset 2, with banked volume/pan/mute, Master on Global channel 16, optional pickup and MMC transport. Configure it in Preferences → MIDI; custom maps take priority. See the [setup guide](docs/nektar-impact.md) for hardware settings and current integration limits.
+
+**Akai APC Key 25** (2014 model and mk2): automatic clip-launcher profile. Its pads launch the clips in a red box of 8 tracks × 5 scenes on the Session View, and light up in the clips' colours (green when playing, blinking when queued). The scene buttons launch scenes, Stop All Clips stops them, Play and Rec run the transport, and the track buttons do Clip Stop, Solo, Rec Arm, Mute or Select (Shift + a scene button picks). Shift + track buttons 1–4 move the box; 5–8 set the knobs to Volume, Pan, Send or Device (Osmium's Macro 1–8). The keys play as before; the pads no longer play notes. See the [APC Key 25 guide](docs/apc-key-25.md).
+
+A knob on an endless (relative) controller, such as the APC Key 25 mk2's, is recognised when you MIDI Map it: it steps the value from where it is instead of jumping between the ends.
 
 ## Session View
 
@@ -138,7 +144,7 @@ Updated in **0.34.0**.
 
 The browser uses original SVG icons for categories, instruments, effects, captures, samples and clips. Folder arrows, open-folder icons, subtle hierarchy guides and child counts make nested libraries easier to scan. Drag the internal divider to resize the categories column; its width is remembered. The header shows the current location and total items, and search keeps exact file/device names separate from their icons.
 
-The **headphones Preview** control toggles sample audition at the Cue volume. The selected sample's filename appears beside it. Colors follow Dark, Light and custom themes without resetting the selected item or expanded folders.
+The **headphones Preview** control toggles sample audition at the Cue volume. The selected sample's filename appears beside it. While a sample plays, its name shows in the text colour with a **■ Stop** button; Esc in the list, turning Preview off, loading an item or clicking one that isn't a sample stops it too, and the button goes away when the sample has played out. Colors follow Dark, Light and custom themes without resetting the selected item or expanded folders.
 
 Osmium's **Voice & mixer** page also uses the available width to fit more controls per row, retaining the larger knob centers and separate modulation rings.
 

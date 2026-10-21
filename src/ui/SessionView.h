@@ -67,6 +67,10 @@ public:
     // MIDI / Key Map: the visible slots, scene launchers and stop buttons, and their targets.
     QVector<QPair<QRect, QString>> mapCells() const;
     QString mapTargetAt(const QPoint& p) const;
+    // A clip launcher's box (the APC Key 25's 8 × 5 pads): the tracks under its columns
+    // (-1: none) from `firstScene`, `scenes` rows; outlined in the record red. Empty: no box.
+    void setControllerBox(const QVector<int>& tracks, int firstScene, int scenes);
+    QRect controllerBoxRect() const;    // where the outline is drawn (empty when none shows)
 
     Sel selectionKind() const { return m_selKind; }
     int selectedTrack() const { return m_selTrack; }
@@ -140,6 +144,7 @@ private:
     Transport* m_transport;
     int m_rowH = 20, m_headerH = 20, m_stopH = 18, m_mainW = 120, m_gap = 1;
     int m_firstRow = 0;   // first scene shown
+    QVector<int> m_boxTracks; int m_boxScene = 0, m_boxScenes = 0;   // setControllerBox
     static constexpr int kSceneNumberW = 18;
     Sel m_selKind = Sel::Slot;
     int m_selTrack = 0, m_selScene = 0;

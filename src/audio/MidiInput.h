@@ -6,6 +6,9 @@
 //
 // Events are read on the UI thread through a socket notifier on the sequencer and come out
 // as signals. Without ALSA at build time this compiles to an input that's never available.
+//
+// It also sends: "Sessions: MIDI Out" delivers messages straight to a device's port by
+// name, for control surfaces' lights (the APC Key 25's pads). Nothing is routed there otherwise.
 
 #include <QObject>
 #include <QSet>
@@ -39,6 +42,10 @@ public:
     void    injectSysEx(const QByteArray& message, const QString& sourceName = {});
     QString sourceName() const { return m_sourceName; } // source of the signal currently being delivered
 
+    // One MIDI message (note, CC or a complete SysEx) to the writable port with this name
+    // (as ports() names it). False when it couldn't be delivered; sent() is emitted either way.
+    bool    send(const QString& portName, const QByteArray& message);
+
 signals:
     void noteOn(int channel, int pitch, int velocity);   // velocity 1..127
     void noteOff(int channel, int pitch);
@@ -48,6 +55,7 @@ signals:
     void activity();                                     // any message (the control bar's light)
     void portsChanged();                                 // a device came or went
     void machineControl(const QString& sourceName, int command);
+    void sent(const QString& portName, const QByteArray& message);   // every message send() was given (tests)
 
 private:
     void readEvents();
@@ -55,6 +63,9 @@ private:
 
     _snd_seq*     m_seq = nullptr;
     int           m_port = -1;
+    int           m_outPort = -1;   // "MIDI Out" (when the sequencer opened for output too)
+    QHash<QString, QString> m_writable;   // port name -> "client:port", ports we can send to
+    void    findWritable();
     QString       m_status;
     QSet<QString> m_connected;   // port ids we're subscribed to
     QHash<QString, QString> m_sourceNames;

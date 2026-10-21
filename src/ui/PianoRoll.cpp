@@ -91,6 +91,18 @@ int PianoRoll::ownerTrack() const {
     return t;
 }
 
+void PianoRoll::setHeldPitches(const QSet<int>& pitches) {
+    if (pitches == m_held) return;
+    m_held = pitches;
+    update(QRect(0, m_rulerH, width(), rows() * m_rowH));
+}
+
+QSet<int> PianoRoll::litPitches() const {
+    QSet<int> lit = m_held;
+    if (m_keyDown >= 0) lit.insert(m_keyDown);
+    return lit;
+}
+
 void PianoRoll::preview(int pitch, double velocity) {
     m_lastPreviewPitch = pitch;
     m_transport->previewNote(ownerTrack(), pitch, velocity);
@@ -261,6 +273,7 @@ void PianoRoll::paintEvent(QPaintEvent*) {
     if (owner >= 0) for (const Device& d : m_project->tracks[owner].devices) if (!rack && deviceType(d.name) == DeviceType::DrumRack) rack = &d;
     QHash<int, QString> padInstruments;
     if (rack) for (const Device& d : m_project->tracks[owner].devices) if (d.rack == rack->id && d.kind == DeviceKind::Instrument) padInstruments.insert(d.chain, d.name);
+    const QSet<int> lit = litPitches();
     for (int r = 0; r < R; ++r) {
         const int pitch = pitchAtRow(r);
         const int y = m_rulerH + r * m_rowH;
@@ -272,14 +285,16 @@ void PianoRoll::paintEvent(QPaintEvent*) {
             row = in ? theme::rollInScale : theme::rollOutScale;
             if (in && ((pitch - m_clip->scaleRoot) % 12 + 12) % 12 == 0) row = theme::rollRoot;
         }
+        const bool held = lit.contains(pitch);
         p.fillRect(QRect(m_keyW, y, W, m_rowH), row);
-        p.fillRect(QRect(0, y, m_keyW - 1, m_rowH - 1), bk ? theme::blackKey : theme::whiteKey);
+        if (held) p.fillRect(QRect(m_keyW, y, W, m_rowH), theme::withAlpha(theme::record, 34));   // the row of a key being played
+        p.fillRect(QRect(0, y, m_keyW - 1, m_rowH - 1), held ? theme::record : bk ? theme::blackKey : theme::whiteKey);
         const int pad = pitch - drumrack::kFirstNote;
         const bool padRow = rack && pad >= 0 && pad < rack->pads.size() && (!rack->pads[pad].samplePath.isEmpty() || padInstruments.contains(pad));
-        const bool label = m_fold ? true : pitch % 12 == 0 || padRow;
+        const bool label = m_fold ? true : pitch % 12 == 0 || padRow || held;
         if (label) {
             p.setFont(small);
-            p.setPen(bk ? theme::blackKeyText : theme::whiteKeyText);
+            p.setPen(held ? theme::onAccent : bk ? theme::blackKeyText : theme::whiteKeyText);
             p.drawText(2, y + m_rowH - 2, QString(noteName(pitch)) + QString::number(pitch / 12 - 2));
         }
         if (padRow) {
@@ -409,6 +424,7 @@ void PianoRoll::mousePressEvent(QMouseEvent* e) {
         m_selected.clear();
         for (int i = 0; i < m_clip->notes.size(); ++i) if (m_clip->notes[i].pitch == h.pitch) m_selected.insert(i);
         preview(h.pitch);
+        m_keyDown = h.pitch;   // lit while the button is down
         update();
         break;
     case Hit::Velocity: {
@@ -536,6 +552,7 @@ void PianoRoll::mouseMoveEvent(QMouseEvent* e) {
 }
 
 void PianoRoll::mouseReleaseEvent(QMouseEvent*) {
+    if (m_keyDown >= 0) { m_keyDown = -1; update(); }
     if (m_drag == Drag::Box && m_clip) {
         QRectF b = m_box.normalized();
         double b0 = xToBeat(b.left()), b1 = xToBeat(b.right());

@@ -1,5 +1,84 @@
 # Sessions — handoff
 
+## Next milestone · APC Key 25, relative knobs, preview Stop, lit piano-roll keys · version set at integration · 2026-10-21
+
+Cloud session (Claude) on branch `claude/tender-babbage-xm4lwn`. **The user expected main at 0.44.0; origin/main is `6026943` / 0.39.0** (CMake 0.39.0; the only other branches are `sampler`, `osmium-usability` and a `sessions-0.43` that points at 0.38.0). This work is built on 0.39.0 and the CMake version is left at 0.39.0 so whoever combines it with 0.40–0.44 assigns the release number; no code comment carries a version. Stack unchanged: native C++17 / Qt 6 Widgets, ALSA sequencer MIDI, immutable audio snapshots. Set files gain one optional field (a mapping's `"relative": true`); older sets load unchanged.
+
+The user asked for four things:
+
+1. **The browser preview didn't stop.** Nothing could stop it: Preview off only saved the setting, and a long file played to its end. Now:
+   - `Engine` has `stopPreview()` and `previewPlaying()`. The audio thread publishes the preview serial it plays and whether it still sounds (`m_fbPreviewSerial`, `m_fbPreviewOn`). A null preview silences the block at once.
+   - `Browser`: a **■ Stop** button (`browserPreviewStop`, the browser's new `stop.svg`) appears at the right of the preview bar while a sample plays, and the name turns to the text colour (`QLabel#browserPreviewName[playing="true"]`). Stop, Esc in the list, turning Preview off, double-clicking (loading) any item and clicking a non-sample item all stop it (`previewStopRequested`). A 100 ms probe hides Stop when the sample has played out, and MainWindow then releases the sample. Stopping also cancels a file still loading (`m_previewRequest`).
+2. **Red keys on the piano roll.** `PianoRoll::setHeldPitches()` / `litPitches()`. Held keys are painted in `theme::record`, with their name in `onAccent` and a band of the same red at alpha 34 along the row. `MainWindow::showHeldKeys()` feeds it from the MIDI keys held (pedal-sustained keys go dark when let go) and the computer MIDI keyboard. A key held down with the mouse in the roll lights too. Notes played back from clips are not lit.
+3. **Osmium knobs jumping.** The APC Key 25 mk2's knobs are endless and send two's-complement steps (1 … 63 up, 127 … 65 down; Ableton's script maps them `AccelTwoCompliment`). MIDI Map treated them as absolute, so a mapped Osmium dial flipped between its ends. Fixes in `Mapper`:
+   - `Mapping::relative`, saved as `"relative": true`;
+   - learning sets it when the controller is known to be relative (the APC hint) or when `Mapper::looksRelative()` hears a run of small step values that repeats or turns back;
+   - relative maps step the value from `Mapper::value(target)` by 1/127 a step;
+   - an APC mk2 knob mapped before this change steps too (the hint applies at run time).
+
+   Absolute maps behave exactly as before, so the smoke test's absolute 0/127 mapping checks are unchanged. A regression check drags an Osmium dial while notes play and the transport runs (33 ms editor refresh in between): the steps are even, so the on-screen path was not the cause.
+4. **APC Key 25 as a clip launcher.** New `core/ApcKey25.{h,cpp}`, an `ApcKey25` beside `ControlSurface`. Both models are recognised by name (`modelOf`).
+   - **Ports.** The mk2 is two ALSA ports: the first carries the keys and sustain, the second the pads, buttons, knobs and LEDs (from Akai's v1.1 protocol and Ableton's script). The 2014 model is one port with controls on channel 1. Roles come from `setPorts()` grouping by ALSA client; generic `MIDI 1/2` names work too.
+   - **Layout** (as in Live):
+     - pads 0–39: top row 32–39 is the box's first scene;
+     - track buttons 64–71, Stop All 81, scenes 82–86, Play 91, Rec 93, Shift 98;
+     - knobs CC 48–55.
+   - **Behaviour.** Behaviour mirrors the Session grid's own clicks:
+     - pads launch a clip, stop the track on an empty slot, or record into an armed track's empty slot;
+     - a group's pad launches its tracks' clips in that scene;
+     - releasing a pad calls `releaseSlot` (Gate);
+     - Shift + pad emits `clipChosen`.
+   - **Modes.**
+     - Track buttons: Clip Stop / Solo / Rec Arm / Mute / Select, chosen with Shift + scene. The 2014 model's order is stop, solo, arm, mute, select; the mk2's is stop, solo, mute, arm, select.
+     - Shift + track buttons 1–4 move the **box**. `visibleTracks()` respects folded groups, and the box is clamped so it stays full.
+     - Shift + track buttons 5–8 pick the knob mode: Volume / Pan / Send (pressed again: the next send) / **Device**. Device is the default and is saved in `midi/apcKnobs`. It turns the Device View's selected device (else the track's instrument) through params named `Macro 1..8` (Osmium, racks, Macros), else its first eight parameters.
+     - Knobs are relative on the mk2 (Shift: ¼ step) and absolute with Pickup on the 2014 model.
+   - **Lights** are computed in `lights()` and sent as diffs every 30 ms through `MidiInput::send`.
+     - mk2: clip colours come from the nearest bright palette entry. Playing pulses green (channels 6/3 on the beat), queued blinks green on eighths, recording pulses red, and an armed track's empty pad glows dim red. Blink and pulse are drawn in software from the transport beat (a 120 BPM clock while stopped), so no MIDI clock is sent.
+     - 2014 model: amber (stopped), green (playing) and red (recording).
+     - Track and scene LEDs show each mode's state, and the Shift overlay shows the box directions and the modes.
+     - `darken()` runs on quit and when the profile is set to Off.
+   - **Routing** (`MainWindow`): user maps first, then `takesNote()`. Nothing on the mk2's controls port plays notes, and on the 2014 model only channel-1 control notes are taken. CCs go to the Mapper (with the relative hint), then Nektar, then the APC. `updateApc()` re-reads ports (ports changed, Preferences); `updateApcBox()` redraws the outline (`ClipGrid::setControllerBox`, a 2 px `theme::record` rectangle) and scrolls the box's scenes into view when it moves.
+   - **MIDI out.** `MidiInput` opens the sequencer duplex, adds a "MIDI Out" port and sends direct to a device port by name (`send`, `sent` signal for tests). It falls back to input-only.
+   - **Preferences.** The Profile reads "Automatic: Nektar Impact LX49+ / LX61+, Akai APC Key 25", and the help names the APC controls.
+
+Tests: new suite **`tests/apc_key25.cpp` / `sessions_apc_key25`, 78 checks**:
+- port and model rules;
+- every pad, button, mode and knob path on both models, including Osmium macros, pickup and the mk2's fine Shift;
+- lights for each state, the diff and darken;
+- relative learn, stepping, legacy repair, a set-file round trip and tempo;
+- the window: pads launch without notes, the keys light the roll, the outline moves, a mapped mk2 knob steps an Osmium macro;
+- the Osmium drag;
+- the computer keyboard and sustain lighting, and the red pixels;
+- engine preview state and silence after Stop;
+- every browser stop path.
+
+Optional captures: `QT_QPA_PLATFORM=offscreen ./build/sessions_apc_key25 <dir>` writes `apc-session-box.png`, `browser-preview-stop.png` and `piano-roll-held-keys.png` (reviewed; not committed).
+
+Verification: baseline 0.39.0 passed all 14 suites before any change. After the change, the release build and **all 15 CTest suites passed (290 s, 4 cores)**:
+
+| Suite | Checks | Suite | Checks |
+| --- | --- | --- | --- |
+| smoke | 1087 | warp live | 40 |
+| Osmium UI | 71 | tempo | 39 |
+| Drum Buss | 97 | warp UI | 17 |
+| Drum Studio | 954 | resample | 15 |
+| Osmium bank | 1160 | group fades | 29 |
+| warp DSP | 89 | Arrangement workflow | 36 |
+| control surface | 48 | clip Follow | 31 |
+| **APC Key 25** | **78** | | |
+
+No existing assertion was changed. The build's only warnings are the two pre-existing `-Wnonnull` ones and smoke's deprecated `setButtonText`.
+
+Docs: `docs/apc-key-25.md` (setup, controls, lights, scope), README (preview Stop, played keys, APC, relative maps) and the manual checklist section "Next".
+
+**Next AI:**
+- Combine this with the 0.40–0.44 work the user believes is on main. Fetch origin first: if main moved, merge it into this branch, keep both sides' docs, give this update the next release number, and set CMake to it.
+- Physical APC verification is outstanding for both models: port names, LED palette and brightness channels, and the 2014 keybed channel (assumed not channel 1, as Live's single-port script implies).
+- If the mk2's knob steps feel slow, scale them in `ApcKey25::knob` (currently 1/127 a step).
+- Clip-playback notes are not lit on the roll.
+- AGENTS.md push rules apply to main. This branch is the session's designated feature branch.
+
 ## Milestone 39 · Osmium wobble basses · 0.39.0 · 2026-10-21
 
 Cloud session (Claude) on branch `claude/great-ptolemy-f8zozz`, based on origin/main **`e38f042` / 0.38.0**; origin/main was fetched again before the final run and had not moved. Stack unchanged: native C++17 / Qt 6 Widgets, Osmium's factory bank in `core/OsmiumPresets.cpp`, shared Monolith/Osmium DSP in `audio/Monolith.cpp`. No DSP, parameter index or file-format change.

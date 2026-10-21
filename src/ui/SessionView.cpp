@@ -159,6 +159,25 @@ QRect ClipGrid::slotRect(int col, int row) const {
     return QRect(x, rowTop(row), w, m_rowH);
 }
 
+void ClipGrid::setControllerBox(const QVector<int>& tracks, int firstScene, int scenes) {
+    if (tracks == m_boxTracks && firstScene == m_boxScene && scenes == m_boxScenes) return;
+    m_boxTracks = tracks; m_boxScene = firstScene; m_boxScenes = scenes;
+    update();
+}
+
+QRect ClipGrid::controllerBoxRect() const {
+    QRect box;
+    const int rows = int(m_project->scenes.size());
+    for (int t : m_boxTracks) {
+        if (t < 0 || t >= m_project->tracks.size()) continue;
+        for (int row = std::max(m_boxScene, m_firstRow); row < std::min(m_boxScene + m_boxScenes, rows); ++row) {
+            const QRect r = slotRect(t, row);
+            if (r.width() > 0 && r.bottom() < stopTop()) box |= r;
+        }
+    }
+    return box;
+}
+
 ClipGrid::Hit ClipGrid::hitTest(const QPoint& p) const {
     Hit h;
     const int nT = int(m_project->tracks.size()), cols = m_project->trackCount(), rows = int(m_project->scenes.size());
@@ -313,6 +332,11 @@ void ClipGrid::paintEvent(QPaintEvent*) {
         const int areaTop = m_headerH + m_gap, areaH = stopTop() - areaTop;
         const int barH = std::max(12, areaH * visibleRows() / rows), barY = areaTop + (areaH - barH) * m_firstRow / std::max(1, rows - visibleRows());
         p.fillRect(QRect(width() - 4, barY, 3, barH), theme::neutral);
+    }
+    if (const QRect box = controllerBoxRect(); !box.isEmpty()) {   // the clip launcher's pads (APC Key 25)
+        p.setPen(QPen(theme::record, 2));
+        p.setBrush(Qt::NoBrush);
+        p.drawRect(box.adjusted(1, 1, -1, -1));
     }
     p.restore();
 

@@ -6,7 +6,7 @@ namespace sessions::browsericons {
 enum class Symbol {
     Sounds, Drums, Instrument, AudioEffect, Guitar, MidiEffect, Impulse, Library,
     Folder, FolderOpen, AddFolder, Project, Sample, Capture, Clip, Preset, Rack,
-    Sampler, Wavetable, Fm, Oscillator, Search, Headphones, ChevronRight, ChevronDown, Close
+    Sampler, Wavetable, Fm, Oscillator, Search, Headphones, ChevronRight, ChevronDown, Close, Stop
 };
 QIcon icon(Symbol symbol, bool toggle = false);
 QIcon folder(); // closed / expanded states

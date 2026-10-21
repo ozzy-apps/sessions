@@ -374,6 +374,9 @@ QLineEdit#browserSearch { padding-left: 4px; border-radius: 3px; }
 QWidget#browserPreviewBar { background: {panel}; border-top: 1px solid {line}; }
 QToolButton#browserPreview { padding: 3px 8px; border-radius: 3px; border: 1px solid {line}; }
 QToolButton#browserPreview:checked { background: {accent}; color: {onAccent}; border-color: {accent}; }
+QLabel#browserPreviewName[playing="true"] { color: {text}; }
+QToolButton#browserPreviewStop { border-radius: 3px; border: 1px solid {line}; }
+QToolButton#browserPreviewStop:hover { border-color: {textFaint}; }
 QSplitter#browserPanes::handle { background: {line}; }
 QSplitter#browserPanes::handle:hover { background: {splitHover}; }
 QLabel#browserColumnHeader { background: {columnHeader}; color: {textSoft}; font-weight: 600; padding-left: 6px; border-bottom: 1px solid {line}; }

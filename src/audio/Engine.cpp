@@ -1990,6 +1990,7 @@ void Engine::renderBlock(float* out, int n, const float* in) {
     const float clickGain = S ? 0.35f * faderGain(S->cueVolume) : 0.0f;
     const SampleData* preview = S ? S->preview.get() : nullptr;
     if (S && S->previewSerial != m_previewPlaying) { m_previewPlaying = S->previewSerial; m_previewPos = preview ? 0 : -1; }
+    if (S && !preview) m_previewPos = -1;
     const double previewStep = preview ? preview->rate / m_sr : 0;
     const float previewGain = S ? faderGain(S->cueVolume) / faderGain(0.6) * 0.7f : 0.0f;
     const float clickDecay = onePoleCoef(0.012f, m_sr);
@@ -2020,6 +2021,10 @@ void Engine::renderBlock(float* out, int n, const float* in) {
         peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
     }
     raisePeak(m_mainPeak, peak);
+    if (S) {
+        m_fbPreviewOn.store(preview && m_previewPos >= 0, std::memory_order_release);
+        m_fbPreviewSerial.store(m_previewPlaying, std::memory_order_release);
+    }
 
     // ---- advance the clocks
     m_liveCount = 0;

@@ -17,7 +17,8 @@ QStringList offPorts() { return QSettings("Sessions", "Sessions").value("midi/of
 MidiInput::MidiInput(QObject* parent) : QObject(parent) {
 #ifdef SESSIONS_HAVE_ALSA
     snd_seq_t* seq = nullptr;
-    if (snd_seq_open(&seq, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK) < 0) {
+    bool duplex = snd_seq_open(&seq, "default", SND_SEQ_OPEN_DUPLEX, SND_SEQ_NONBLOCK) >= 0;
+    if (!duplex && snd_seq_open(&seq, "default", SND_SEQ_OPEN_INPUT, SND_SEQ_NONBLOCK) < 0) {
         m_status = "The ALSA sequencer isn't available (is the snd-seq module loaded?).";
         return;
     }
@@ -31,6 +32,8 @@ MidiInput::MidiInput(QObject* parent) : QObject(parent) {
         m_status = "Couldn't create a MIDI input port.";
         return;
     }
+    if (duplex) m_outPort = snd_seq_create_simple_port(seq, "MIDI Out", SND_SEQ_PORT_CAP_READ,
+                                                       SND_SEQ_PORT_TYPE_MIDI_GENERIC | SND_SEQ_PORT_TYPE_APPLICATION);
     snd_seq_connect_from(seq, m_port, SND_SEQ_CLIENT_SYSTEM, SND_SEQ_PORT_SYSTEM_ANNOUNCE);   // devices coming and going
     const int n = snd_seq_poll_descriptors_count(seq, POLLIN);
     std::vector<pollfd> fds(size_t(std::max(0, n)));
@@ -110,8 +113,63 @@ void MidiInput::setEnabled(const QString& portName, bool on) {
 #endif
 }
 
+// The ports a message can go to: writable MIDI ports of other clients, by the same name ports() gives.
+void MidiInput::findWritable() {
+    m_writable.clear();
+#ifdef SESSIONS_HAVE_ALSA
+    if (!m_seq || m_outPort < 0) return;
+    snd_seq_client_info_t* client;
+    snd_seq_port_info_t* port;
+    snd_seq_client_info_alloca(&client);
+    snd_seq_port_info_alloca(&port);
+    snd_seq_client_info_set_client(client, -1);
+    const int self = snd_seq_client_id(m_seq);
+    while (snd_seq_query_next_client(m_seq, client) >= 0) {
+        const int c = snd_seq_client_info_get_client(client);
+        if (c == SND_SEQ_CLIENT_SYSTEM || c == self) continue;
+        snd_seq_port_info_set_client(port, c);
+        snd_seq_port_info_set_port(port, -1);
+        while (snd_seq_query_next_port(m_seq, port) >= 0) {
+            if (!(snd_seq_port_info_get_capability(port) & SND_SEQ_PORT_CAP_WRITE)) continue;
+            if (!(snd_seq_port_info_get_type(port) & SND_SEQ_PORT_TYPE_MIDI_GENERIC)) continue;
+            const QString name = QString::fromUtf8(snd_seq_client_info_get_name(client)) + ": " + QString::fromUtf8(snd_seq_port_info_get_name(port));
+            m_writable.insert(name, QString("%1:%2").arg(c).arg(snd_seq_port_info_get_port(port)));
+        }
+    }
+#endif
+}
+
+bool MidiInput::send(const QString& portName, const QByteArray& message) {
+    emit sent(portName, message);
+#ifdef SESSIONS_HAVE_ALSA
+    if (!m_seq || m_outPort < 0 || message.isEmpty()) return false;
+    const QStringList id = m_writable.value(portName).split(':');
+    if (id.size() != 2) return false;
+    snd_seq_event_t ev;
+    snd_seq_ev_clear(&ev);
+    snd_seq_ev_set_source(&ev, m_outPort);
+    snd_seq_ev_set_dest(&ev, id[0].toInt(), id[1].toInt());
+    snd_seq_ev_set_direct(&ev);
+    const int status = uchar(message[0]), type = status & 0xF0, channel = status & 0x0F;
+    const int d1 = message.size() > 1 ? uchar(message[1]) & 0x7F : 0, d2 = message.size() > 2 ? uchar(message[2]) & 0x7F : 0;
+    if (status == 0xF0) {
+        if (uchar(message.back()) != 0xF7) return false;
+        snd_seq_ev_set_sysex(&ev, unsigned(message.size()), const_cast<char*>(message.constData()));
+    } else if (type == 0x90 && message.size() == 3) snd_seq_ev_set_noteon(&ev, channel, d1, d2);
+    else if (type == 0x80 && message.size() == 3) snd_seq_ev_set_noteoff(&ev, channel, d1, d2);
+    else if (type == 0xB0 && message.size() == 3) snd_seq_ev_set_controller(&ev, channel, d1, d2);
+    else return false;
+    if (snd_seq_event_output(m_seq, &ev) < 0) return false;
+    return snd_seq_drain_output(m_seq) >= 0;
+#else
+    Q_UNUSED(portName);
+    return false;
+#endif
+}
+
 void MidiInput::connectAll() {
 #ifdef SESSIONS_HAVE_ALSA
+    findWritable();
     m_sourceNames.clear();
     for (const Port& p : ports()) {
         m_sourceNames.insert(p.id, p.name);

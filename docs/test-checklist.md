@@ -1,5 +1,17 @@
 # Sessions — manual test checklist
 
+## Next · APC Key 25, relative knobs, preview Stop, lit piano-roll keys
+
+Built on 0.39.0 (origin/main); the release number is set when it's combined with main.
+
+1. Browser: click a long sample with Preview on → **■** appears at the right of the preview bar and the name turns to the text colour. Click **■** → silence at once. Start it again and press Esc in the list, turn Preview off, double-click an instrument, or click a preset → it stops each time. Let a short sample play out → **■** goes away by itself.
+2. Open a MIDI clip and play a MIDI keyboard → each held key is red on the piano roll's keyboard, with a faint band along its row, and goes dark when released (also with the sustain pedal down). Repeat with the computer MIDI keyboard (M) and by clicking a key in the roll.
+3. Connect an **APC Key 25 mk2** (Preferences → MIDI, Profile Automatic) → a red box on the Session View and the pads lit in the clips' colours. Follow the [APC guide](apc-key-25.md): pads launch / stop / record (armed track) and Gate release; Shift + pad shows the clip; scene buttons; Stop All; Play; Rec; Shift + track buttons 1–4 move the box (the outline and the lights follow); each track-button mode; each knob mode. Playing pads pulse with the beat, queued ones blink.
+4. Keys: the mk2's keys play the armed track while the pads play no notes. The sustain button sustains.
+5. Osmium: select an Osmium track, knobs in Device mode → knobs 1–8 turn Macro 1–8 in small steps, in both directions, without jumping. MIDI Map a knob to any Osmium dial → the same; reopen the set → still stepping. A map made with an older build steps too.
+6. With the **2014 APC Key 25**: the same, with amber clips and absolute knobs (Pickup: a knob takes over at the value on screen). Its keys (other channel) play.
+7. Profile **Off** → the pads play notes again and the lights go out; quitting Sessions darkens them too.
+
 ## 0.39 · Osmium wobble basses
 
 1. Expand Osmium and open the patch selector: a separator follows the 40 Drum & Bass sounds, then the 20 basses. Type `dubstep` → ten matches; `dnb bass` → ten matches.

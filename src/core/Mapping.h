@@ -28,6 +28,9 @@ struct Mapping {
     int     channel = 0;   // MIDI channel 0..15 (unused for keys)
     int     number = 0;    // CC or note number, or a Qt::Key
     QString target;
+    // A relative (endless) knob: values 1 .. 63 turn up, 127 .. 65 down (two's complement), and
+    // move the value by 1/127 a step instead of setting it. Learned from how the knob sends.
+    bool    relative = false;
     bool sameSource(const Mapping& o) const { return source == o.source && number == o.number && (source == Key || channel == o.channel); }
     bool operator==(const Mapping& o) const { return sameSource(o) && target == o.target; }
 };
@@ -44,7 +47,8 @@ public:
     Mapper(Project* project, Transport* transport, QObject* parent = nullptr);
 
     // Incoming messages: true when a mapping (or learning) took them, so they don't also play notes.
-    bool controlChange(int channel, int cc, int value);
+    // `relative`: the controller is known to send this CC from an endless knob (APC Key 25 mk2).
+    bool controlChange(int channel, int cc, int value, bool relative = false);
     bool note(int channel, int pitch, bool on, int velocity);
     bool key(int qtKey, bool press);
 
@@ -60,6 +64,9 @@ public:
     // Sets a target the way its control would (one undo step per gesture).
     void setValue(const QString& target, double value01);
     void trigger(const QString& target, bool on);
+    double value(const QString& target) const;       // a continuous target's value now, 0..1
+    // What learning heard: a run of small steps (1 .. 15 up, 113 .. 127 down) that repeats or turns back.
+    static bool looksRelative(const QVector<int>& values);
 
 signals:
     void changed();   // a mapping was added or removed, the selection or the mode changed
@@ -73,6 +80,9 @@ private:
     Mode       m_mode = Mode::Off;
     QString    m_selected;
     QHash<int, int> m_lastCC;   // (channel << 8 | cc) -> last value, to see a button's rising edge
+    int          m_learnKey = -1;   // the CC being learned (channel << 8 | cc) and the values it sent
+    QString      m_learnTarget;
+    QVector<int> m_learnValues;
 };
 
 } // namespace sessions

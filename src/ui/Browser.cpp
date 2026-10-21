@@ -38,6 +38,9 @@
 #include <QPainter>
 #include <QHeaderView>
 #include <QScrollBar>
+#include <QKeyEvent>
+#include <QTimer>
+#include <QStyle>
 
 namespace sessions {
 
@@ -376,13 +379,16 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
         QStringList parts = it->data(0, kPayloadRole).toString().split('|');
         if (parts.size() < 2) return;
         const QString kind = parts.takeLast();
+        stopPreview();   // it's chosen: the preview doesn't play on over what was just loaded
         emit itemActivated(parts.join('|'), kind.isEmpty() ? QChar('i') : kind.at(0));
     });
     connect(m_items, &QTreeWidget::itemClicked, this, [this](QTreeWidgetItem* it) {
         const QString payload = it->data(0, kPayloadRole).toString();
         if (payload.isEmpty() && !it->data(0, kKeyRole).toString().isEmpty()) { it->setExpanded(!it->isExpanded()); return; }   // a folder: a click opens or closes it
-        if (payload.endsWith("|s") && m_preview->isChecked()) emit previewRequested(payload.chopped(2));
+        if (payload.endsWith("|s") && m_preview->isChecked()) { m_previewPending = true; emit previewRequested(payload.chopped(2)); }
+        else if (!payload.endsWith("|s")) stopPreview();   // another kind of item: the sample stops
     });
+    m_items->installEventFilter(this);   // Esc stops the preview
     content->addWidget(m_items, 1);
     panes->addWidget(results); panes->setStretchFactor(0, 0); panes->setStretchFactor(1, 1);
     panes->setSizes({156, 180});
@@ -399,14 +405,21 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
     m_preview->setFixedHeight(28); m_preview->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_preview->setChecked(QSettings("Sessions", "Sessions").value("browser/preview", true).toBool());
     InfoView::attach(m_preview, "Preview samples", "On: clicking a sample plays it at the Cue volume. The headphones button toggles preview.");
-    connect(m_preview, &QToolButton::toggled, this, [](bool on) { QSettings("Sessions", "Sessions").setValue("browser/preview", on); });
-    m_previewName = new BrowserLabel(footer); m_previewName->setObjectName("browserPreviewName"); m_previewName->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    previewRow->addWidget(m_preview); previewRow->addWidget(m_previewName, 1); lay->addWidget(footer);
-    connect(m_items, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem* it) {
-        const QString payload = it ? it->data(0, kPayloadRole).toString() : QString();
-        m_previewName->setText(payload.endsWith("|s") ? QFileInfo(payload.chopped(2)).fileName() : QString());
-        m_previewName->setToolTip(payload.endsWith("|s") ? QDir::toNativeSeparators(payload.chopped(2)) : QString());
+    connect(m_preview, &QToolButton::toggled, this, [this](bool on) {
+        QSettings("Sessions", "Sessions").setValue("browser/preview", on);
+        if (!on) stopPreview();
     });
+    m_previewName = new BrowserLabel(footer); m_previewName->setObjectName("browserPreviewName"); m_previewName->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    m_previewStop = new QToolButton(footer); m_previewStop->setObjectName("browserPreviewStop"); m_previewStop->setAccessibleName("Stop preview");
+    m_previewStop->setIcon(browsericons::icon(Symbol::Stop)); m_previewStop->setIconSize(QSize(16, 16));
+    m_previewStop->setFixedSize(28, 28); m_previewStop->setFocusPolicy(Qt::NoFocus); m_previewStop->setToolTip("Stop preview (Esc)");
+    m_previewStop->hide();
+    InfoView::attach(m_previewStop, "Stop preview", "Stops the sample playing in the preview. Esc in the list, turning Preview off or loading an item stops it too.");
+    connect(m_previewStop, &QToolButton::clicked, this, &Browser::stopPreview);
+    previewRow->addWidget(m_preview); previewRow->addWidget(m_previewName, 1); previewRow->addWidget(m_previewStop); lay->addWidget(footer);
+    m_previewTimer = new QTimer(this); m_previewTimer->setInterval(100);
+    connect(m_previewTimer, &QTimer::timeout, this, [this] { if (!m_previewProbe || !m_previewProbe()) previewEnded(); });
+    connect(m_items, &QTreeWidget::currentItemChanged, this, [this] { showPreviewName(); });
     connect(theme::notifier(), &theme::Notifier::changed, this, &Browser::refreshAppearance);
 
     for (const QString& dir : QSettings("Sessions", "Sessions").value("browser/folders").toStringList())
@@ -414,10 +427,57 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
     rebuild();
 }
 
+// The bar names the preview while it plays (in the text colour), else the selected sample.
+void Browser::showPreviewName() {
+    QString path = m_previewing;
+    if (path.isEmpty()) {
+        const QTreeWidgetItem* it = m_items->currentItem();
+        const QString payload = it ? it->data(0, kPayloadRole).toString() : QString();
+        if (payload.endsWith("|s")) path = payload.chopped(2);
+    }
+    m_previewName->setText(path.isEmpty() ? QString() : QFileInfo(path).fileName());
+    m_previewName->setToolTip(path.isEmpty() ? QString() : QDir::toNativeSeparators(path));
+    m_previewName->setProperty("playing", !m_previewing.isEmpty());
+    m_previewName->style()->unpolish(m_previewName); m_previewName->style()->polish(m_previewName);
+}
+
+void Browser::previewStarted(const QString& path) {
+    m_previewPending = false;
+    m_previewing = path;
+    m_previewStop->show();
+    showPreviewName();
+    m_previewTimer->start();
+}
+
+void Browser::previewEnded() {
+    m_previewPending = false;
+    m_previewTimer->stop();
+    if (m_previewing.isEmpty() && m_previewStop->isHidden()) return;
+    m_previewing.clear();
+    m_previewStop->hide();
+    showPreviewName();
+}
+
+void Browser::stopPreview() {
+    if (m_previewing.isEmpty() && !m_previewPending) return;
+    emit previewStopRequested();
+    previewEnded();
+}
+
+bool Browser::eventFilter(QObject* watched, QEvent* event) {
+    if (watched == m_items && event->type() == QEvent::KeyPress && static_cast<QKeyEvent*>(event)->key() == Qt::Key_Escape
+        && (!m_previewing.isEmpty() || m_previewPending)) {
+        stopPreview();
+        return true;
+    }
+    return QWidget::eventFilter(watched, event);
+}
+
 void Browser::refreshAppearance() {
     m_search->findChild<QAction*>("browserSearchIcon")->setIcon(browsericons::icon(Symbol::Search));
     m_search->findChild<QAction*>("browserClearSearch")->setIcon(browsericons::icon(Symbol::Close));
     m_preview->setIcon(browsericons::icon(Symbol::Headphones, true));
+    m_previewStop->setIcon(browsericons::icon(Symbol::Stop));
     m_categories->viewport()->update(); m_items->viewport()->update();
 }
 
