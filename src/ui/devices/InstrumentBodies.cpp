@@ -23,6 +23,8 @@
 #include <QScrollArea>
 #include <QToolButton>
 #include <QFileInfo>
+#include <QFileDialog>
+#include <QWheelEvent>
 #include <QGuiApplication>
 #include <QMenu>
 #include <QMimeData>
@@ -1593,10 +1595,42 @@ protected:
     }
 };
 
+QHash<int,bool>& drumWaveShelves(){static QHash<int,bool> state;return state;}
+class PadShelfWave : public Display {
+public:
+    explicit PadShelfWave(DeviceBody* b):Display(b,500,126){setObjectName("drumWaveShelfDisplay");setCursor(Qt::OpenHandCursor);setMouseTracking(true);}
+    void fit(){m_zoom=1;m_start=0;update();}
+    void zoom(double factor){m_zoom=std::clamp(m_zoom*factor,1.,64.);m_start=std::clamp(m_start,0.,1-1/m_zoom);update();}
+    void draw(QPainter& p,const QRectF& r)override{
+        const auto* d=m_body->device();const int index=selectedDrumPad(m_body->ctx().deviceId);
+        const SamplePtr sample=d&&index<d->pads.size()?d->pads[index].sample:nullptr;
+        if(sample!=m_sample){m_sample=sample;fit();}
+        if(!sample){p.setPen(col::gridText);p.drawText(r,Qt::AlignCenter,"No sample on selected pad");return;}
+        const auto plot=r.adjusted(8,20,-8,-19);p.setFont(QFont(p.font().family(),7));
+        for(int ch=0;ch<2;++ch){const double center=plot.top()+plot.height()*(ch*.5+.25),half=plot.height()*.22;p.setPen(col::grid);p.drawLine(QPointF(plot.left(),center),QPointF(plot.right(),center));
+            p.setPen(ch?col::cyan:col::curve);for(int x=0;x<int(plot.width());++x){float lo,hi;const double a=(m_start+x/plot.width()/m_zoom)*sample->seconds(),b=(m_start+(x+1)/plot.width()/m_zoom)*sample->seconds();sample->range(a,b,lo,hi,ch);p.drawLine(QPointF(plot.left()+x,center-hi*half),QPointF(plot.left()+x,center-lo*half));}}
+        p.setPen(col::label);p.drawText(r.adjusted(8,3,-8,-3),Qt::AlignTop|Qt::AlignLeft,drumPadLabel(*d,index));p.drawText(r.adjusted(8,3,-8,-3),Qt::AlignTop|Qt::AlignRight,QString("%1× · %2 kHz").arg(m_zoom,0,'g',3).arg(sample->rate/1000,0,'g',4));
+        for(int i=0;i<=4;++i){double x=plot.left()+i*plot.width()/4;p.setPen(col::grid);p.drawLine(QPointF(x,plot.top()),QPointF(x,plot.bottom()));p.setPen(col::gridText);p.drawText(QRectF(x-25,plot.bottom()+2,50,15),Qt::AlignCenter,QString::number((m_start+i/(4*m_zoom))*sample->seconds(),'f',3));}
+    }
+protected:
+    void wheelEvent(QWheelEvent* e)override{zoom(e->angleDelta().y()>0?1.5:1/1.5);e->accept();}
+    void mousePressEvent(QMouseEvent* e)override{if(e->button()==Qt::LeftButton){m_press=e->position();m_saved=m_start;m_drag=false;}}
+    void mouseMoveEvent(QMouseEvent* e)override{if(e->buttons()&Qt::LeftButton){const double dx=e->position().x()-m_press.x();m_drag|=std::abs(dx)>QApplication::startDragDistance();if(m_drag){m_start=std::clamp(m_saved-dx/(width()*m_zoom),0.,1-1/m_zoom);update();}}}
+    void mouseReleaseEvent(QMouseEvent* e)override{if(e->button()==Qt::LeftButton&&!m_drag&&m_body->ctx().transport)m_body->ctx().transport->previewNote(m_body->ctx().track,drumrack::kFirstNote+selectedDrumPad(m_body->ctx().deviceId),.8);}
+private:
+    SamplePtr m_sample;double m_zoom=1,m_start=0,m_saved=0;QPointF m_press;bool m_drag=false;
+};
+
 class DrumRackBody : public DeviceBody {
 public:
     DrumRackBody(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
-        auto* root = rootRow(this);
+        auto* outer = rootRow(this);
+        auto* base = new QWidget(this);
+        base->setFixedWidth(584);
+        auto* root = new QHBoxLayout(base);
+        root->setContentsMargins(0,0,0,0);
+        root->setSpacing(6);
+        outer->addWidget(base);
         m_pages = new QStackedWidget(this);
         auto* pads = new RackPads(this, 248, 176, [this] { showSelected(); });
         animate(pads);
@@ -1632,17 +1666,34 @@ public:
         auto* glob = vbox(2);
         glob->addWidget(knob(1, 22, "Vel"));
         glob->addWidget(knob(0, 26));
+        const auto shelfButtonStyle=QString("QToolButton{background:%1;color:%2;border:0;border-radius:4px;padding:3px 6px;}QToolButton:checked{background:%3;color:%4;}").arg(col::button.name(),col::buttonText.name(),col::buttonOn.name(),col::buttonOnText.name());
+        auto* open=new QToolButton(this);open->setText("Waveform");open->setObjectName("drumWaveShelfToggle");open->setCheckable(true);open->setStyleSheet(shelfButtonStyle);open->setToolTip("Open the selected pad's waveform shelf");glob->addWidget(open);
         glob->addStretch(1);
         root->addLayout(glob);
-        showSelected();
-        setFixedWidth(600);
+        m_drawer=new QWidget(this);m_drawer->setObjectName("drumWaveShelf");m_drawer->setMinimumWidth(0);m_drawer->setMaximumWidth(0);m_drawer->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        auto* drawerLayout=new QHBoxLayout(m_drawer);drawerLayout->setContentsMargins(8,0,0,0);
+        auto* content=new QWidget(m_drawer);content->setFixedWidth(510);auto* shelf=new QVBoxLayout(content);shelf->setContentsMargins(0,0,0,0);shelf->setSpacing(4);
+        auto* header=hbox(4);header->addWidget(section("PAD WAVEFORM"));header->addStretch();
+        auto* fit=new QToolButton(content);fit->setText("Fit");fit->setObjectName("drumWaveShelfFit");header->addWidget(fit);auto* minus=new QToolButton(content);minus->setText("−");header->addWidget(minus);auto* plus=new QToolButton(content);plus->setText("+");plus->setObjectName("drumWaveShelfZoomIn");header->addWidget(plus);shelf->addLayout(header);
+        m_shelfWave=new PadShelfWave(this);watch(m_shelfWave);shelf->addWidget(m_shelfWave);
+        auto* actions=hbox(5);auto* audition=new QToolButton(content);audition->setText("Audition");actions->addWidget(audition);auto* load=new QToolButton(content);load->setText("Load sample…");actions->addWidget(load);actions->addStretch();shelf->addLayout(actions);drawerLayout->addWidget(content);outer->addWidget(m_drawer);m_drawer->hide();
+        for(auto* button:content->findChildren<QToolButton*>())button->setStyleSheet(shelfButtonStyle);
+        connect(fit,&QToolButton::clicked,m_shelfWave,[this]{m_shelfWave->fit();});connect(minus,&QToolButton::clicked,m_shelfWave,[this]{m_shelfWave->zoom(1/1.5);});connect(plus,&QToolButton::clicked,m_shelfWave,[this]{m_shelfWave->zoom(1.5);});
+        connect(audition,&QToolButton::clicked,this,[this]{if(ctx().transport)ctx().transport->previewNote(ctx().track,drumrack::kFirstNote+selectedDrumPad(ctx().deviceId),.8);});
+        connect(load,&QToolButton::clicked,this,[this]{const auto path=QFileDialog::getOpenFileName(this,"Load Pad Sample",{},"Audio ("+samples::nameFilters().join(' ')+")");if(!path.isEmpty())RackPads::loadPads(ctx(),selectedDrumPad(ctx().deviceId),{path});});
+        m_slide=new QPropertyAnimation(m_drawer,"maximumWidth",this);m_slide->setDuration(180);m_slide->setEasingCurve(QEasingCurve::OutCubic);
+        connect(m_slide,&QPropertyAnimation::valueChanged,this,[this,outer](const QVariant& v){const int width=v.toInt();m_drawer->setMinimumWidth(width);setFixedWidth(600+width+(width?outer->spacing():0));});
+        connect(m_slide,&QPropertyAnimation::finished,this,[this]{if(m_drawer->maximumWidth()==0)m_drawer->hide();});
+        connect(open,&QToolButton::toggled,this,[this](bool on){drumWaveShelves()[ctx().deviceId]=on;m_slide->stop();m_drawer->show();m_slide->setStartValue(m_drawer->maximumWidth());m_slide->setEndValue(on?526:0);m_slide->start();});
+        showSelected();setFixedWidth(600);if(drumWaveShelves().value(c.deviceId))open->setChecked(true);
     }
     void showSelected() {
         m_pages->setCurrentIndex(selectedDrumPad(ctx().deviceId));
-        m_wave->update();
+        m_wave->update();if(m_shelfWave){m_shelfWave->fit();m_shelfWave->update();}
         update();
     }
 private:
+    QWidget* m_drawer=nullptr;QPropertyAnimation* m_slide=nullptr;PadShelfWave* m_shelfWave=nullptr;
     QStackedWidget* m_pages;
     PadWave* m_wave;
 };

@@ -70,6 +70,7 @@
 #include <QWheelEvent>
 #include <QTemporaryDir>
 #include <QSettings>
+#include <QTabBar>
 #include <QFile>
 #include <QFileInfo>
 #include <QDir>
@@ -1648,7 +1649,7 @@ int main(int argc, char** argv) {
         QStringList top;
         for (int i = 0; i < std::min<qsizetype>(4, timings.size()); ++i) top << QString("%1 %2 ms").arg(timings[i].second).arg(timings[i].first, 0, 'f', 1);
         std::printf("      heaviest devices (1 s of audio): %s\n", qPrintable(top.join(", ")));
-        CHECK(devices == 51, "M6 devices: 51 devices (15 instruments, 31 audio effects including Drum Buss, 5 MIDI effects)");
+        CHECK(devices == 52, "M6 devices: 52 devices (15 instruments, 32 audio effects including Drum Buss and Stereo Width, 5 MIDI effects)");
         CHECK(badDefaults == 0, "M6 devices: every device's defaults give finite, sane output");
         CHECK(silentInstruments == 0, "M6 devices: every instrument makes a sound");
         CHECK(badFuzz == 0, "M6 devices: random knob settings never blow up (finite, bounded)");
@@ -1763,7 +1764,7 @@ int main(int argc, char** argv) {
         for (size_t i = 0; i < a0.l.size(); ++i) diff = std::max(diff, std::fabs(a0.l[i] - a6.l[i]));
         CHECK(diff > 0.05f && a6.finite, "M6 FM: the algorithm changes the sound");
 
-        bool tablesOk = audio::wavetableCount() == 8;
+        bool tablesOk = audio::wavetableCount() == osmium::kWavetableCount;
         for (int t = 0; t < audio::wavetableCount(); ++t)
             for (int f = 0; f < audio::kWtFrames; ++f) {
                 float peak = 0;
@@ -1772,7 +1773,7 @@ int main(int argc, char** argv) {
                 tablesOk &= std::fabs(peak - 1) < 0.01f && w[audio::kWtSize] == w[0];
             }
         CHECK(tablesOk && audio::wavetableLevel(40, 48000) == 0 && audio::wavetableLevel(4000, 48000) >= 5,
-              "M6 Wavetable: eight tables of normalized frames, fewer harmonics for high notes");
+              "M6 Wavetable: 48 tables of normalized frames, fewer harmonics for high notes");
 
         // Bass: overlapping notes slide (one attack), separate notes retrigger (two)
         auto countAttacks = [](const std::vector<float>& l) {
@@ -1816,12 +1817,28 @@ int main(int argc, char** argv) {
         Transport dt(&dp, &de);
         int missingControls = 0, withoutDisplay = 0, tooTall = 0;
         QStringList missing;
-        for (const Device& d : dp.tracks[0].devices) {
+        const auto panelDevices = dp.tracks[0].devices; // compound controls below edit their live model
+        for (const Device& d : panelDevices) {
             DevicePanel panel(&dp, &dt, 0, d, nullptr, {});
             devui::DeviceBody* body = panel.body();
-            if (auto* editor = body->createEditor(body)) editor->hide(); // expanded controls are created on demand
+            auto* editor = body->createEditor(body);
+            if (editor) editor->hide(); // expanded controls are created on demand
             QSet<QString> targets;
-            for (QWidget* w : body->findChildren<QWidget*>()) targets.insert(w->property("mapTarget").toString());
+            const auto collectTargets = [&] {
+                for (QWidget* w : body->findChildren<QWidget*>()) targets.insert(w->property("mapTarget").toString());
+            };
+            collectTargets();
+            if (editor && deviceType(d.name) == DeviceType::Osmium) {
+                // One picker serves the legacy parameter or its extension. Audit
+                // both real states rather than requiring duplicate visible controls.
+                std::vector<std::pair<int, double>> expanded, original;
+                for (int o = 0; o < 3; ++o)
+                    for (int param : {osmium::tableExtension(o), osmium::warpExtension(o)}) {
+                        original.push_back({param, editor->pos(param)}); expanded.push_back({param, 1});
+                    }
+                editor->editMany(expanded, 0); editor->refresh(); collectTargets();
+                editor->editMany(original, 1); editor->refresh();
+            }
             for (int i = 0; i < body->count(); ++i)
                 if (!targets.contains(body->target(i))) { ++missingControls; missing << QString("%1/%2").arg(d.name, d.params[i].name); }
             if (body->findChildren<devui::Display*>().isEmpty() && deviceType(d.name) != DeviceType::Utility && deviceType(d.name) != DeviceType::Macros)
@@ -2233,7 +2250,7 @@ int main(int argc, char** argv) {
             QComboBox* slices = cv->findChild<QComboBox*>("warpSlices");
             CHECK(warpOn && slices && warpOn->isChecked() && warpOn->isVisible(), "M7 window: an audio clip shows Warp (on)");
             warpOn->click();
-            CHECK(!audioClip->warp && !slices->isEnabled(), "M7 window: Warp off (and the slices grey out)");
+            CHECK(!audioClip->warp && slices->isEnabled(), "M7 window: Warp off keeps slice settings editable");
             proj->undoStack()->undo();
             CHECK(audioClip->warp && slices->isEnabled(), "M7 window: Warp back on with undo");
             emit slices->activated(0);
@@ -3985,7 +4002,9 @@ int main(int argc, char** argv) {
         {
             bool all = true;
             for (int t = 0; t < 8; ++t) { std::vector<float> p = base; p[oparam(0, Table)] = choicePosition(t, 8); all &= rms(run(p, {}, c2, 0.3).l, 2400, 14400) > 0.01f; }
-            CHECK(all && audio::wavetableCount() == 8, "M13 Monolith: all eight wavetables (Basic … Sub, Growl, Metallic, Digital) sound");
+            CHECK(all && specOf(DeviceType::Monolith)->params[oparam(0, Table)].choices.size() == 8
+                      && audio::wavetableCount() == osmium::kWavetableCount,
+                  "M13 Monolith: its original eight wavetable choices still sound within the expanded shared bank");
         }
         {
             std::vector<float> sine = base; sine[oparam(0, Table)] = choicePosition(4, 8); sine[oparam(0, Position)] = 0;   // Sub at 0: a pure sine
@@ -6281,22 +6300,26 @@ int main(int argc, char** argv) {
         cv.show();
         cv.setClip(p.tracks[0].clipSlots[0]);
         QApplication::processEvents();
-        const QList<QToolButton*> toggles = cv.findChildren<QToolButton*>("clipBoxToggle");
-        QWidget *launchBox = nullptr, *envBox = nullptr, *clipBox = nullptr;
-        for (QLabel* l : cv.findChildren<QLabel*>("clipBoxTitle")) { if (l->text() == "Launch") launchBox = l->parentWidget(); else if (l->text() == "Envelopes") envBox = l->parentWidget(); else if (l->text() == "Clip") clipBox = l->parentWidget(); }
-        QToolButton *L = nullptr, *E = nullptr;
-        for (QToolButton* b : toggles) { if (b->text() == "L") L = b; else if (b->text() == "E") E = b; }
-        CHECK((toggles.size() == 3 && L && E && launchBox && envBox && clipBox && launchBox->isVisible() && clipBox->width() == 132 && launchBox->width() == 132),
-              "M19 clip view: the boxes are 132 px wide and three round switches sit at the bottom left");
-        L->click();
-        E->click();
+        auto* tabs = cv.findChild<QTabBar*>("clipInspectorTabs");
+        auto* pages = cv.findChild<QStackedWidget*>("clipInspectorPages");
+        auto* props = cv.findChild<QWidget*>("clipProps");
+        QWidget* clipBox = nullptr;
+        for (QLabel* label : cv.findChildren<QLabel*>("clipBoxTitle"))
+            if (label->text() == "Clip") clipBox = label->parentWidget();
+        CHECK((tabs && pages && props && clipBox && tabs->count() == 3 && props->width() <= 440 && clipBox->isVisible()),
+              "M19 clip view: timing stays visible beside one compact tabbed inspector");
+        if (tabs) tabs->setCurrentIndex(1);
         QApplication::processEvents();
-        CHECK((!launchBox->isVisible() && !envBox->isVisible() && clipBox->isVisible() && !QSettings("Sessions", "Sessions").value("clipView/launch", true).toBool()),
-              "M19 clip view: L and E hide the Launch and Envelopes boxes (the Clip box stays), remembered in QSettings");
-        L->click();
-        E->click();
+        CHECK((pages && pages->currentIndex() == 1 && clipBox->isVisible()
+               && QSettings("Sessions", "Sessions").value("clipView/inspectorPage").toInt() == 1),
+              "M19 clip view: Launch opens one focused page and remembers it without hiding clip timing");
+        if (tabs) tabs->setCurrentIndex(2);
         QApplication::processEvents();
-        CHECK((launchBox->isVisible() && envBox->isVisible()), "M19 clip view: and show them again");
+        const bool envelopePage = pages && pages->currentIndex() == 2;
+        if (tabs) tabs->setCurrentIndex(0);
+        QApplication::processEvents();
+        CHECK((envelopePage && pages->currentIndex() == 0 && cv.pianoRoll()->isVisible()),
+              "M19 clip view: Envelopes opens and returning to Notes restores the note editor");
         QLabel* tempoInfo = nullptr;
         for (QLabel* l : cv.findChildren<QLabel*>()) if (l->toolTip().startsWith("found ") || l->text().startsWith("found ")) tempoInfo = l;
         (void)tempoInfo;
@@ -6610,9 +6633,9 @@ int main(int argc, char** argv) {
             QSet<QString> targets;
             for (QWidget* w : panel.body()->findChildren<QWidget*>()) targets.insert(w->property("mapTarget").toString());
             int missing = 0;
-            for (int i = 0; i < panel.body()->count(); ++i) if (!targets.contains(panel.body()->target(i))) ++missing;
+            for (int i = 0; i < ds::kLegacyParams; ++i) if (!targets.contains(panel.body()->target(i))) ++missing;
             CHECK((pages.size() == 3 && panel.body()->count() == ds::kParams && missing == 0 && panel.body()->minimumSizeHint().height() <= devui::kBodyHeight + 4 && panel.body()->findChildren<devui::Display*>().size() >= 2),
-                  "M19 Drum Studio panel: Kit, Mics and Grooves pages, a control for all 66 parameters, the kit and mic views, and it fits the device height");
+                  "M19 Drum Studio panel: Kit, Mics and Grooves pages, controls for the original 66 parameters (extended kit/mic controls are in Expand), the kit and mic views, and it fits the device height");
             for (QPushButton* b : pages) if (b->text() == "Grooves") b->click();
             QApplication::processEvents();
             QToolButton* toClip = panel.body()->findChild<QToolButton*>("grooveToClip");
@@ -8716,7 +8739,7 @@ int main(int argc, char** argv) {
             audio::Engine e(&p);
             Transport t(&p, &e);
             ClipView view(&p, &t);
-            view.resize(1300, 220); view.show();
+            view.resize(1300, std::max(260, view.minimumSizeHint().height())); view.show();
             QApplication::processEvents();
             view.setClip(clip);
             QApplication::processEvents();
@@ -8725,8 +8748,8 @@ int main(int argc, char** argv) {
             auto* detune = view.findChild<DragValue*>("clipDetune");
             auto* fader = view.findChild<Fader*>("clipGainFader");
             auto* gain = view.findChild<DragValue*>("clipGain");
-            CHECK(knob && field && detune && fader && gain && knob->width() >= 30 && fader->height() >= 60 && view.minimumSizeHint().height() <= 200,
-                  "M37 clip: the Sample box has a transpose knob over its field, a detune field and a gain fader, within the pane's height");
+            CHECK(knob && field && detune && fader && gain && knob->width() >= 30 && fader->height() >= 60 && view.minimumSizeHint().height() <= 290 && field->height() >= 20 && field->isVisibleTo(&view),
+                  "M37 clip: the Sample box has a transpose knob over its field, a detune field and a gain fader, with readable fields inside the compact inspector");
             QTest::mousePress(knob, Qt::LeftButton, Qt::NoModifier, QPoint(15, 15));
             QTest::mouseMove(knob, QPoint(15, -15));
             QTest::mouseRelease(knob, Qt::LeftButton, Qt::NoModifier, QPoint(15, -15));

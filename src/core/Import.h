@@ -4,9 +4,19 @@
 // callers wrap them in an EditScope (and they emit structureChanged themselves).
 
 #include "Model.h"
+#include "Tempo.h"
 #include <QStringList>
 
 namespace sessions::import {
+
+// A shared recording needs both its source folder and its exact exported time span.
+// Named matching is deliberately restricted to recognizable stem roles; a multi-file
+// import can also establish the relationship for other long, equally cut exports.
+QString stemRole(const QString& path);
+bool matchingStemSource(const Clip& a, const Clip& b, bool requireRoles = true);
+tempo::Estimate sharedSourceTempo(const QVector<ClipPtr>& clips, ClipPtr* guide = nullptr);
+bool automaticSourceMap(const Clip& clip);
+void rememberAutomaticSourceMap(Clip& clip);
 
 // One audio clip per file that loads; the others are listed in `errors` ("name: why").
 // The files are decoded side by side (samples::loadMany).

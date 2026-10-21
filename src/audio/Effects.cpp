@@ -12,6 +12,45 @@ namespace {
 // Highest of two meters across a block, for the panels.
 inline void store(std::atomic<float>& m, float v) { m.store(v, std::memory_order_relaxed); }
 
+// Stereo Width: mid is invariant; side processing cannot cancel the mono fold-down.
+class StereoWidth : public DeviceProcessor {
+public:
+    explicit StereoWidth(float sr) : m_sr(sr) { m_delay.init(int(sr*.03f)+8); }
+    void process(float* L,float* R,int n,const float* p,const Context&) override {
+        namespace sw=stereowidth;constexpr T t=T::StereoWidth;
+        const float cutoff=pv(t,p,sw::BassCutoff);
+        if(cutoff!=m_cutoff){m_cutoff=cutoff;for(auto& f:m_bass)f.highpass(std::min(cutoff,m_sr*.4f),.70710678f,m_sr);}
+        const float coef=onePoleCoef(.015f,m_sr);const int monitor=pc(t,p,sw::Monitor);
+        double ll=0,rr=0,lr=0,midPower=0,sidePower=0;float peak=0;
+        for(int i=0;i<n;++i){
+            const float left=std::isfinite(L[i])?L[i]:0,right=std::isfinite(R[i])?R[i]:0;
+            const float mid=(left+right)*.5f,side=(left-right)*.5f;
+            const float width=m_width.next(pv(t,p,sw::Width),coef),bass=m_monoBass.next(pb(p,sw::MonoBass)?1.f:0.f,coef);
+            const float spread=m_spread.next(p[sw::Spread],coef),time=m_time.next(1+pv(t,p,sw::Delay)*m_sr*.001f,coef);
+            const float wet=m_mix.next(p[sw::Mix],coef),gain=m_output.next(dbToGain(pv(t,p,sw::Output)),coef);
+            m_delay.push(mid);const float added=(mid-m_delay.read(time))*.5f*spread;
+            const float rawSide=side+added;const float high=m_bass[1].process(m_bass[0].process(rawSide));
+            const float processed=(rawSide+(high-rawSide)*bass)*width;
+            float outSide=side+(processed-side)*wet;
+            const float midMonitor=m_midMonitor.next(monitor==2?0.f:1.f,coef),sideMonitor=m_sideMonitor.next(monitor==1?0.f:1.f,coef);
+            float l=(mid*midMonitor+outSide*sideMonitor)*gain,r=(mid*midMonitor-outSide*sideMonitor)*gain;
+            // Finite guards protect a downstream chain after corrupt source data or extreme automation.
+            if(!std::isfinite(l)||!std::isfinite(r)){l=r=0;panic();}
+            L[i]=l;R[i]=r;ll+=double(l)*l;rr+=double(r)*r;lr+=double(l)*r;
+            midPower+=double(l+r)*(l+r)*.25;sidePower+=double(l-r)*(l-r)*.25;peak=std::max(peak,std::max(std::abs(l),std::abs(r)));
+        }
+        const double decay=std::exp(-double(n)/(m_sr*.25));
+        m_ll=ll+(m_ll-ll)*decay;m_rr=rr+(m_rr-rr)*decay;m_lr=lr+(m_lr-lr)*decay;
+        meter[0].store(m_ll*m_rr>1e-18?float(std::clamp(m_lr/std::sqrt(m_ll*m_rr),-1.,1.)):0,std::memory_order_relaxed);
+        meter[1].store(n?float(std::sqrt(sidePower/std::max(1e-18,midPower+sidePower))):0,std::memory_order_relaxed);
+        meter[2].store(gainToDb(peak),std::memory_order_relaxed);
+    }
+    void panic() override {m_delay.clear();for(auto& f:m_bass)f.reset();m_ll=m_rr=m_lr=0;}
+private:
+    float m_sr,m_cutoff=-1;DelayLine m_delay;Biquad m_bass[2];double m_ll=0,m_rr=0,m_lr=0;
+    Smoothed m_width,m_monoBass,m_spread,m_time,m_mix,m_output,m_midMonitor,m_sideMonitor;
+};
+
 // ===========================================================================
 // The sidechain key of a Compressor, Gate or Auto Filter: the device's own input, or another
 // track's audio (Context::keyL / keyR), through Key Gain, Key HP and Key LP (DeviceSpecs
@@ -622,6 +661,7 @@ float eqResponseDb(const float* params, float freq, float sampleRate) {
 std::shared_ptr<DeviceProcessor> createEffect(DeviceType type, float sr) {
     switch (type) {
     case T::DrumBuss:   return createDrumBuss(sr);
+    case T::StereoWidth:return std::make_shared<StereoWidth>(sr);
     case T::EQ:         return std::make_shared<Eq>(sr);
     case T::Compressor: return std::make_shared<Compressor>(sr);
     case T::Saturator:  return std::make_shared<Saturator>(sr);

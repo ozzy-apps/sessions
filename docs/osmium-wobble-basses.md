@@ -1,6 +1,6 @@
-# Osmium — Wobble Basses · 0.39
+# Osmium — Wobble Basses · 0.44
 
-20 fat wobble basses for Osmium: ten **Dubstep** (voiced at 140 BPM, half-time) and ten **DnB Bass** (voiced at 174 BPM). They sit after the 40 Drum & Bass sounds in Osmium's patch selector: type `dubstep` or `dnb bass` there, or search **Osmium** in Browser → Sounds.
+20 fat wobble basses for Osmium: ten **Dubstep** (voiced at 140 BPM, half-time) and ten **DnB Bass** (voiced at 174 BPM). They follow the existing 112 factory presets, after a separator in Osmium's patch selector: type `dubstep` or `dnb bass` there, or search **Osmium** in Browser → Sounds.
 
 ![Gravedigger's two-bar phrase in Curve 1](screenshots/osmium/osmium-bass-phrase.png)
 

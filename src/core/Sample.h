@@ -71,6 +71,7 @@ public:
     ~WavWriter();
     bool open(const QString& path, int rate, WavFormat format, QString* error = nullptr);
     void write(const float* interleavedStereo, qint64 frames);   // 16 / 24 bit get TPDF dither
+    bool checkpoint(QString* error = nullptr); // readable header without ending a live recording; writer's owning thread
     bool close(QString* error = nullptr);
 private:
     struct Impl;

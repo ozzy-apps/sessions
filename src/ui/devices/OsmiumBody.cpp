@@ -14,6 +14,7 @@
 #include <QDrag>
 #include <QDropEvent>
 #include <QInputDialog>
+#include <QLineEdit>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
@@ -31,9 +32,12 @@
 #include <QUndoStack>
 #include <map>
 #include <QStackedWidget>
+#include <QTreeWidget>
 #include <QTimer>
+#include <QWidgetAction>
 #include <QWheelEvent>
 #include <QGridLayout>
+#include <array>
 #include <cmath>
 #include <set>
 
@@ -98,12 +102,96 @@ protected:
     }
 };
 
+// Both panel sizes use the same ordered bank and atomic, identity-preserving load path.
+ChoiceBox* patchPicker(DeviceBody* body, const QString& objectName) {
+    auto* picker = new ChoiceBox(body); picker->setObjectName(objectName);
+    picker->addItems({"Init", "Basalt Bass", "Obsidian Reese", "Glacial Pad", "Pressure Sequence"});
+    picker->insertSeparator(picker->count());
+    bool wobbleBasses = false;
+    for (const auto& patch : osmium::factoryPresets()) {
+        const QLatin1String category(patch.category);
+        if (!wobbleBasses && (category == QLatin1String("Dubstep") || category == QLatin1String("DnB Bass"))) {
+            picker->insertSeparator(picker->count()); wobbleBasses = true;
+        }
+        picker->addItem(QString::fromUtf8(patch.name).mid(7), QString::fromUtf8(patch.name));
+        picker->setItemData(picker->count() - 1, QString::fromUtf8(patch.description), Qt::ToolTipRole);
+    }
+    picker->setMaxVisibleItems(16); picker->setEditable(true); picker->setInsertPolicy(QComboBox::NoInsert);
+    picker->completer()->setFilterMode(Qt::MatchContains); picker->completer()->setCaseSensitivity(Qt::CaseInsensitive);
+    picker->setAccessibleName("Osmium preset");
+    InfoView::attach(picker, "Preset", QString("Type to search %1 factory presets and the starting patches. Loading replaces the sound in one undo step. ").arg(osmium::factoryPresets().size()) +
+                     "Macros: Tone, Warp, Drive, Width, Space, Echo, Body and Air. Automate Curve1 Rate to change a wobble phrase's length.");
+    return picker;
+}
+void applyStartingPatch(Device& d, int i) {
+    const QStringList names{"Monolith", "Dub Wobble", "Neuro Reese", "Glass Pad", "Neuro Step"};
+    const auto* spec = deviceSpec(names[i]); const auto* defaults = specOf(DeviceType::Osmium);
+    for (int p = 0; p < d.params.size(); ++p) {
+        d.params[p].value = p < int(spec->params.size()) ? spec->params[size_t(p)].def : defaults->params[size_t(p)].def;
+    }
+    d.mods.clear(); for (const auto& r : presetMods(names[i])) d.mods.push_back(r);
+    if (i == 0) d.mods = {{mo::SrcEnv2, mo::fparam(0, mo::FCutoff), 0.28}};
+    for (int e = 0; e < 4; ++e) { d.params[osmium::bend(e, 1)].value = 0.22; d.params[osmium::bend(e, 2)].value = 0.22; }
+    d.curves = {{{0, 0}, {0.25, 1, -0.35, 1}, {0.5, 0.15}, {0.75, 0.7, 0.3, 1}, {1, 0}}, {{0, 1, 0.35}, {0.5, 0, -0.35}, {1, 1}}};
+}
+void syncPatchPicker(DeviceBody* body, QComboBox* picker) {
+    if (const auto* d = body->device(); d && (picker->property("deviceName").toString() != d->name || d->name == "Osmium")) {
+        picker->setProperty("deviceName", d->name);
+        int item = picker->findData(d->name);
+        if (item < 0 && d->name == "Osmium") {
+            // The original starting patches share a device name. Recognize their actual
+            // sound after a panel rebuild or undo instead of losing the navigation position.
+            for (int i = 1; i < 5; ++i) {
+                Device reference = *d; applyStartingPatch(reference, i);
+                bool same = reference.mods == d->mods && reference.curves == d->curves;
+                for (int p = 0; same && p < d->params.size(); ++p) same &= reference.params[p].value == d->params[p].value;
+                if (same) { item = i; break; }
+            }
+        }
+        const int selected = item >= 0 ? item : 0;
+        if (picker->currentIndex() != selected) picker->setCurrentIndex(selected);
+    }
+}
+void loadPatch(DeviceBody* body, QComboBox* picker, int i) {
+    if (i < 0 || i >= picker->count()) return;
+    const auto* patch = osmium::factoryPreset(picker->itemData(i).toString());
+    if (!patch && i >= 5) return;
+    bool renamed = false;
+    {
+        EditScope edit(body->ctx().project, "Load Osmium Patch");
+        Device* d = mutableDevice(body); if (!d) return;
+        const QString name = patch ? QString::fromUtf8(patch->name) : QString("Osmium");
+        renamed = d->name != name; d->name = name;
+        if (patch) osmium::applyPreset(*d, *patch);
+        else applyStartingPatch(*d, i);
+        picker->setProperty("deviceName", d->name);
+        for (int p = 0; p < d->params.size(); ++p) body->ctx().project->touchTarget(body->ctx().project->indexOfTrack(body->ctx().trackId), target::device(body->ctx().deviceId, p));
+    }
+    emit body->ctx().project->deviceChanged(); body->refresh();
+    if (renamed) emit body->ctx().project->structureChanged();
+}
+
+QPushButton* patchArrow(DeviceBody* body, QComboBox* picker, int direction) {
+    auto* arrow = new QPushButton(direction < 0 ? "‹" : "›", body);
+    arrow->setObjectName(direction < 0 ? "osmiumPreviousPreset" : "osmiumNextPreset");
+    arrow->setFixedSize(28, 28); arrow->setStyleSheet("font-size:18px;padding:0;border-radius:5px;");
+    const QString label = direction < 0 ? "Previous preset" : "Next preset";
+    arrow->setAccessibleName(label); arrow->setToolTip(label);
+    QObject::connect(arrow, &QPushButton::clicked, body, [body, picker, direction] {
+        int index = picker->currentIndex();
+        do { index = (index + direction + picker->count()) % picker->count(); }
+        while (index >= 5 && picker->itemData(index).toString().isEmpty());
+        picker->setCurrentIndex(index); loadPatch(body, picker, index);
+    });
+    return arrow;
+}
+
 // Each control exposes its base value, source slot and directly draggable range ring.
 class RangeKnob : public QWidget {
 public:
     RangeKnob(DeviceBody* b, int param, QString label, int diameter, std::function<int()> source,
               std::function<void(int)> focus, std::function<void(int)> select = {}) : QWidget(b), m_body(b), m_param(param), m_label(std::move(label)),
-              m_d(std::max(64, diameter)), m_source(std::move(source)), m_focus(std::move(focus)), m_select(std::move(select)) {
+              m_d(std::max(52, diameter)), m_source(std::move(source)), m_focus(std::move(focus)), m_select(std::move(select)) {
         setFixedSize(m_d + 12, m_d + 48);
         setObjectName(QString("osmiumKnob_%1").arg(param));
         setProperty("mapTarget", b->target(param));
@@ -264,6 +352,112 @@ private:
     DeviceBody* m_body; int m_source; QPoint m_press;
 };
 
+// Keep the complete table catalogue searchable without flattening its musical families.
+class TablePicker : public QPushButton {
+public:
+    TablePicker(DeviceBody* body, int osc) : QPushButton(body), m_body(body), m_osc(osc) {
+        setObjectName(QString("osmiumTablePicker_%1").arg(osc));
+        setAcceptDrops(true); installEventFilter(body);
+        setMinimumHeight(26); setMinimumWidth(120); setCursor(Qt::PointingHandCursor);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        m_menu = new QMenu(this); m_menu->setObjectName(QString("osmiumTableMenu_%1").arg(osc));
+        auto* content = new QWidget(m_menu); auto* layout = new QVBoxLayout(content);
+        layout->setContentsMargins(8, 8, 8, 8); layout->setSpacing(6);
+        m_search = new QLineEdit(content); m_search->setObjectName(QString("osmiumTableSearch_%1").arg(osc));
+        m_search->setPlaceholderText("Search wavetables"); m_search->setClearButtonEnabled(true); layout->addWidget(m_search);
+        m_tree = new QTreeWidget(content); m_tree->setObjectName(QString("osmiumTableTree_%1").arg(osc));
+        m_tree->setHeaderHidden(true); m_tree->setIndentation(13); m_tree->setIconSize(QSize(56, 20));
+        m_tree->setUniformRowHeights(true); m_tree->setMinimumSize(326, 308); m_tree->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        layout->addWidget(m_tree);
+        std::map<QString, QTreeWidgetItem*> families;
+        for (int index = 0; index < audio::wavetableCount(); ++index) {
+            const QString family = QString::fromUtf8(audio::wavetableCategory(index));
+            auto*& group = families[family];
+            if (!group) {
+                group = new QTreeWidgetItem(m_tree, QStringList{family});
+                group->setFlags(group->flags() & ~Qt::ItemIsSelectable); group->setExpanded(true);
+                auto font = m_tree->font(); font.setBold(true); group->setFont(0, font); group->setSizeHint(0, QSize(0, 24));
+            }
+            auto* item = new QTreeWidgetItem(group, QStringList{QString::fromUtf8(audio::wavetable(index).name)});
+            item->setData(0, Qt::UserRole, index); item->setSizeHint(0, QSize(0, 26));
+            item->setToolTip(0, family + " · " + item->text(0));
+        }
+        auto* action = new QWidgetAction(m_menu); action->setDefaultWidget(content); m_menu->addAction(action);
+        connect(m_search, &QLineEdit::textChanged, this, [this](const QString& text) {
+            for (int family = 0; family < m_tree->topLevelItemCount(); ++family) {
+                auto* group = m_tree->topLevelItem(family); bool any = false;
+                for (int row = 0; row < group->childCount(); ++row) {
+                    auto* item = group->child(row);
+                    const bool show = text.isEmpty() || item->text(0).contains(text, Qt::CaseInsensitive) || group->text(0).contains(text, Qt::CaseInsensitive);
+                    item->setHidden(!show); any |= show;
+                }
+                group->setHidden(!any); if (!text.isEmpty()) group->setExpanded(true);
+            }
+        });
+        const auto choose = [this](QTreeWidgetItem* item) {
+            if (!item || !item->parent()) return;
+            const int index = item->data(0, Qt::UserRole).toInt();
+            m_body->ctx().project->beginEdit("Select Wavetable");
+            if (index < 8) m_body->editMany({{mo::oparam(m_osc, mo::Table), choicePosition(index, 8)}, {osmium::tableExtension(m_osc), 0}}, 27 + m_osc);
+            else m_body->edit(osmium::tableExtension(m_osc), choicePosition(index - 7, 41));
+            m_body->ctx().project->endEdit(); m_menu->hide(); refresh();
+        };
+        connect(m_tree, &QTreeWidget::itemClicked, this, [choose](QTreeWidgetItem* item, int) { choose(item); });
+        connect(m_tree, &QTreeWidget::itemActivated, this, [choose](QTreeWidgetItem* item, int) { choose(item); });
+        connect(m_search, &QLineEdit::returnPressed, this, [this, choose] {
+            for (int family = 0; family < m_tree->topLevelItemCount(); ++family) {
+                auto* group = m_tree->topLevelItem(family);
+                if (group->isHidden()) continue;
+                for (int row = 0; row < group->childCount(); ++row) if (!group->child(row)->isHidden()) { choose(group->child(row)); return; }
+            }
+        });
+        connect(this, &QPushButton::clicked, this, [this] {
+            m_search->clear(); refreshIcons();
+            const int index = current();
+            for (int family = 0; family < m_tree->topLevelItemCount(); ++family) {
+                auto* group = m_tree->topLevelItem(family);
+                for (int row = 0; row < group->childCount(); ++row) if (group->child(row)->data(0, Qt::UserRole).toInt() == index) {
+                    m_tree->setCurrentItem(group->child(row)); m_tree->scrollToItem(group->child(row));
+                }
+            }
+            m_menu->popup(mapToGlobal(QPoint(0, height()))); m_search->setFocus();
+        });
+        InfoView::attach(this, "Wavetable", "Choose a table by family, or type to search. Each thumbnail shows a frame of the actual band-limited table. The display scans its eight frames with Position.");
+        refresh();
+    }
+    int current() const { return osmium::tableIndex(m_body->pos(mo::oparam(m_osc, mo::Table)), m_body->pos(osmium::tableExtension(m_osc))); }
+    void refresh() {
+        const int index = current();
+        setProperty("mapTarget", m_body->target(index >= 8 ? osmium::tableExtension(m_osc) : mo::oparam(m_osc, mo::Table)));
+        setText(QString::fromUtf8(audio::wavetable(index).name));
+        setToolTip(QString::fromUtf8(audio::wavetableCategory(index)) + " · " + text()); setProperty("tableIndex", index);
+    }
+protected:
+    void paintEvent(QPaintEvent* event) override {
+        QPushButton::paintEvent(event); QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
+        p.setPen(QPen(theme::textFaint, 1.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        const double x = width() - 11, y = height() / 2.0; QPolygonF arrow;
+        arrow << QPointF(x - 3, y - 1) << QPointF(x, y + 2) << QPointF(x + 3, y - 1); p.drawPolyline(arrow);
+    }
+private:
+    void refreshIcons() {
+        for (int family = 0; family < m_tree->topLevelItemCount(); ++family) {
+            auto* group = m_tree->topLevelItem(family); group->setForeground(0, theme::textFaint);
+            for (int row = 0; row < group->childCount(); ++row) {
+                auto* item = group->child(row); const auto& table = audio::wavetable(item->data(0, Qt::UserRole).toInt());
+                QPixmap pixmap(56, 20); pixmap.fill(Qt::transparent); QPainter painter(&pixmap); painter.setRenderHint(QPainter::Antialiasing);
+                QPainterPath path;
+                for (int x = 0; x < 56; ++x) {
+                    const QPointF point(x, 10 - 8 * audio::wavetableRead(table, 0, 0.45f, float(x) / 56));
+                    if (x == 0) path.moveTo(point); else path.lineTo(point);
+                }
+                painter.setPen(QPen(theme::osmiumLfo, 1.1)); painter.drawPath(path); item->setIcon(0, QIcon(pixmap));
+            }
+        }
+    }
+    DeviceBody* m_body; int m_osc; QMenu* m_menu; QLineEdit* m_search; QTreeWidget* m_tree;
+};
+
 class Plot : public Display {
 public:
     Plot(DeviceBody* b, int height) : Display(b, 180, height) {
@@ -295,36 +489,159 @@ protected:
 
 class WavePlot : public Plot {
 public:
-    WavePlot(DeviceBody* b, int osc, int h = 52) : Plot(b, h), m_osc(osc) {
-        InfoView::attach(this, "Oscillator waveform", "The current wavetable position and warp. Position scans the table; Warp bends, syncs or squeezes its phase.");
-    }
-protected:
-    void draw(QPainter& p, const QRectF& r) override {
-        const auto& table = audio::wavetable(m_body->pick(mo::oparam(m_osc, mo::Table)));
-        const auto pos = m_body->pos(mo::oparam(m_osc, mo::Position));
-        const auto intensity = m_body->pos(mo::oparam(m_osc, mo::Intensity));
-        const int mode = m_body->pick(mo::oparam(m_osc, mo::Mode));
-        p.setPen(QPen(theme::devGridStrong, 1)); p.drawLine(QPointF(r.left(), r.center().y()), QPointF(r.right(), r.center().y()));
-        QPainterPath path;
-        for (int x = 0; x <= int(r.width()); ++x) {
-            const float phase = audio::monolithWarpPhase(mode, float(x / r.width()) * 0.99999f, float(intensity));
-            const float y = audio::wavetableRead(table, 0, float(pos), phase);
-            const QPointF point(r.left() + x, r.center().y() - y * r.height() * 0.45);
-            if (x == 0) path.moveTo(point); else path.lineTo(point);
+    WavePlot(DeviceBody* body, int osc, int height = 172) : Plot(body, height), m_osc(osc), m_compact(height < 100) {
+        setObjectName(QString("osmiumWave_%1").arg(osc)); setFocusPolicy(Qt::StrongFocus); setMouseTracking(true);
+        setProperty("mapTarget", body->target(mo::oparam(osc, mo::Position))); installEventFilter(body); setAcceptDrops(true);
+        setProperty("displayMode", 0);
+        if (!m_compact) {
+            setMinimumHeight(132); setMaximumHeight(QWIDGETSIZE_MAX); setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+            setCursor(Qt::SizeHorCursor);
         }
-        p.setPen(QPen(theme::osmiumLfo, 1.6)); p.drawPath(path);
+        InfoView::attach(this, "Wavetable display", "Table shows all eight frames and the selected scan position. Wave shows the warped waveform; Harm shows its harmonic content. Drag horizontally to scan Position. Shift: fine. Arrow keys and the wheel also scan; one drag is one undo step.");
     }
-private: int m_osc;
+    ~WavePlot() override { finish(); }
+protected:
+    int tableIndex() const { return m_body->ctx().type == DeviceType::Osmium ? osmium::tableIndex(m_body->pos(mo::oparam(m_osc, mo::Table)), m_body->pos(osmium::tableExtension(m_osc))) : m_body->pick(mo::oparam(m_osc, mo::Table)); }
+    int warpMode() const { return m_body->ctx().type == DeviceType::Osmium ? osmium::warpMode(m_body->pos(mo::oparam(m_osc, mo::Mode)), m_body->pos(osmium::warpExtension(m_osc))) : m_body->pick(mo::oparam(m_osc, mo::Mode)); }
+    float sample(const audio::Wavetable& table, double position, double phase) const {
+        float warped = audio::osmiumWarpPhase(m_mode, float(phase), m_intensity);
+        if (m_mode == 7 && m_nextTable) {
+            const double modPhase = phase * m_pitchRatio;
+            const float mod = audio::wavetableRead(*m_nextTable, 0, m_nextPosition, float(modPhase - std::floor(modPhase)));
+            warped = float(phase) + mod * 1.5f * m_intensity * m_intensity; warped -= std::floor(warped);
+        }
+        const float value = audio::wavetableRead(table, 0, float(position), std::clamp(warped, 0.0f, 0.999999f));
+        return audio::osmiumFold(value, m_fold);
+    }
+    QPainterPath waveform(const audio::Wavetable& table, double position, const QRectF& frame) const {
+        QPainterPath path; const int points = std::clamp(int(frame.width() * 1.2), 160, 520);
+        for (int point = 0; point <= points; ++point) {
+            const double phase = double(point) / (points + 1);
+            const QPointF at(frame.left() + frame.width() * point / points, frame.center().y() - sample(table, position, phase) * frame.height() * 0.43);
+            if (point == 0) path.moveTo(at); else path.lineTo(at);
+        }
+        return path;
+    }
+    void paintEvent(QPaintEvent*) override {
+        m_mode = warpMode(); m_intensity = float(m_body->pos(mo::oparam(m_osc, mo::Intensity)));
+        m_fold = float(m_body->pos(osmium::fold(m_osc)));
+        const int next = (m_osc + 1) % mo::kOscs;
+        m_nextIndex = osmium::tableIndex(m_body->pos(mo::oparam(next, mo::Table)), m_body->pos(osmium::tableExtension(next)));
+        m_nextTable = &audio::wavetable(m_nextIndex); m_nextPosition = float(m_body->pos(mo::oparam(next, mo::Position)));
+        m_pitchRatio = std::pow(2.0, (m_body->real(mo::oparam(next, mo::Pitch)) - m_body->real(mo::oparam(m_osc, mo::Pitch))
+            + (m_body->real(mo::oparam(next, mo::Fine)) - m_body->real(mo::oparam(m_osc, mo::Fine))) / 100) / 12);
+        QPainter p(this); p.setRenderHint(QPainter::Antialiasing);
+        p.fillRect(rect(), theme::devDisplay);
+        const QRectF area = m_compact ? QRectF(rect()).adjusted(9, 6, -9, -6) : QRectF(rect()).adjusted(12, 32, -12, -25);
+        draw(p, area);
+        if (m_compact) return;
+        p.setFont(pxFont(this, 9));
+        const QStringList modes{"Table", "Wave", "Harm"};
+        for (int mode = 0; mode < 3; ++mode) {
+            const QRectF button(7 + mode * 41, 6, 38, 17);
+            p.setPen(Qt::NoPen); p.setBrush(m_display == mode ? theme::withAlpha(theme::osmiumLfo, 30) : theme::devCell); p.drawRect(button);
+            p.setPen(m_display == mode ? theme::osmiumLfo : theme::textFaint); p.drawText(button, Qt::AlignCenter, modes[mode]);
+        }
+        const double position = m_body->pos(mo::oparam(m_osc, mo::Position));
+        p.setPen(theme::textSoft); p.drawText(QRectF(132, 6, width() - 142, 17), Qt::AlignRight | Qt::AlignVCenter,
+            m_mode == 7 ? QString("OSC %1 → FM").arg((m_osc + 1) % mo::kOscs + 1) : QString("%1 / 8").arg(1 + position * 7, 0, 'f', 1));
+        const QRectF scan(12, height() - 13, width() - 24, 3);
+        p.setPen(QPen(theme::devGridStrong, 2)); p.drawLine(scan.topLeft(), scan.topRight());
+        for (int frame = 0; frame < 8; ++frame) { const double x = scan.left() + scan.width() * frame / 7; p.setPen(theme::textFaint); p.drawLine(QPointF(x, scan.top() - 2), QPointF(x, scan.top() + 3)); }
+        const double x = scan.left() + scan.width() * position;
+        p.setPen(QPen(theme::osmiumLfo, 3, Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(scan.left(), scan.top()), QPointF(x, scan.top()));
+        p.setPen(QPen(theme::osmiumLfo, 1)); p.setBrush(theme::devDisplay); p.drawEllipse(QPointF(x, scan.top()), 3.5, 3.5);
+    }
+    void draw(QPainter& p, const QRectF& r) override {
+        const auto& table = audio::wavetable(tableIndex()); const double position = m_body->pos(mo::oparam(m_osc, mo::Position));
+        p.save(); p.setClipRect(r.adjusted(-1, -1, 1, 1));
+        if (m_compact || m_display == 1) {
+            grid(p, r, 8);
+            p.setPen(QPen(theme::withAlpha(theme::osmiumLfo, 60), 1)); p.drawLine(QPointF(r.left(), r.center().y()), QPointF(r.right(), r.center().y()));
+            const auto path = waveform(table, position, r);
+            auto fill = path; fill.lineTo(r.bottomRight()); fill.lineTo(r.bottomLeft()); fill.closeSubpath();
+            QLinearGradient gradient(r.topLeft(), r.bottomLeft()); gradient.setColorAt(0, theme::withAlpha(theme::osmiumLfo, 45)); gradient.setColorAt(1, theme::withAlpha(theme::osmiumLfo, 3));
+            p.setBrush(gradient); p.setPen(Qt::NoPen); p.drawPath(fill);
+            p.setBrush(Qt::NoBrush); p.setPen(QPen(theme::osmiumLfo, 1.7)); p.drawPath(path);
+        } else if (m_display == 0) {
+            const double depthX = r.width() * 0.14, depthY = r.height() * 0.35;
+            const auto frameRect = [&](double depth) { return QRectF(r.left() + depthX * depth, r.top() + depthY * (1 - depth), r.width() - depthX, r.height() - depthY); };
+            p.setPen(QPen(theme::withAlpha(theme::devGridStrong, 110), 1));
+            for (int line = 0; line <= 4; ++line) {
+                const auto front = frameRect(0), back = frameRect(1); const double t = line / 4.0;
+                p.drawLine(QPointF(front.left() + front.width() * t, front.center().y()), QPointF(back.left() + back.width() * t, back.center().y()));
+            }
+            for (int frame = 7; frame >= 0; --frame) {
+                const auto area = frameRect(frame / 7.0);
+                p.setPen(QPen(theme::withAlpha(theme::osmiumLfo, frame == 0 ? 90 : 40 + (7 - frame) * 5), 1));
+                p.setBrush(Qt::NoBrush); p.drawPath(waveform(table, frame / 7.0, area));
+            }
+            const auto active = frameRect(position); const auto path = waveform(table, position, active);
+            p.setPen(QPen(theme::withAlpha(theme::devDisplay, 210), 4.5)); p.drawPath(path);
+            p.setPen(QPen(theme::osmiumLfo, 2)); p.drawPath(path);
+        } else {
+            grid(p, r, 8);
+            // A small, deterministic DFT of the displayed cycle, cached while parameters stand still.
+            const std::array<double, 8> key{double(tableIndex()), position, double(m_mode), m_intensity, m_fold, double(m_nextIndex), m_nextPosition, m_pitchRatio};
+            if (key != m_spectrumKey) {
+                m_spectrumKey = key; std::array<double, 256> wave{};
+                for (int i = 0; i < 256; ++i) wave[size_t(i)] = sample(table, position, i / 256.0);
+                for (int harmonic = 1; harmonic <= 64; ++harmonic) {
+                    double real = 0, imaginary = 0;
+                    for (int i = 0; i < 256; ++i) { const double phase = 2 * kPi * harmonic * i / 256; real += wave[size_t(i)] * std::cos(phase); imaginary -= wave[size_t(i)] * std::sin(phase); }
+                    m_harmonics[size_t(harmonic - 1)] = std::clamp((20 * std::log10(std::max(0.00001, std::hypot(real, imaginary) / 128)) + 60) / 60, 0.0, 1.0);
+                }
+            }
+            const double bar = r.width() / 64;
+            for (int harmonic = 0; harmonic < 64; ++harmonic) {
+                const double height = r.height() * m_harmonics[size_t(harmonic)];
+                p.fillRect(QRectF(r.left() + harmonic * bar, r.bottom() - height, std::max(1.0, bar - 1), height), theme::withAlpha(theme::osmiumLfo, harmonic < 8 ? 210 : 145));
+            }
+        }
+        p.restore();
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        if (m_compact || e->button() != Qt::LeftButton) return;
+        if (e->position().y() < 29) {
+            const int mode = int((e->position().x() - 7) / 41);
+            if (e->position().x() >= 7 && mode >= 0 && mode < 3 && e->position().x() < 130) { m_display = mode; setProperty("displayMode", mode); update(); }
+            return;
+        }
+        setFocus(); m_press = e->position(); m_initial = m_body->pos(mo::oparam(m_osc, mo::Position)); m_drag = true;
+        m_body->ctx().project->beginEdit("Scan Wavetable");
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (m_drag && (e->buttons() & Qt::LeftButton)) m_body->edit(mo::oparam(m_osc, mo::Position), m_initial + (e->position().x() - m_press.x()) / std::max(1, width() - 24) * (e->modifiers() & Qt::ShiftModifier ? 0.1 : 1));
+    }
+    void mouseReleaseEvent(QMouseEvent*) override { finish(); }
+    void wheelEvent(QWheelEvent* e) override {
+        if (m_compact) { e->ignore(); return; }
+        m_body->edit(mo::oparam(m_osc, mo::Position), m_body->pos(mo::oparam(m_osc, mo::Position)) + e->angleDelta().y() / 120.0 * (e->modifiers() & Qt::ShiftModifier ? 0.001 : 0.01)); e->accept();
+    }
+    void keyPressEvent(QKeyEvent* e) override {
+        if (e->key() == Qt::Key_Left || e->key() == Qt::Key_Right) m_body->edit(mo::oparam(m_osc, mo::Position), m_body->pos(mo::oparam(m_osc, mo::Position)) + (e->key() == Qt::Key_Right ? 1 : -1) * (e->modifiers() & Qt::ShiftModifier ? 0.001 : 0.01));
+        else Plot::keyPressEvent(e);
+    }
+private:
+    void finish() { if (m_drag) { m_drag = false; m_body->ctx().project->endEdit(); } }
+    int m_osc, m_display = 0; bool m_compact, m_drag = false; QPointF m_press; double m_initial = 0;
+    int m_mode = 0, m_nextIndex = 0; float m_intensity = 0, m_fold = 0, m_nextPosition = 0; double m_pitchRatio = 1;
+    const audio::Wavetable* m_nextTable = nullptr;
+    std::array<double, 8> m_spectrumKey{-1, -1, -1, -1, -1, -1, -1, -1}; std::array<double, 64> m_harmonics{};
 };
 
 class FilterPlot : public Plot {
 public:
-    FilterPlot(DeviceBody* b, int f) : Plot(b, 45), m_filter(f) {
+    FilterPlot(DeviceBody* b, int f) : Plot(b, 172), m_filter(f) {
+        setObjectName(QString("osmiumFilter_%1").arg(f));
+        setProperty("mapTarget", b->target(mo::fparam(f, mo::FCutoff))); installEventFilter(b); setAcceptDrops(true);
+        setMinimumHeight(132); setMaximumHeight(QWIDGETSIZE_MAX); setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
         setCursor(Qt::SizeAllCursor);
         InfoView::attach(this, "Filter", "Drag horizontally for cutoff and vertically for resonance. The accent range around Cutoff controls how far modulation opens the filter.");
     }
 protected:
     void draw(QPainter& p, const QRectF& r) override {
+        drawFreqGrid(p, r, 24);
         const float cutoff = float(m_body->real(mo::fparam(m_filter, mo::FCutoff)));
         const int type = m_body->pick(mo::fparam(m_filter, mo::FType));
         const float reso = float(m_body->pos(mo::fparam(m_filter, mo::FReso)));
@@ -348,6 +665,14 @@ protected:
             if (x == 0) path.moveTo(pt); else path.lineTo(pt);
         }
         curve(p, r, path, theme::accent);
+        const double x = freqToX(cutoff, r);
+        const double db = std::clamp(double(dsp::gainToDb(std::max(1e-5f, magnitude(cutoff)))), -24.0, 24.0);
+        const QPointF handle(x, r.center().y() - db / 24 * r.height() / 2);
+        p.setPen(QPen(theme::withAlpha(theme::accent, 85), 1, Qt::DashLine)); p.drawLine(QPointF(x, r.top()), QPointF(x, r.bottom()));
+        p.setPen(QPen(theme::accent, 1.5)); p.setBrush(theme::devDisplay); p.drawEllipse(handle, 4, 4);
+        p.setFont(pxFont(this, 9)); p.setPen(theme::textSoft);
+        p.drawText(r.adjusted(4, 3, -4, -3), Qt::AlignLeft | Qt::AlignTop, m_body->text(mo::fparam(m_filter, mo::FCutoff)));
+        p.drawText(r.adjusted(4, 3, -4, -3), Qt::AlignRight | Qt::AlignTop, QString("Q %1").arg(q, 0, 'f', 2));
     }
     void mousePressEvent(QMouseEvent* e) override { if (e->button() == Qt::LeftButton) { m_body->ctx().project->beginEdit("Filter"); m_drag = true; mouseMoveEvent(e); } }
     void mouseMoveEvent(QMouseEvent* e) override {
@@ -358,6 +683,137 @@ protected:
     }
     void mouseReleaseEvent(QMouseEvent*) override { if (m_drag) { m_drag = false; m_body->ctx().project->endEdit(); } }
 private: int m_filter; bool m_drag = false;
+};
+
+class UnisonPlot : public Plot {
+public:
+    UnisonPlot(DeviceBody* body) : Plot(body, 150) {
+        setObjectName("osmiumUnisonField"); setMinimumHeight(132); setMaximumHeight(QWIDGETSIZE_MAX);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); setCursor(Qt::SizeAllCursor);
+        InfoView::attach(this, "Unison field", "Each oscillator row shows its unison copies: horizontal position is stereo balance; vertical displacement is detune. Dot size follows oscillator level. Drag horizontally for Spread and vertically for Detune. Shift: fine. Pitch and fine tuning are listed at the left.");
+    }
+    ~UnisonPlot() override { finish(); }
+protected:
+    void draw(QPainter& p, const QRectF& bounds) override {
+        const QRectF r = bounds.adjusted(105, 12, -8, -5);
+        const int count = std::clamp(int(m_body->real(mo::Unison)), 1, 4);
+        const double spread = m_body->pos(mo::Spread), detune = m_body->real(mo::Detune);
+        const double offsets[4][4] = {{0, 0, 0, 0}, {-1, 1, 0, 0}, {-1, 0, 1, 0}, {-1, -0.33, 0.33, 1}};
+        p.setFont(pxFont(this, 9)); p.setPen(theme::textFaint);
+        p.drawText(QRectF(r.left(), bounds.top() - 3, 30, 14), Qt::AlignLeft, "L");
+        p.drawText(QRectF(r.center().x() - 15, bounds.top() - 3, 30, 14), Qt::AlignCenter, "C");
+        p.drawText(QRectF(r.right() - 30, bounds.top() - 3, 30, 14), Qt::AlignRight, "R");
+        p.setPen(QPen(theme::devGridStrong, 1, Qt::DashLine)); p.drawLine(QPointF(r.center().x(), r.top()), QPointF(r.center().x(), r.bottom()));
+        const QColor colors[] = {theme::osmiumLfo, theme::accent, theme::osmiumCurve};
+        for (int osc = 0; osc < 3; ++osc) {
+            const double y = r.top() + r.height() * (osc + 0.5) / 3;
+            const double level = m_body->pos(mo::oparam(osc, mo::Level)); const QColor color = theme::withAlpha(colors[osc], level > 0.001 ? 230 : 65);
+            p.setPen(QPen(theme::devGridStrong, 1)); p.drawLine(QPointF(r.left(), y), QPointF(r.right(), y));
+            p.setPen(theme::textSoft); p.drawText(QRectF(bounds.left(), y - 17, 98, 14), Qt::AlignLeft, QString("OSC %1").arg(osc + 1));
+            p.setPen(theme::textFaint); p.drawText(QRectF(bounds.left(), y - 1, 98, 14), Qt::AlignLeft,
+                QString("%1 · %2").arg(m_body->text(mo::oparam(osc, mo::Pitch)), m_body->text(mo::oparam(osc, mo::Fine))));
+            for (int copy = 0; copy < count; ++copy) {
+                const double offset = offsets[count - 1][copy];
+                const QPointF point(r.center().x() + offset * spread * (r.width() / 2 - 12), y - offset * detune / 50 * std::min(22.0, r.height() / 9));
+                p.setPen(QPen(theme::withAlpha(color, 80), 1)); p.drawLine(QPointF(r.center().x(), y), point);
+                p.setPen(QPen(color, 1.5)); p.setBrush(theme::withAlpha(color, 35)); p.drawEllipse(point, 4 + level * 4, 4 + level * 4);
+            }
+        }
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        if (e->button() != Qt::LeftButton) return;
+        m_press = e->position(); m_spread = m_body->pos(mo::Spread); m_detune = m_body->pos(mo::Detune);
+        m_body->ctx().project->beginEdit("Shape Unison Field"); m_drag = true;
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (!m_drag || !(e->buttons() & Qt::LeftButton)) return;
+        const double scale = e->modifiers() & Qt::ShiftModifier ? 0.1 : 1;
+        m_body->editMany({{mo::Spread, m_spread + (e->position().x() - m_press.x()) / 250 * scale}, {mo::Detune, m_detune + (m_press.y() - e->position().y()) / 150 * scale}}, 28);
+    }
+    void mouseReleaseEvent(QMouseEvent*) override { finish(); }
+private:
+    void finish() { if (m_drag) { m_drag = false; m_body->ctx().project->endEdit(); } }
+    bool m_drag = false; QPointF m_press; double m_spread = 0, m_detune = 0;
+};
+
+// These displays describe the corresponding settings; the EQ uses the processor's exact shelves.
+class FxPlot : public Plot {
+public:
+    FxPlot(DeviceBody* body, int section) : Plot(body, 150), m_section(section) {
+        setObjectName(QString("osmiumFxPlot_%1").arg(section)); setMinimumHeight(100); setMaximumHeight(QWIDGETSIZE_MAX);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        const QStringList help{
+            "The two traces show the left and right chorus delay modulation, in milliseconds, over one second. Rate changes their speed; Depth changes the delay excursion.",
+            "Each alternating stereo tap is one synced delay repeat. Height follows Mix and the processor's 0.95-scaled Feedback; Tone darkens successive repeats.",
+            "The envelope estimates the four comb lines' decay from Room Size and Mix. It describes the tail shape rather than measuring the current audio.",
+            "The actual 120 Hz low shelf and 6 kHz high shelf used by the processor, plotted from 20 Hz to 20 kHz. Drag horizontally for Low EQ, vertically for High EQ."
+        };
+        InfoView::attach(this, QStringList{"Chorus modulation", "Ping-pong repeats", "Reverb decay", "EQ response"}[section], help[section]);
+        if (section == 3) setCursor(Qt::SizeAllCursor);
+    }
+protected:
+    void draw(QPainter& p, const QRectF& r) override {
+        if (m_section == 3) {
+            drawFreqGrid(p, r, 24); dsp::Biquad low, high;
+            low.lowShelf(120, float(m_body->real(mo::fx(mo::EqLow))), 48000); high.highShelf(6000, float(m_body->real(mo::fx(mo::EqHigh))), 48000);
+            QPainterPath path;
+            for (int x = 0; x <= int(r.width()); ++x) {
+                const float f = float(xToFreq(r.left() + x, r));
+                const double db = dsp::gainToDb(std::max(1e-5f, low.magnitude(f, 48000) * high.magnitude(f, 48000)));
+                const QPointF point(r.left() + x, r.center().y() - db / 24 * r.height() * 0.5);
+                if (x == 0) path.moveTo(point); else path.lineTo(point);
+            }
+            curve(p, r, path, theme::accent); return;
+        }
+        grid(p, r, 8); p.setFont(pxFont(this, 9));
+        if (m_section == 0) {
+            const double rate = m_body->real(mo::fx(mo::ChorusRate)), depth = m_body->pos(mo::fx(mo::ChorusDepth));
+            for (int channel = 0; channel < 2; ++channel) {
+                QPainterPath path;
+                for (int x = 0; x <= int(r.width()); ++x) {
+                    const double ms = 7 + 6 * depth * (0.5 + 0.5 * std::sin(2 * kPi * (rate * x / r.width() + channel * 0.5)));
+                    const QPointF point(r.left() + x, r.bottom() - (ms - 5) / 10 * r.height());
+                    if (x == 0) path.moveTo(point); else path.lineTo(point);
+                }
+                p.setPen(QPen(channel ? theme::accent : theme::osmiumLfo, 1.7)); p.drawPath(path);
+            }
+            p.setPen(theme::textFaint); p.drawText(r.adjusted(3, 2, -3, -2), Qt::AlignLeft | Qt::AlignTop, "15 ms");
+            p.drawText(r.adjusted(3, 2, -3, -2), Qt::AlignRight | Qt::AlignBottom, "1 s");
+        } else if (m_section == 1) {
+            const double feedback = m_body->pos(mo::fx(mo::DelayFeedback)) * 0.95, mix = m_body->pos(mo::fx(mo::DelayMix));
+            const double time = m_body->real(mo::fx(mo::DelayTime)), tone = m_body->pos(mo::fx(mo::DelayTone));
+            const double span = std::max(4.0, time * 5), spacing = r.width() * time / span;
+            for (int tap = 0; tap * time < span; ++tap) {
+                const double x = r.left() + (tap + 0.5) * spacing;
+                const double level = std::pow(feedback, tap) * mix, height = r.height() * level * 0.8;
+                const QColor color = theme::withAlpha(tap % 2 ? theme::accent : theme::osmiumLfo, int(std::max(40.0, 220 - tap * (20 - 14 * tone))));
+                p.setPen(QPen(color, std::clamp(spacing * 0.25, 3.0, 9.0), Qt::SolidLine, Qt::RoundCap)); p.drawLine(QPointF(x, r.bottom() - 2), QPointF(x, r.bottom() - std::max(2.0, height)));
+                if (spacing >= 18) { p.setPen(theme::textFaint); p.drawText(QRectF(x - 10, r.top() + 2, 20, 13), Qt::AlignCenter, tap % 2 ? "R" : "L"); }
+            }
+            p.setPen(theme::textFaint); p.drawText(r.adjusted(3, 2, -3, -2), Qt::AlignRight | Qt::AlignBottom, QString("%1 beats").arg(span, 0, 'g', 2));
+        } else {
+            const double size = m_body->pos(mo::fx(mo::ReverbSize)), mix = m_body->pos(mo::fx(mo::ReverbMix));
+            const double feedback = 0.7 + 0.22 * size, period = 0.0379 * (0.6 + 1.2 * size);
+            QPainterPath path; path.moveTo(r.bottomLeft());
+            for (int x = 0; x <= int(r.width()); ++x) {
+                const double time = 3.0 * x / r.width(), amplitude = mix * std::pow(feedback, time / period);
+                path.lineTo(r.left() + x, r.bottom() - r.height() * amplitude * (0.72 + 0.18 * std::sin(x * 1.73) + 0.1 * std::cos(x * 3.13)));
+            }
+            curve(p, r, path, theme::osmiumCurve);
+            p.setPen(theme::textFaint); p.drawText(r.adjusted(3, 2, -3, -2), Qt::AlignRight | Qt::AlignBottom, "3 s");
+        }
+    }
+    void mousePressEvent(QMouseEvent* e) override {
+        if (m_section != 3 || e->button() != Qt::LeftButton) return;
+        m_press = e->position(); m_low = m_body->pos(mo::fx(mo::EqLow)); m_high = m_body->pos(mo::fx(mo::EqHigh));
+        m_body->ctx().project->beginEdit("Shape Oscillator EQ"); m_drag = true;
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if (m_drag && (e->buttons() & Qt::LeftButton)) m_body->editMany({{mo::fx(mo::EqLow), m_low + (e->position().x() - m_press.x()) / 180}, {mo::fx(mo::EqHigh), m_high + (m_press.y() - e->position().y()) / 180}}, 29);
+    }
+    void mouseReleaseEvent(QMouseEvent*) override { if (m_drag) { m_drag = false; m_body->ctx().project->endEdit(); } }
+private:
+    int m_section; bool m_drag = false; QPointF m_press; double m_low = 0, m_high = 0;
 };
 
 class EnvelopePlot : public Plot {
@@ -767,21 +1223,40 @@ protected:
 private: std::function<int()> m_source, m_param;
 };
 
-// Reflow the five sound sections without shrinking their knobs.
+// Give each oscillator a useful drawing area; wrap complete cards before controls get cramped.
 class SoundPage : public QWidget {
 public:
     SoundPage(std::vector<QWidget*> cells, QWidget* parent) : QWidget(parent), m_cells(std::move(cells)) {
-        m_grid = new QGridLayout(this); m_grid->setContentsMargins(0, 0, 0, 0); m_grid->setSpacing(8);
-        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(520); reflow(2);
+        setObjectName("osmiumSoundPage");
+        m_grid = new QGridLayout(this); m_grid->setContentsMargins(0, 0, 0, 0); m_grid->setSpacing(7);
+        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(620); reflow(2);
     }
 protected:
-    void resizeEvent(QResizeEvent* e) override { QWidget::resizeEvent(e); const int columns = width() >= 1160 ? 5 : width() >= 780 ? 3 : 2; if (columns != m_columns) reflow(columns); }
+    void resizeEvent(QResizeEvent* e) override {
+        QWidget::resizeEvent(e); const int columns = width() >= 1420 ? 5 : width() >= 930 ? 3 : 2;
+        if (columns != m_columns) reflow(columns);
+    }
 private:
     void reflow(int columns) {
-        m_columns = columns;
+        m_columns = columns; setProperty("columns", columns);
         while (auto* item = m_grid->takeAt(0)) delete item;
-        for (int c = 0; c < 5; ++c) m_grid->setColumnStretch(c, c < columns ? (columns == 5 && c < 3 ? 4 : columns == 5 ? 3 : 1) : 0);
-        for (int i = 0; i < 5; ++i) m_grid->addWidget(m_cells[size_t(i)], i / columns, i % columns);
+        for (int c = 0; c < 6; ++c) m_grid->setColumnStretch(c, 0);
+        for (int r = 0; r < 3; ++r) m_grid->setRowStretch(r, 0);
+        if (columns == 5) {
+            for (int c = 0; c < 5; ++c) { m_grid->setColumnStretch(c, c < 3 ? 4 : 3); m_grid->addWidget(m_cells[size_t(c)], 0, c); }
+            m_grid->setRowStretch(0, 1);
+        } else if (columns == 3) {
+            for (int c = 0; c < 6; ++c) m_grid->setColumnStretch(c, 1);
+            for (int o = 0; o < 3; ++o) m_grid->addWidget(m_cells[size_t(o)], 0, o * 2, 1, 2);
+            for (int f = 0; f < 2; ++f) m_grid->addWidget(m_cells[size_t(f + 3)], 1, f * 3, 1, 3);
+            m_grid->setRowStretch(0, 1); m_grid->setRowStretch(1, 1);
+        } else {
+            m_grid->setColumnStretch(0, 1); m_grid->setColumnStretch(1, 1);
+            m_grid->addWidget(m_cells[0], 0, 0); m_grid->addWidget(m_cells[1], 0, 1);
+            m_grid->addWidget(m_cells[2], 1, 0, 1, 2);
+            m_grid->addWidget(m_cells[3], 2, 0); m_grid->addWidget(m_cells[4], 2, 1);
+            for (int r = 0; r < 3; ++r) m_grid->setRowStretch(r, 1);
+        }
         setMinimumHeight(m_grid->minimumSize().height()); m_grid->activate();
     }
     std::vector<QWidget*> m_cells; QGridLayout* m_grid; int m_columns = 0;
@@ -792,23 +1267,66 @@ class VoiceGrid : public QWidget {
 public:
     VoiceGrid(std::vector<QWidget*> controls, QWidget* parent) : QWidget(parent), m_controls(std::move(controls)) {
         m_grid = new QGridLayout(this); m_grid->setContentsMargins(4, 6, 4, 4); m_grid->setSpacing(8);
-        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(430); reflow(7);
+        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(188); reflow(7);
     }
 protected:
     void resizeEvent(QResizeEvent* e) override {
-        QWidget::resizeEvent(e); const int columns = std::clamp((width() - 8) / 108, 4, 12); if (columns != m_columns) reflow(columns);
+        QWidget::resizeEvent(e); const int columns = std::clamp((width() - 8) / 89, 2, 14); if (columns != m_columns) reflow(columns);
     }
 private:
     void reflow(int columns) {
         m_columns = columns;
         while (auto* item = m_grid->takeAt(0)) delete item;
         for (int r = 0; r < m_grid->rowCount(); ++r) m_grid->setRowStretch(r, 0);
-        for (int c = 0; c < 12; ++c) m_grid->setColumnStretch(c, c < columns ? 1 : 0);
+        for (int c = 0; c < 14; ++c) m_grid->setColumnStretch(c, c < columns ? 1 : 0);
         for (int i = 0; i < int(m_controls.size()); ++i) m_grid->addWidget(m_controls[size_t(i)], i / columns, i % columns, Qt::AlignTop | Qt::AlignHCenter);
         m_grid->setRowStretch((int(m_controls.size()) + columns - 1) / columns, 1);
         setMinimumHeight(m_grid->minimumSize().height()); m_grid->activate();
     }
     std::vector<QWidget*> m_controls; QGridLayout* m_grid; int m_columns = 0;
+};
+
+class VoiceSections : public QWidget {
+public:
+    VoiceSections(std::vector<QWidget*> cards, QWidget* parent) : QWidget(parent), m_cards(std::move(cards)) {
+        m_grid = new QGridLayout(this); m_grid->setContentsMargins(0, 0, 0, 0); m_grid->setSpacing(7);
+        m_grid->setSizeConstraint(QLayout::SetNoConstraint); setMinimumWidth(620); reflow(2);
+    }
+protected:
+    void resizeEvent(QResizeEvent* e) override { QWidget::resizeEvent(e); const int columns = width() >= 1100 ? 3 : 2; if (columns != m_columns) reflow(columns); }
+private:
+    void reflow(int columns) {
+        m_columns = columns;
+        while (auto* item = m_grid->takeAt(0)) delete item;
+        for (int column = 0; column < 3; ++column) m_grid->setColumnStretch(column, column < columns ? 1 : 0);
+        for (int card = 0; card < int(m_cards.size()); ++card) {
+            const bool lastFull = columns == 2 && card + 1 == int(m_cards.size()) && card % 2 == 0;
+            m_grid->addWidget(m_cards[size_t(card)], card / columns, card % columns, 1, lastFull ? 2 : 1);
+        }
+        setMinimumHeight(m_grid->minimumSize().height()); m_grid->activate();
+    }
+    std::vector<QWidget*> m_cards; QGridLayout* m_grid; int m_columns = 0;
+};
+
+class EffectGrid : public QWidget {
+public:
+    EffectGrid(std::vector<QWidget*> cells, QWidget* parent) : QWidget(parent), m_cells(std::move(cells)) {
+        setObjectName("osmiumEffectGrid"); m_grid = new QGridLayout(this);
+        m_grid->setContentsMargins(0, 0, 0, 0); m_grid->setSpacing(7); m_grid->setSizeConstraint(QLayout::SetNoConstraint);
+        setMinimumWidth(620); reflow(2);
+    }
+protected:
+    void resizeEvent(QResizeEvent* e) override { QWidget::resizeEvent(e); const int columns = width() >= 1320 ? 4 : 2; if (columns != m_columns) reflow(columns); }
+private:
+    void reflow(int columns) {
+        m_columns = columns;
+        while (auto* item = m_grid->takeAt(0)) delete item;
+        for (int column = 0; column < 4; ++column) m_grid->setColumnStretch(column, column < columns ? 1 : 0);
+        for (int row = 0; row < 2; ++row) m_grid->setRowStretch(row, row < 4 / columns ? 1 : 0);
+        for (int cell = 0; cell < 4; ++cell) m_grid->addWidget(m_cells[size_t(cell)], cell / columns, cell % columns);
+        setMinimumHeight(m_grid->minimumSize().height()); m_grid->activate();
+    }
+    std::vector<QWidget*> m_cells; QGridLayout* m_grid; int m_columns = 0;
 };
 
 class OsmiumEditor : public DeviceBody {
@@ -819,23 +1337,9 @@ public:
         auto* header = hbox(12);
         auto* title = new QLabel("OSMIUM", this); title->setObjectName("osmiumTitle"); header->addWidget(title);
         header->addSpacing(22);
-        m_patches = new ChoiceBox(this); m_patches->setObjectName("osmiumPatch"); m_patches->setFixedWidth(258);
-        m_patches->addItems({"Init", "Basalt Bass", "Obsidian Reese", "Glacial Pad", "Pressure Sequence"});
-        m_patches->insertSeparator(m_patches->count());
-        bool basses = false;   // the wobble basses (Dubstep, DnB Bass) follow the Drum & Bass bank after a separator
-        for (const auto& patch : osmium::factoryPresets()) {
-            const QLatin1String category(patch.category);
-            if (!basses && (category == QLatin1String("Dubstep") || category == QLatin1String("DnB Bass"))) { m_patches->insertSeparator(m_patches->count()); basses = true; }
-            m_patches->addItem(QString::fromUtf8(patch.name).mid(7), QString::fromUtf8(patch.name));
-            m_patches->setItemData(m_patches->count() - 1, QString::fromUtf8(patch.description), Qt::ToolTipRole);
-        }
-        m_patches->setMaxVisibleItems(16); m_patches->setEditable(true); m_patches->setInsertPolicy(QComboBox::NoInsert);
-        m_patches->completer()->setFilterMode(Qt::MatchContains); m_patches->completer()->setCaseSensitivity(Qt::CaseInsensitive);
-        if (device()) { const int item = m_patches->findData(device()->name); if (item >= 0) m_patches->setCurrentIndex(item); m_presetName = device()->name; }
-        InfoView::attach(m_patches, "Patch", "Type to search 60 factory presets: 40 Drum & Bass sounds, 20 Dubstep and DnB wobble basses, plus the original starting patches. "
-                         "Loading a patch replaces the parameters, curves and routes in one undo step. Factory macros: Tone, Warp, Drive, Width, Space, Echo, Body and Air. "
-                         "The wobble basses draw their rate changes into Curve 1; automate Curve 1 Rate to stretch or speed up the whole phrase.");
-        connect(m_patches, &QComboBox::activated, this, [this](int i) { loadPatch(i); }); header->addWidget(m_patches);
+        m_patches = patchPicker(this, "osmiumPatch"); m_patches->setFixedWidth(258);
+        syncPatchPicker(this, m_patches);
+        connect(m_patches, &QComboBox::activated, this, [this](int i) { loadPatch(this, m_patches, i); }); header->addWidget(m_patches);
         header->addStretch();
         auto* voices = new QLabel(this); header->addWidget(voices);
         m_refreshers.push_back([this, voices] { voices->setText(QString("%1 / 8 voices").arg(int(meter(0)))); });
@@ -885,7 +1389,7 @@ public:
         m_pages->addWidget(voice()); m_pages->addWidget(effects());
         pane->addWidget(m_pages); workspace->addWidget(panel, 1);
 
-        auto* inspector = card(); inspector->setFixedWidth(256); auto* ins = new QVBoxLayout(inspector); ins->setContentsMargins(14, 12, 14, 12); ins->setSpacing(7);
+        auto* inspector = card(); inspector->setObjectName("osmiumRangeInspector"); inspector->setFixedWidth(216); auto* ins = new QVBoxLayout(inspector); ins->setContentsMargins(10, 10, 10, 10); ins->setSpacing(6);
         auto* rangeTitle = new QLabel("MODULATION RANGE", inspector); rangeTitle->setObjectName("osmiumCaption"); ins->addWidget(rangeTitle);
         m_destination = new QLabel(inspector); ins->addWidget(m_destination);
         ins->addWidget(new RangePlot(this, [this] { return m_source; }, [this] { return m_focus; }));
@@ -925,10 +1429,7 @@ public:
     void refresh() override {
         DeviceBody::refresh();
         if (!m_destination) return;
-        if (device() && device()->name != m_presetName) {
-            m_presetName = device()->name;
-            const int item = m_patches->findData(m_presetName); m_patches->setCurrentIndex(item >= 0 ? item : 0);
-        }
+        syncPatchPicker(this, m_patches);
         m_destination->setText(name(m_focus));
         const auto r = routeFor(this, m_source, m_focus);
         m_amount->setValue(r.amount * 100, false);
@@ -975,7 +1476,7 @@ private:
         auto* b = new QPushButton(text, this); b->setMinimumHeight(26); b->setCursor(Qt::PointingHandCursor);
         InfoView::attach(b, text, help); connect(b, &QPushButton::clicked, this, std::move(fn)); return b;
     }
-    QFrame* card() { auto* f = new QFrame(this); f->setObjectName("osmiumCard"); return f; }
+    QFrame* card() { auto* f = new QFrame(this); f->setObjectName("osmiumCard"); f->setProperty("osmiumCard", true); return f; }
     QWidget* dial(int i, const QString& name = {}, int size = 36) {
         m_used.insert(i);
         return new RangeKnob(this, i, name.isEmpty() ? this->name(i) : name, size, [this] { return m_source; }, [this](int p) { m_focus = p; refresh(); }, [this](int s) { selectSource(s, false); });
@@ -995,22 +1496,54 @@ private:
         auto* w = new QWidget(this); auto* l = vbox(3); l->addWidget(new QLabel(label, w)); l->addWidget(choice(i, width)); l->addStretch(); w->setLayout(l); return w;
     }
     QWidget* oscillator(int o) {
-        auto* box = card(); auto* l = new QVBoxLayout(box); l->setContentsMargins(10, 10, 10, 8); l->setSpacing(6);
-        auto* top = hbox(4); auto* name = new QLabel(QString("OSC %1").arg(o + 1), box); name->setObjectName("osmiumCaption"); top->addWidget(name); top->addStretch();
-        top->addWidget(choice(mo::oparam(o, mo::Table), 106)); l->addLayout(top);
-        l->addWidget(new WavePlot(this, o, 46));
-        auto* knobs = hbox(3); knobs->addStretch(); knobs->addWidget(dial(mo::oparam(o, mo::Position), "Position", 52));
-        knobs->addWidget(dial(mo::oparam(o, mo::Intensity), "Warp", 44)); knobs->addWidget(dial(mo::oparam(o, mo::Level), "Level", 44)); knobs->addStretch(); l->addLayout(knobs);
-        auto* bottom = hbox(4); bottom->addWidget(choice(mo::oparam(o, mo::Mode), 78)); bottom->addWidget(new QLabel("Pitch", box));
-        m_used.insert(mo::oparam(o, mo::Pitch)); auto* pitch = field(mo::oparam(o, mo::Pitch), 46); pitch->setAcceptDrops(true); pitch->installEventFilter(this); bottom->addWidget(pitch); l->addLayout(bottom);
-        return box;
+        auto* box = card(); box->setObjectName(QString("osmiumOscillator_%1").arg(o)); box->setProperty("osmiumCard", true);
+        auto* l = new QVBoxLayout(box); l->setContentsMargins(9, 8, 9, 8); l->setSpacing(5);
+        auto* top = hbox(7); auto* title = new QLabel(QString("OSC %1").arg(o + 1), box); title->setObjectName("osmiumCaption"); top->addWidget(title);
+        m_used.insert(mo::oparam(o, mo::Table)); m_used.insert(osmium::tableExtension(o));
+        auto* tables = new TablePicker(this, o); top->addWidget(tables, 1); m_refreshers.push_back([tables] { tables->refresh(); }); l->addLayout(top);
+        l->addWidget(new WavePlot(this, o), 1);
+        auto* knobs = hbox(3); knobs->addStretch();
+        knobs->addWidget(dial(mo::oparam(o, mo::Position), "Position", 64));
+        knobs->addWidget(dial(mo::oparam(o, mo::Intensity), "Warp", 52));
+        knobs->addWidget(dial(osmium::fold(o), "Fold", 52));
+        knobs->addWidget(dial(mo::oparam(o, mo::Level), "Level", 52)); knobs->addStretch(); l->addLayout(knobs);
+        auto* bottom = hbox(5);
+        m_used.insert(mo::oparam(o, mo::Mode)); m_used.insert(osmium::warpExtension(o));
+        auto* mode = new ChoiceBox(this); mode->setObjectName(QString("osmiumWarpMode_%1").arg(o));
+        mode->setAcceptDrops(true); mode->installEventFilter(this);
+        mode->addItems({"Bend", "Formant", "Sync", "Phase", "Fold", "Asym", "Steps", "Cross FM"}); mode->setMinimumWidth(82); bottom->addWidget(mode, 1);
+        connect(mode, &QComboBox::activated, this, [this, o](int index) {
+            ctx().project->beginEdit("Select Oscillator Warp");
+            if (index < 3) editMany({{mo::oparam(o, mo::Mode), choicePosition(index, 3)}, {osmium::warpExtension(o), 0}}, 30 + o);
+            else edit(osmium::warpExtension(o), choicePosition(index - 2, 6));
+            ctx().project->endEdit();
+        });
+        m_refreshers.push_back([this, o, mode] {
+            const int index = osmium::warpMode(pos(mo::oparam(o, mo::Mode)), pos(osmium::warpExtension(o)));
+            mode->setCurrentIndex(index); mode->setProperty("mapTarget", target(index >= 3 ? osmium::warpExtension(o) : mo::oparam(o, mo::Mode)));
+        });
+        InfoView::attach(mode, "Oscillator warp", "Bend, Formant and Sync reshape phase. Phase adds phase distortion; Fold, Asym and Steps reshape the cycle. Cross FM takes its phase modulation from the next oscillator, independently of that oscillator's level. Warp sets the depth; Fold adds a separate wavefold stage.");
+        auto addField = [this, bottom, box](int param, const QString& label, int width) {
+            bottom->addWidget(new QLabel(label, box)); m_used.insert(param);
+            auto* value = field(param, width); value->setAcceptDrops(true); value->installEventFilter(this); bottom->addWidget(value);
+        };
+        addField(mo::oparam(o, mo::Pitch), "Pitch", 42); addField(mo::oparam(o, mo::Fine), "Fine", 44);
+        l->addLayout(bottom); return box;
     }
     QWidget* filter(int f) {
-        auto* box = card(); auto* l = new QVBoxLayout(box); l->setContentsMargins(10, 10, 10, 8); l->setSpacing(6);
-        auto* title = new QLabel(QString("FILTER %1").arg(f + 1), box); title->setObjectName("osmiumCaption"); l->addWidget(title);
-        l->addWidget(choice(mo::fparam(f, mo::FType))); l->addWidget(new FilterPlot(this, f));
-        auto* knobs = hbox(0); knobs->addStretch(); knobs->addWidget(dial(mo::fparam(f, mo::FCutoff), "Cutoff", 52)); knobs->addWidget(dial(mo::fparam(f, mo::FReso), "Resonance", 44)); knobs->addStretch(); l->addLayout(knobs); l->addStretch();
-        return box;
+        auto* box = card(); box->setObjectName(QString("osmiumFilterCard_%1").arg(f)); box->setProperty("osmiumCard", true);
+        auto* l = new QVBoxLayout(box); l->setContentsMargins(9, 8, 9, 8); l->setSpacing(5);
+        auto* top = hbox(6); auto* title = new QLabel(QString("FILTER %1").arg(f + 1), box); title->setObjectName("osmiumCaption"); top->addWidget(title);
+        top->addWidget(choice(mo::fparam(f, mo::FType)), 1); l->addLayout(top);
+        l->addWidget(new FilterPlot(this, f), 1);
+        auto* knobs = hbox(2); knobs->addStretch();
+        knobs->addWidget(dial(mo::fparam(f, mo::FCutoff), "Cutoff", 64)); knobs->addWidget(dial(mo::fparam(f, mo::FReso), "Resonance", 52));
+        knobs->addWidget(dial(f == 0 ? mo::FDrive : mo::FMix, f == 0 ? "Drive" : "Mix", 52)); knobs->addStretch(); l->addLayout(knobs);
+        auto* footer = hbox(5);
+        const int footerParam = f == 0 ? mo::FRouting : mo::Feedback;
+        footer->addWidget(new QLabel(f == 0 ? "Routing" : "Feedback", box));
+        auto* value = field(footerParam, 50); value->setAcceptDrops(true); value->installEventFilter(this); footer->addWidget(value); m_used.insert(footerParam);
+        footer->addStretch(); l->addLayout(footer); return box;
     }
     void expandPlot(Plot* plot, int height) {
         plot->setMinimumHeight(height); plot->setMaximumHeight(QWIDGETSIZE_MAX); plot->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -1099,26 +1632,56 @@ private:
         return w;
     }
     QWidget* effects() {
-        auto* scroll = new QScrollArea(this); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
-        auto* w = new QWidget(scroll); auto* grid = new QGridLayout(w); grid->setContentsMargins(4, 8, 4, 4); grid->setSpacing(10);
-        const QStringList names{"Chorus rate", "Depth", "Chorus mix", "Delay time", "Feedback", "Tone", "Delay mix", "Room size", "Reverb mix", "Low EQ", "High EQ"};
-        for (int k = 0; k < mo::kFx; ++k) {
-            const int i = mo::kFxBase + k; const auto kind = specOf(ctx().type)->params[size_t(i)].kind;
-            grid->addWidget(kind == ParamKind::Choice ? labelledChoice(i, names[k]) : dial(i, names[k], 38), k / 6, k % 6, Qt::AlignTop | Qt::AlignHCenter);
+        std::vector<QWidget*> cards;
+        const QStringList titles{"CHORUS", "PING-PONG DELAY", "REVERB", "EQ"};
+        const std::vector<std::vector<mo::FxKnob>> params{
+            {mo::ChorusRate, mo::ChorusDepth, mo::ChorusMix},
+            {mo::DelayTime, mo::DelayFeedback, mo::DelayTone, mo::DelayMix},
+            {mo::ReverbSize, mo::ReverbMix}, {mo::EqLow, mo::EqHigh}
+        };
+        const std::vector<QStringList> labels{{"Rate", "Depth", "Mix"}, {"Time", "Feedback", "Tone", "Mix"}, {"Size", "Mix"}, {"Low", "High"}};
+        for (int section = 0; section < 4; ++section) {
+            auto* box = card(); box->setProperty("osmiumCard", true); box->setObjectName(QString("osmiumFxCard_%1").arg(section));
+            auto* layout = new QVBoxLayout(box); layout->setContentsMargins(9, 8, 9, 8); layout->setSpacing(6);
+            auto* title = new QLabel(titles[section], box); title->setObjectName("osmiumCaption"); layout->addWidget(title);
+            layout->addWidget(new FxPlot(this, section), 1);
+            auto* controls = hbox(4); controls->addStretch();
+            for (int k = 0; k < int(params[size_t(section)].size()); ++k) {
+                const int param = mo::fx(params[size_t(section)][size_t(k)]); const auto kind = specOf(ctx().type)->params[size_t(param)].kind;
+                controls->addWidget(kind == ParamKind::Choice ? labelledChoice(param, labels[size_t(section)][k], 74) : dial(param, labels[size_t(section)][k], 52), 0, Qt::AlignTop);
+            }
+            controls->addStretch(); layout->addLayout(controls); cards.push_back(box);
         }
-        grid->setRowStretch(2, 1); scroll->setWidget(w); return scroll;
+        return scrollPage(new EffectGrid(std::move(cards), this));
     }
     QWidget* voice() {
         auto* scroll = new QScrollArea(this); scroll->setObjectName("osmiumVoiceScroll"); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
-        std::vector<QWidget*> controls;
-        // FX, macros and output are built below; all other unused parameters belong here.
-        for (int i = 0; i < count(); ++i) {
-            if (m_used.count(i) || i == mo::Volume || (i >= mo::kFxBase && i < mo::kFxBase + mo::kFx)) continue;
-            bool macro = false; for (int k = 0; k < 8; ++k) macro |= i == mo::macro(k); if (macro) continue;
-            const auto& p = specOf(ctx().type)->params[size_t(i)];
-            controls.push_back(p.kind == ParamKind::Choice || p.kind == ParamKind::Toggle ? labelledChoice(i, p.name, 96) : dial(i, p.name, 64));
+        auto* content = new QWidget(scroll); auto* layout = new QVBoxLayout(content); layout->setContentsMargins(0, 0, 0, 0); layout->setSpacing(7);
+        std::vector<QWidget*> groups;
+        const auto addGroup = [this, &groups](const QString& title, const std::vector<int>& params) {
+            std::vector<QWidget*> controls;
+            for (int param : params) {
+                if (param < 0 || param >= count() || m_used.count(param)) continue;
+                const auto& spec = specOf(ctx().type)->params[size_t(param)];
+                controls.push_back(spec.kind == ParamKind::Choice || spec.kind == ParamKind::Toggle ? labelledChoice(param, spec.name, 78) : dial(param, spec.name, 52));
+            }
+            if (controls.empty()) return;
+            auto* box = card(); box->setProperty("osmiumCard", true); auto* group = new QVBoxLayout(box); group->setContentsMargins(9, 6, 9, 3); group->setSpacing(1);
+            auto* caption = new QLabel(title, box); caption->setObjectName("osmiumCaption"); group->addWidget(caption);
+            group->addWidget(new VoiceGrid(std::move(controls), box)); groups.push_back(box);
+        };
+        addGroup("VOICE", {mo::Glide, mo::VoiceMode, mo::Unison, mo::Detune, mo::Spread, mo::VelAmp, mo::KeyTrack, mo::BendRange, mo::OscRestart});
+        addGroup("SOURCES & INSERT", {mo::ModPitch, mo::ModOscWave, mo::ModPhase, mo::ModRing, mo::NoiseLevel, mo::NoiseColor, mo::InsertType, mo::InsertAmount});
+        addGroup("SUB & OSCILLATOR MIXER", {mo::SubLevel, mo::SubOct, mo::SubWave, mo::oparam(0, mo::FilterMix), mo::oparam(1, mo::FilterMix), mo::oparam(2, mo::FilterMix)});
+        std::vector<int> remaining;
+        for (int param = 0; param < count(); ++param) {
+            if (m_used.count(param) || param == mo::Volume || (param >= mo::kFxBase && param < mo::kFxBase + mo::kFx)) continue;
+            bool macro = false; for (int k = 0; k < 8; ++k) macro |= param == mo::macro(k);
+            if (!macro) remaining.push_back(param);
         }
-        scroll->setWidget(new VoiceGrid(std::move(controls), scroll)); return scroll;
+        addGroup("PERFORMANCE", remaining);
+        layout->addWidget(new VoiceSections(std::move(groups), content));
+        layout->addWidget(new UnisonPlot(this), 1); scroll->setWidget(content); return scroll;
     }
     QWidget* scrollPage(QWidget* w) {
         auto* scroll = new QScrollArea(this); scroll->setWidgetResizable(true); scroll->setFrameShape(QFrame::NoFrame);
@@ -1140,37 +1703,10 @@ private:
         if (count == 0) { auto* label = new QLabel("No assignments", this); label->setObjectName("osmiumCaption"); m_routes->addWidget(label); }
         m_routes->addStretch();
     }
-    void loadPatch(int i) {
-        if (i < 0 || i >= m_patches->count()) return;
-        const auto* patch = osmium::factoryPreset(m_patches->itemData(i).toString());
-        const QStringList names{"Monolith", "Dub Wobble", "Neuro Reese", "Glass Pad", "Neuro Step"}; if (!patch && i >= names.size()) return;
-        bool renamed = false;
-        {
-            EditScope edit(ctx().project, "Load Osmium Patch");
-            Device* d = mutableDevice(this); if (!d) return;
-            const QString name = patch ? QString::fromUtf8(patch->name) : QString("Osmium");
-            renamed = d->name != name; d->name = name;
-            if (patch) osmium::applyPreset(*d, *patch);
-            else {
-                const auto* spec = deviceSpec(names[i]); const auto* defaults = specOf(DeviceType::Osmium);
-                for (int p = 0; p < d->params.size(); ++p) {
-                    d->params[p].value = p < int(spec->params.size()) ? spec->params[size_t(p)].def : defaults->params[size_t(p)].def;
-                }
-                d->mods.clear(); for (const auto& r : presetMods(names[i])) d->mods.push_back(r);
-                if (i == 0) d->mods = {{mo::SrcEnv2, mo::fparam(0, mo::FCutoff), 0.28}};
-                for (int e = 0; e < 4; ++e) { d->params[osmium::bend(e, 1)].value = 0.22; d->params[osmium::bend(e, 2)].value = 0.22; }
-                d->curves = {{{0, 0}, {0.25, 1, -0.35, 1}, {0.5, 0.15}, {0.75, 0.7, 0.3, 1}, {1, 0}}, {{0, 1, 0.35}, {0.5, 0, -0.35}, {1, 1}}};
-            }
-            m_presetName = d->name;
-            for (int p = 0; p < d->params.size(); ++p) ctx().project->touchTarget(ctx().project->indexOfTrack(ctx().trackId), target::device(ctx().deviceId, p));
-        }
-        emit ctx().project->deviceChanged(); refresh();
-        if (renamed) emit ctx().project->structureChanged();
-    }
     void applyStyle() {
         setStyleSheet(QString(
             "QWidget#osmiumEditor{background:%1;color:%5;}"
-            "QFrame#osmiumCard{background:%2;border:1px solid %4;border-radius:2px;}"
+            "QFrame[osmiumCard=\"true\"]{background:%2;border:1px solid %4;border-radius:2px;}"
             "QLabel{background:transparent;color:%5;font-size:10px;border:0;}"
             "QLabel#osmiumTitle{font-size:13px;font-weight:700;color:%5;}"
             "QLabel#osmiumCaption{font-size:9px;font-weight:600;color:%7;letter-spacing:1px;}"
@@ -1179,6 +1715,10 @@ private:
             "QComboBox{background:%3;color:%5;border:1px solid %4;border-radius:2px;min-height:24px;padding:0 20px 0 7px;font-size:10px;}"
             "QComboBox::drop-down{width:16px;border:0;} QComboBox::down-arrow{image:none;}"
             "QComboBox QAbstractItemView{background:%2;color:%5;selection-background-color:%4;}"
+            "QPushButton#osmiumTablePicker_0,QPushButton#osmiumTablePicker_1,QPushButton#osmiumTablePicker_2{text-align:left;padding-left:7px;padding-right:20px;}"
+            "QTreeWidget{background:%3;color:%5;border:0;outline:0;font-size:11px;}"
+            "QTreeWidget::item{padding:2px;} QTreeWidget::item:selected{background:%4;color:%5;}"
+            "QLineEdit{background:%3;color:%5;border:1px solid %4;border-radius:2px;padding:4px;font-size:11px;}"
             "QScrollArea{background:transparent;border:0;} QScrollArea>QWidget>QWidget{background:transparent;}"
         ).arg(theme::panel.name(), theme::devCell.name(), theme::devDisplay.name(), theme::devSeparator.name(),
               theme::text.name(), theme::accent.name(), theme::textFaint.name(), theme::devButtonOnText.name()));
@@ -1188,7 +1728,7 @@ private:
     std::set<int> m_used; std::map<int, QWidget*> m_sourcePages;
     std::vector<std::pair<int, SourceButton*>> m_sources; std::vector<QPushButton*> m_pagesButtons;
     QStackedWidget* m_pages = nullptr; QStackedWidget* m_modulators = nullptr; QWidget* m_performance = nullptr;
-    QComboBox* m_other = nullptr; QComboBox* m_patches = nullptr; QString m_presetName;
+    QComboBox* m_other = nullptr; QComboBox* m_patches = nullptr;
     QLabel* m_sourceTitle = nullptr; QLabel* m_destination = nullptr; QLabel* m_rangeLabel = nullptr;
     DragValue* m_amount = nullptr; QVBoxLayout* m_routes = nullptr; QString m_routesSignature;
 };
@@ -1197,9 +1737,17 @@ class OsmiumBody : public DeviceBody {
 public:
     OsmiumBody(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
         setFixedWidth(502);
-        auto* root = rootRow(this, 10); auto* left = vbox(6);
-        auto* title = new QLabel("OSMIUM", this); title->setStyleSheet(QString("color:%1;font-size:13px;font-weight:700;").arg(theme::text.name())); left->addWidget(title);
-        left->addWidget(new WavePlot(this, 0, 58));
+        setObjectName("osmiumCompact");
+        auto* outer = new QVBoxLayout(this); outer->setContentsMargins(10, 6, 10, 6); outer->setSpacing(6);
+        auto* header = hbox(4);
+        auto* title = new QLabel("OSMIUM", this); title->setStyleSheet(QString("color:%1;font-size:13px;font-weight:700;").arg(theme::text.name())); header->addWidget(title);
+        header->addSpacing(6);
+        m_patches = patchPicker(this, "osmiumCompactPatch"); m_patches->setMinimumWidth(200);
+        header->addWidget(m_patches, 1); header->addWidget(patchArrow(this, m_patches, -1)); header->addWidget(patchArrow(this, m_patches, 1));
+        connect(m_patches, &QComboBox::activated, this, [this](int i) { loadPatch(this, m_patches, i); });
+        outer->addLayout(header);
+        auto* root = hbox(10); auto* left = vbox(6);
+        left->addWidget(new WavePlot(this, 0, 74), 1);
         auto* open = new QPushButton("Expand", this); open->setObjectName("osmiumOpenEditor"); open->setFixedHeight(28);
         InfoView::attach(open, "Open Osmium", "Expand the instrument inside the device pane: accent modulation ranges on the knobs, bendable envelopes, LFOs, curves, steppers, macros and effects.");
         connect(open, &QPushButton::clicked, this, [this] { emit editorRequested(); });
@@ -1209,10 +1757,13 @@ public:
             auto* k = new RangeKnob(this, p, p == mo::FDrive ? "Drive" : p == mo::Volume ? "Output" : p == mo::fparam(0, mo::FCutoff) ? "Cutoff" : "Position", 44,
                                     [] { return mo::SrcEnv2; }, [](int) {}); controls->addWidget(k, 0, Qt::AlignVCenter);
         }
-        root->addLayout(controls);
+        root->addLayout(controls); outer->addLayout(root, 1);
         refresh();
     }
+    void refresh() override { DeviceBody::refresh(); syncPatchPicker(this, m_patches); }
     DeviceBody* createEditor(QWidget* parent) override { return new OsmiumEditor(ctx(), parent); }
+private:
+    QComboBox* m_patches = nullptr;
 };
 
 } // namespace

@@ -28,6 +28,44 @@ double fall(double current, float peak) {
 
 double ceilBar(double beats) { return std::max(4.0, std::ceil(beats / 4.0 - 1e-9) * 4.0); }
 
+double nativePitchRatio(const Clip& clip) { return std::exp2((clip.transpose + clip.detune / 100.0) / 12.0); }
+double nativeEnd(const Clip& clip) {
+    const double end = clip.secondsAt(clip.loopEnd());
+    return clip.sample && clip.takes.isEmpty() ? std::min(end, clip.sample->seconds()) : end;
+}
+double nativeRecordOffset(const Clip& clip, const Track& track, double at, double now, double tempo) {
+    const double start = clip.secondsAt(clip.start), from = clip.secondsAt(clip.loopStart), end = nativeEnd(clip);
+    const double ratio = nativePitchRatio(clip);
+    double seconds;
+    if (track.playingClipBeat >= 0) {
+        seconds = clip.secondsAt(track.playingClipBeat);
+        if (clip.loop && track.playingClipPass > 1 && end > from)
+            seconds = end + (track.playingClipPass - 2) * (end - from) + seconds - from;
+        seconds -= (now - at) * 60.0 / tempo * ratio;
+    } else {
+        // A just-launched clip may precede the first engine status update.
+        seconds = start + (at - track.slotStart) * 60.0 / tempo * ratio;
+    }
+    if (clip.loop && end > from && seconds >= end) seconds = from + std::fmod(seconds - from, end - from);
+    return std::max(0.0, clip.beatAt(seconds));
+}
+double nativePlacementBeat(const ArrangementClip& placement, double sourceBeat, double tempo) {
+    const Clip& clip = *placement.clip;
+    const double loopStart = clip.secondsAt(clip.loopStart), end = nativeEnd(clip);
+    const double target = clip.secondsAt(sourceBeat);
+    if (target >= end) return -1;
+    double origin = clip.secondsAt(placement.offset);
+    if (clip.loop && end > loopStart && origin >= end)
+        origin = loopStart + std::fmod(origin - loopStart, end - loopStart);
+    double seconds = target - origin;
+    if (seconds < 0) {
+        if (!clip.loop || target < loopStart || end <= loopStart) return -1;
+        seconds += end - loopStart;
+    }
+    const double elapsed = seconds / nativePitchRatio(clip) * tempo / 60.0;
+    return elapsed < placement.length ? placement.start + elapsed : -1;
+}
+
 } // namespace
 
 Transport::Transport(Project* project, audio::Engine* engine, QObject* parent)
@@ -198,6 +236,77 @@ void Transport::drainCapture() {
     }
 }
 
+bool Transport::captureRecovery(EditState& state, QString* error) {
+    auto track = [&](int id) -> EditState::TrackState* { for (auto& t : state.tracks) if (t.id == id) return &t; return nullptr; };
+    int nextId = state.clips.isEmpty() ? 1 : state.clips.lastKey() + 1;
+    for (const auto& take : m_takes) if (take.source) nextId = std::max(nextId, take.source->id + 1);
+    auto newId = [&] { return nextId++; };
+    auto place = [](EditState::TrackState& t, const EditState::Placed& added) {
+        QVector<EditState::Placed> kept;
+        const double end = added.start + added.length;
+        for (const auto& original : t.arrangement) {
+            const double stop = original.start + original.length;
+            if (stop <= added.start || original.start >= end) { kept.push_back(original); continue; }
+            if (original.start < added.start) { auto left = original; left.length = added.start - original.start; left.fadeOut = 0; left.fadeIn = std::min(left.fadeIn, left.length); kept.push_back(left); }
+            if (stop > end) { auto right = original; right.offset += end - original.start; right.start = end; right.length = stop - end; right.fadeIn = 0; right.fadeOut = std::min(right.fadeOut, right.length); kept.push_back(right); }
+        }
+        kept.push_back(added); std::sort(kept.begin(), kept.end(), [](const auto& a, const auto& b) { return a.start < b.start; }); t.arrangement = std::move(kept);
+    };
+    QMap<int, int> keyClips;
+    for (const auto& take : m_takes) {
+        auto* t = track(take.trackId);
+        const double length = take.end - take.start;
+        if (!t || take.audio || !take.source || length <= 0) continue;
+        Clip clip = *take.source;
+        if (!take.keys) clip.id = newId();
+        if (take.keys) { clip.length = std::max(1.0 / 16, length); keyClips.insert(take.trackId, clip.id); }
+        state.clips.insert(clip.id, clip);
+        const double offset = take.keys ? 0 : take.sourceOffset >= 0 ? take.sourceOffset : std::max(0.0, clip.positionAt(take.start - take.slotStart));
+        place(*t, {take.start, length, offset, clip.id});
+    }
+    // A note still held down hasn't reached noteOff or the regular undo snapshot yet.
+    if (m_playing && !m_countingIn) for (auto it = m_held.cbegin(); it != m_held.cend(); ++it) {
+        const auto& h = it.value(); const auto* live = m_project->trackAt(h.track);
+        if (!live) continue;
+        auto* t = track(live->id); if (!t) continue;
+        const bool session = m_rec.active && m_rec.trackId == live->id && m_rec.clip && live->playingSlot == m_rec.scene;
+        const double until = session ? m_beat : std::min(m_beat, punchEnd()); if (until <= h.beat) continue;
+        if (session) {
+            if (state.clips.contains(m_rec.clip->id)) state.clips[m_rec.clip->id].notes.push_back({it.key() & 127, std::max(0.0, h.beat - live->slotStart), until - h.beat, h.velocity, 1.0});
+        } else if (m_arrRecord && inPunch(h.beat) && live->armed && live->type == TrackType::Midi && live->playingSlot < 0) {
+            int id = keyClips.value(live->id);
+            double start = m_punchIn ? m_loopStart : std::floor(std::max(m_recStart, h.beat) / 4) * 4;
+            if (!id) { Clip clip; clip.id = id = newId(); clip.name = live->name; clip.length = std::max(1.0 / 16, until - start); state.clips.insert(id, clip); keyClips.insert(live->id, id); place(*t, {start, clip.length, 0, id}); }
+            for (const auto& pl : t->arrangement) if (pl.clip == id) start = pl.start;
+            auto& clip = state.clips[id]; clip.length = std::max(clip.length, until - start);
+            for (auto& pl : t->arrangement) if (pl.clip == id) pl.length = std::max(pl.length, clip.length);
+            clip.notes.push_back({it.key() & 127, std::max(0.0, h.beat - start), until - h.beat, h.velocity, 1.0});
+        }
+    }
+    const double sr = m_engine->sampleRate(), beatsPerSecond = m_project->tempo / 60;
+    for (auto& take : m_audioTakes) {
+        if (!take.writer || take.written < 2 || take.startBeat < 0) continue;
+        if (!take.writer->checkpoint(error)) return false;
+        take.checkpointed = true;
+        auto* t = track(take.trackId); if (!t) continue;
+        Clip clip;
+        if (take.clip && state.clips.contains(take.clip->id)) clip = state.clips.value(take.clip->id);
+        else { clip.id = newId(); clip.name = t->name; }
+        clip.samplePath = take.path; clip.start = clip.loopStart = 0; clip.loop = false;
+        clip.length = take.written / sr * beatsPerSecond;
+        clip.warpMarkers = {{0, 0}, {clip.length, take.written / sr}};
+        state.clips.insert(clip.id, clip);
+        if (!take.session) place(*t, {take.startBeat, clip.length, 0, clip.id});
+    }
+    return true;
+}
+
+bool Transport::recordingInProgress() const {
+    if (m_rec.active || !m_audioTakes.isEmpty() || !m_takes.isEmpty()) return true;
+    if (m_arrRecord && m_playing) for (const auto& track : m_project->tracks) if (track.armed) return true;
+    return false;
+}
+
 // The take has all its audio: close the file and put it in the set (one undo step with its pass).
 void Transport::finishAudioTake(int index, ClipPtr* created) {
     AudioTake a = m_audioTakes.takeAt(index);
@@ -211,7 +320,7 @@ void Transport::finishAudioTake(int index, ClipPtr* created) {
         EditScope edit(m_project, "Record", recordMergeKey(m_takeCounter));
         if (!sample) {   // never started (stopped before its launch): take the empty clip out again
             if (ti >= 0) for (ClipPtr& c : m_project->tracks[ti].clipSlots) if (c == a.clip) c = nullptr;
-            QFile::remove(a.path);
+            if (!a.checkpointed) QFile::remove(a.path);
             emit m_project->structureChanged();
         } else {
             a.clip->sample = sample;
@@ -221,7 +330,7 @@ void Transport::finishAudioTake(int index, ClipPtr* created) {
         emit recordingChanged();
         return;
     }
-    if (ti < 0 || !sample || length < 1.0 / 16) { QFile::remove(a.path); emit recordingChanged(); return; }
+    if (ti < 0 || !sample || length < 1.0 / 16) { if (!a.checkpointed) QFile::remove(a.path); emit recordingChanged(); return; }
     Track& t = m_project->tracks[ti];
     EditScope edit(m_project, "Arrangement Record", recordMergeKey(m_takeCounter));
     // Loop recording: a later pass of the loop is another take of the clip the first pass made.
@@ -416,6 +525,8 @@ void Transport::startPlaying() {
 void Transport::stop() {
     m_countingIn = false;
     m_countLeft = 0;
+    const auto held = m_held.keys();
+    for (int key : held) noteOff(key >> 8, key & 255); // finish held hardware notes before committing takes
     finishSessionRecord(true);
     finishTakes();
     const bool rewind = !m_playing;
@@ -516,7 +627,8 @@ void Transport::playClipFrom(const ClipPtr& clip, double clipBeat) {
     if (!t.overridden || t.playingSlot < 0)
         for (const ArrangementClip& a : t.arrangement)
             if (a.clip == clip) {
-                const double at = a.beatOf(clipBeat);
+                const double at = clip->isAudio() && !clip->warp
+                    ? nativePlacementBeat(a, clipBeat, m_project->tempo) : a.beatOf(clipBeat);
                 if (at >= 0) {
                     setStartMarker(at);
                     if (m_playing) setBeat(at);
@@ -547,7 +659,7 @@ void Transport::reset() {
     m_takes.clear();
     for (AudioTake& a : m_audioTakes) {   // recordings in progress belong to the old set: drop them
         if (a.writer) a.writer->close();
-        QFile::remove(a.path);
+        if (!a.checkpointed) QFile::remove(a.path);
     }
     m_audioTakes.clear();
     m_loopClips.clear();
@@ -681,6 +793,8 @@ void Transport::updateTakes() {
             take.source = playing;
             take.slotStart = t.slotStart;
             take.start = take.end = std::max({m_recStart, t.slotStart, punchStart()});
+            if (playing->isAudio() && !playing->warp)
+                take.sourceOffset = nativeRecordOffset(*playing, t, take.start, m_beat, m_project->tempo);
             m_takes.push_back(take);
             k = int(m_takes.size()) - 1;
             changed = true;
@@ -746,7 +860,8 @@ void Transport::finishTake(int index, bool wrapped) {
         a.clip = take.source;
     } else {
         a.length = take.end - take.start;
-        a.offset = std::max(0.0, take.source->positionAt(take.start - take.slotStart));   // where the clip was when the take began
+        a.offset = take.sourceOffset >= 0 ? take.sourceOffset
+            : std::max(0.0, take.source->positionAt(take.start - take.slotStart));   // where the clip was when the take began
         a.clip = m_project->copyClip(take.source);
     }
     arrangement::clearRange(*m_project, t, a.start, a.start + a.length);
@@ -799,20 +914,39 @@ void Transport::onTimer() {
                 t.slotStart = s.slotStart;
                 t.playingClipBeat = s.clipPass > 0 ? s.clipBeat : -1;
                 t.playingClipPass = s.clipPass;
-                if (const ClipPtr clip = t.clipSlots.value(s.playingSlot); clip && !clip->warp && s.clipPass > 0) {
+                t.playingSourceClipId = s.sourceClipId;
+                ClipPtr clip = t.clipSlots.value(s.playingSlot);
+                const ArrangementClip* sourcePlacement = nullptr;
+                if (!clip && s.playingSlot < 0 && !s.overridden)
+                    for (const ArrangementClip& placed : t.arrangement)
+                        if (placed.clip && placed.clip->id == s.sourceClipId && m_engine->beat() >= placed.start
+                            && m_engine->beat() < placed.start + placed.length) { clip = placed.clip; sourcePlacement = &placed; break; }
+                if (clip && !clip->warp && s.clipPass > 0) {
                     // Native-speed audio has a separate seconds clock. Compensate
                     // output latency in seconds before converting back to source beats.
-                    const double start = clip->secondsAt(clip->start), from = clip->secondsAt(clip->loopStart);
-                    const double end = std::min(clip->secondsAt(clip->loopEnd()), clip->sample ? clip->sample->seconds() : clip->secondsAt(clip->loopEnd()));
+                    const double from = clip->secondsAt(clip->loopStart);
+                    const double end = nativeEnd(*clip);
                     double seconds = clip->secondsAt(s.clipBeat);
                     if (clip->loop && s.clipPass > 1 && end > from) seconds = end + (s.clipPass - 2) * (end - from) + seconds - from;
-                    seconds = std::max(start, seconds - m_engine->latencySeconds());
+                    double start = clip->secondsAt(sourcePlacement ? sourcePlacement->offset : clip->start);
+                    if (sourcePlacement && clip->loop && end > from && start >= end)
+                        start = from + std::fmod(start - from, end - from);
+                    // A timeline placement owns its offset; Clip::start belongs
+                    // only to Session launches. A retained Warp-toggle phase can
+                    // also precede that offset and must never be clamped forward.
+                    if (sourcePlacement) start = std::min(start, seconds);
+                    seconds = std::max(start, seconds - m_engine->latencySeconds() * nativePitchRatio(*clip));
                     t.playingClipPass = 1;
                     if (clip->loop && end > from && seconds >= end) {
                         t.playingClipPass = 2 + int(std::floor((seconds - end) / (end - from)));
                         seconds = from + std::fmod(seconds - from, end - from);
                     }
                     t.playingClipBeat = clip->beatAt(seconds);
+                } else if (clip && clip->isAudio() && s.playingSlot < 0 && s.clipPass > 0) {
+                    double local = s.clipBeat - m_engine->latencySeconds() * m_project->tempo / 60;
+                    if (clip->loop && s.clipPass > 1 && local < clip->loopStart && clip->length > 0)
+                        local = clip->loopEnd() - std::fmod(clip->loopStart - local, clip->length);
+                    t.playingClipBeat = local;
                 }
                 t.queuedAt = s.queuedAt;
                 t.overridden = s.overridden;

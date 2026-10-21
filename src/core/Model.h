@@ -138,6 +138,8 @@ inline void forClipPasses(double start, double loopStart, double length, bool lo
     }
 }
 
+enum class SourceTempoOrigin { Legacy, Unknown, Detected, Metadata, Shared, Manual };
+
 struct Clip {
     int             id = 0;
     QString         name;
@@ -188,6 +190,9 @@ struct Clip {
     // The tempo found in the audio (core/Tempo.h), 0 when unknown. sampleBpm() is the
     // editable source warp map's tempo; project tempo changes leave that map untouched.
     double    detectedBpm = 0;
+    SourceTempoOrigin sourceTempoOrigin = SourceTempoOrigin::Legacy;
+    double    sourceTempoConfidence = 0;
+    quint64   sourceTempoMapFingerprint = 0; // protects automatically mapped clips after user edits
 
     // Clip envelopes: the same targets as track automation ("device:<id>:<p>", "mixer:volume", …),
     // positions in clip beats, looping with the clip. While the clip plays they set those controls.
@@ -399,8 +404,9 @@ struct Track {
     QSet<QString> overriddenTargets;   // automation you've overridden by hand, until Re-Enable Automation
     int    playingSlot  = -1;   // session clip currently playing (mirrored from the engine)
     double slotStart    = 0.0;  // beat at which that clip started
-    double playingClipBeat = -1; // native-speed audio position mirrored from the engine
-    int    playingClipPass = 0;
+    double playingClipBeat = -1; // native Session / audio Arrangement source position mirrored from the engine
+    int    playingClipPass = 0;  // 0: no source feedback; -1: Arrangement one-shot has ended
+    int    playingSourceClipId = 0; // protects source feedback when the visible placement changes
     int    queuedSlot   = -2;   // -2 none, -1 stop, >=0 launch
     double queuedAt     = 0.0;
     bool   overridden   = false; // session has taken over from the arrangement
@@ -495,7 +501,7 @@ public:
     // An audio clip for `path` (sample may be null when the file is missing). Loops that
     // last a power-of-two number of bars at a plausible tempo are warped to whole bars and
     // loop; anything else plays at its own speed at the current tempo, once.
-    ClipPtr newAudioClip(const QString& path, const SamplePtr& sample);
+    ClipPtr newAudioClip(const QString& path, const SamplePtr& sample, bool trackTiming = true);
     ClipPtr copyClip(const ClipPtr& src);                   // new id, same contents and settings
     Device makeDevice(const QString& name, DeviceKind kind);
     // What adding `name` puts on a track: the device, or a ready-made rack with its chains' devices.
@@ -615,6 +621,12 @@ public:
     // known yet, then sets the clip's length, loop and warp markers (one undo step). False when
     // the clip has no audio.
     bool syncClipToTempo(const ClipPtr& clip);
+    // Source corrections preserve the audio under clip/placement positions and are undoable.
+    bool setClipSourceBpm(const ClipPtr& clip, double bpm, bool related = false);
+    // Import helper: caller owns the edit scope and emits changes after the entire cohort.
+    bool setClipWarpMap(const ClipPtr& clip, const QVector<WarpMarker>& markers);
+    bool redetectClipTempo(const ClipPtr& clip, bool related = false);
+    QVector<ClipPtr> matchingStemClips(const ClipPtr& clip) const;
     // Every audio clip in the set (slots and the Arrangement), each once.
     QVector<ClipPtr> audioClips() const;
 

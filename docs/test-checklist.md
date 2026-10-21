@@ -1,14 +1,42 @@
 # Sessions — manual test checklist
 
-## 0.39 · Osmium wobble basses
+## 0.44 · Osmium wobble basses
 
-1. Expand Osmium and open the patch selector: a separator follows the 40 Drum & Bass sounds, then the 20 basses. Type `dubstep` → ten matches; `dnb bass` → ten matches.
+1. Expand Osmium and open the patch selector: a separator follows the existing 112 factory sounds, then the 20 basses. Type `dubstep` → ten matches; `dnb bass` → ten matches.
 2. At 140 BPM load **Dubstep - Gravedigger** and hold F1 (MIDI 41) for two bars from a bar line → quarters, eighths, eighth triplets, sixteenths, then a 1/32 roll. Hold four bars → the phrase repeats with a slightly different timbre (Curve 2). Start a note mid-bar → the wobble keeps its place in the bar.
 3. Arrangement: add an automation lane for the track's **Curve1 Rate** and draw 2 bars, then 1 bar from bar 3 → from bar 3 the phrase plays twice as fast; 1/16 → a buzz. The Modulators page's Curve 1 **Length** follows the automation. Repeat with a MIDI clip envelope, and with a controller knob mapped to Curve1 Rate.
 4. **DnB Bass - Jump Up Wheeze** and **Stab Rewind** restart their one-bar phrase with every note; all others follow the song's bars.
 5. Play E0–F2 on several presets → each note has the same wobble colour (key-tracked filters) and a centred sub; switching presets keeps similar loudness.
 6. Turn each macro up while a phrase plays → audible change, no clipping with all eight at maximum. Save the set and reopen it, and save a user preset → both curves (21–91 nodes in Curve 1) and all routes return.
 7. Listen on full-range monitors or headphones: low end weight, wobble depth and the triplet / roll sections. Automated checks don't replace listening.
+
+
+## 0.39.0 · Osmium wavetable, synthesis and visual pass
+
+1. Open Osmium: compare 900/1480/2048 px windows and a short/tall device pane. Large oscillator/filter plots should fill the available space; complete cards wrap and all controls remain reachable. Check Dark/Mid/Light and a custom accent, with macros remaining large.
+2. Open each table selector. Search family/name, choose with mouse or Enter, and undo. All 48 tables must be available, including original eight. Compare old saved patches before/after; original normalized table/modulation routes must retain their sounds.
+3. Switch Table/Wave/Harm, scan by dragging (Shift fine), wheel and arrows. Scanning must update Position, the waveform and sound in one undo gesture. Select an FM/folded preset and confirm visual changes follow its source tuning/table and depth.
+4. Compare all eight Warp modes; set Warp depth to zero. Cross FM must respond to the next oscillator's tuning/table at zero audible source level. Add envelope/LFO modulation to each oscillator's Fold, then adjust base and range separately. Check high notes, low notes, sustained notes and release tails without overs or stale folder history.
+5. Load all 48 Wavefront sounds across Pad/Lead/Keys/Bass/Motion/Texture. Try notes/chords in their guide ranges, all eight macros and pressure/wheel. Curves and rhythmic modulation must follow project tempo, while macros preserve pitch/rhythm settings. Save a new patch and reopen it.
+6. Use Voice & mixer and Effects, adjust a range without changing pages, then collapse/reopen the integrated editor. Existing envelope/curve editing, device mappings, audition, undo, preset selection and track switching remain functional.
+
+## 0.38.2 · Clip inspector and default Warp mode
+
+1. Preferences → Record / Warp: choose each Default Warp Mode and import new audio. New clips use it, including sources kept unwarped; existing and reopened clips retain their saved modes. Close/reopen preferences and restart to verify persistence.
+2. With Warp off, choose all six algorithms and adjust pitch, detune, grain/flux/formants or Beats tail where applicable. Editing must not enable Warp. Pitch changes audible frequency and playback duration; changing project tempo leaves native playback speed alone. Turn Warp on to hear the prepared algorithm; Re-Pitch then derives pitch from tempo.
+3. At narrow and wide window sizes, timing remains visible beside Sample/Notes, Launch and Envelopes. Fields and tabs are readable and fit at the pane minimum. The overview spans the exact waveform/MIDI editor width. Audio hides irrelevant MIDI tools. Compare Dark, Mid and Light.
+4. Enter Envelopes, change target, return to Sample/Notes; enter Takes and return through Envelopes. No editor gets stranded behind a hidden switch. Launch modes/follow actions, note tools, Source BPM repairs, library saving and undo remain functional.
+5. Play pitched native clips, change pitch live, loop, seek, stop/resume and record a playing Session clip into Arrangement. The visible source position and recorded offset must match the audio. Save/reopen and compare Arrangement/offline rendering.
+
+## 0.38.1 · Source-tempo aliases and synchronized stems
+
+1. Import a long breakbeat with a repeating three-eighth pattern and a non-bar tail. It must retain its actual duple tempo rather than choose a 2/3 alias. Repeat at slow/fast tempos and 44.1/48 kHz. Unknown sustained textures retain `—` and Warp off.
+2. Import the supplied `_06` folder together at project 176: every stem shares the approximately 174 BPM guide map and remains aligned. Repeat individually, with Keyboard/Bass first and Drums last. Different folders, lengths and short same-length loops remain independent; no unrequested neighboring recordings are loaded.
+3. Import `_01`: its shared map follows the measured acceleration. Play through the drumless break and the final section, comparing against the project metronome. Every stem must retain identical map points and the same source start. Check the source range and the average BPM field.
+4. In an older set with inconsistent source estimates, right-click Source BPM / Sync → Re-detect Matching Stems. Confirm shared timing, complete clip/placement lengths and one-step undo/redo. Ordinary Sync must preserve an adaptive map. Test Use Project Tempo and Apply Source Tempo to Matching Stems separately.
+5. Manually edit a BPM or warp marker, save and reopen, then import another matching stem. Automatic import must preserve manual and edited maps. Explicit re-detection may replace them and must remain undoable. Conflicting filename BPM tags must not be silently unified.
+6. Change project tempo during playback: source map points stay fixed and every stem follows the same new destination tempo. Save/reopen and compare export timing with playback. See [source-tempo guide](tempo-stems.md).
+
 
 ## 0.38 · Arrangement, groups and live controls
 
@@ -472,3 +500,37 @@ Get a few captures: [tonehunt.org](https://tonehunt.org) (free `.nam` files; "st
 ## How to tell me what you found
 
 For each problem: the section and number (e.g. "4.3"), what you did, what happened, and what you expected. For sound problems, which device and settings, and whether it's a click, crackle, noise, distortion, a wrong level or a delay. If something crashed, say what you clicked last.
+
+## Drum Studio stage and microphones
+
+1. Expand Drum Studio; resize the embedded pane. Kit, Microphones, Mixer and Grooves fit at 920 px and 1480 px in Dark and Light. Inspect the source waveform at soft/hard audition velocities.
+2. Select a tom or cymbal. Remove it; its MIDI notes are silent. Add it from the menu or empty slot; Ctrl+Z restores each change. Removing a soloed piece leaves the other drums audible.
+3. Swap just the snare's Source; kick and cymbals keep their recordings. Save/reopen the set to retain mixed sources, membership and mic placements.
+4. Enable Move pieces and drag the snare. X affects stereo placement; Y changes the saved layout. Undo restores both coordinates together. Reset layout leaves all sounds and mic settings intact.
+5. Open Microphones. Drag a close mic farther and off axis; hear the new distance/color and inspect the response curve. Switch Recording / Dynamic / Condenser / Ribbon. Reset mic restores its neutral placement in one undo step.
+6. Select overhead and room pairs. Change height, distance and model; compare the audible overhead/room contributions. Generic tonal models remain separate from Primary/Alternate recorded sources.
+7. Drag a mic, undo, collapse/reopen, reorder the track and save/reopen. Its controls, page and correct target track remain usable. Preview a groove, leave the page or collapse; preview stops without inserting a clip.
+
+## Recorded content, NAM and Stereo Width · 0.41
+
+1. Install both packages. Play each added drum preset at soft/hard velocities and repeated snares. Frankensnare leaves other pieces on the original recipe.
+2. Change one piece's Library. Switch Primary/Alternate where supplied; listen to OH/Room tails. Undo and save/reopen retain the selection.
+3. NAM: compare flat and boosted/cut tone controls on a capture, with/without IR. Old sets start flat; Presence affects the upper end.
+4. Stereo Width: compare 0/100/200%, mono/stereo sources, Mono Spread/Delay, Mono Bass/cutoff and Mono/Side monitoring. Watch correlation/side/peak and retain output headroom.
+5. Drum Rack: open Waveform, select pads, zoom, pan, Fit and audition. Load a sample and undo. Inspect all header controls in both themes; collapse/reopen and horizontal chain scrolling work on small windows.
+
+## Autosave, crash recovery and rolling backups · 0.42
+
+1. Preferences → Startup: leave recovery at Every 2 min and backups at Keep 10 saves. Edit an untitled set and wait; its title remains unsaved and undo still restores the edit. Repeat on a named set; its manual file is unchanged until Save.
+2. Terminate a test instance after a completed checkpoint. Reopen: Recover opens a marked unsaved copy, Later leaves it available, and Delete asks before removing its history. A second live instance's snapshot is excluded.
+3. Save repeatedly and open File → Show Backups. At most the selected number of standard sets remains. Move a collected project folder and open one of its backups; local samples still resolve.
+4. Record MIDI/audio through a checkpoint. The take continues. After a forced termination, the last checkpoint includes completed/held notes and readable recorded audio. Save during recording, then open New Set; the saved recording's WAV remains available.
+5. During a long manual save, make an edit. The saved version contains the earlier state, the later edit remains dirty, and recovery remains available. Cancel Close retains snapshots; confirmed Discard removes the current document's history. Verify file-write errors are reported without clearing dirty state.
+6. Inspect the recovery picker and Startup preferences in Dark and Light at normal and small sizes. Corrupt the newest test snapshot; an older valid one remains recoverable and the current project is unchanged after a failed attempt.
+
+
+## Osmium Gesture Bass and compact presets (0.43)
+
+- In the compact Osmium panel, search a partial name, select it with mouse and keyboard, then use previous/next. Verify separator skipping and wrapping at both ends, one undo step per load, original starting-patch navigation, and both selectors after undo/redo and expand/collapse. Check Dark/Light without increasing the panel footprint.
+- Play Gesture Bass patches around MIDI 28–43. Compare held notes and short/overlapping notes; two unequal contours should shape timbre while the bass sustains. Curve 1/2 must use retriggered One-shot mode, all envelope loops must be off, and no LFO/stepper routes should supply default motion. Hold long enough for the contours to stop; their endpoints should stay held.
+- Check velocity, pressure and all eight macros, default/max-macro headroom and released silence. Run `sessions_osmium_bank --gesture <directory>` for the new-bank audit/export, and the full bank suite for all 112 sounds and the previous-88 fingerprint.

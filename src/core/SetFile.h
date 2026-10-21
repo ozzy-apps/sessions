@@ -71,6 +71,7 @@ Clip        clipFromJson(const QJsonObject& o, const QString& baseDir = {});
 // Project::loadEditState + applyToProject, so the project is replaced only when
 // the whole file was read successfully.
 bool save(const QString& path, const Project& project, const Extras& extras, QString* error = nullptr);
+bool saveState(const QString& path, const EditState& state, const Extras& extras, QString* error = nullptr);
 bool read(const QString& path, EditState& state, Extras& extras, QString* error = nullptr);
 bool load(const QString& path, Project& project, Extras& extras, QString* error = nullptr);
 

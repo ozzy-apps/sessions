@@ -104,9 +104,9 @@ int main(int argc,char**argv){
     }
     std::printf("%zu grooves, %lld styles, worst default peak %.3f\n",grooves::all().size(),styles.size(),worst);
     Project project;project.scenes={"1"};project.addTrack("Drums",theme::accent);project.tracks[0].devices={project.makeDevice("Drum Studio",DeviceKind::Instrument)};const int id=project.tracks[0].devices[0].id;
-    CHECK(project.tracks[0].devices[0].params.size()==66,"Original 50 parameters are preserved and 16 mute/solo parameters appended");
+    CHECK(project.tracks[0].devices[0].params.size()==ds::kParams,"Legacy parameters retain their indices; kit and mic controls are appended");
     auto json=setfile::deviceToJson(project.tracks[0].devices[0]);auto old=json["params"].toArray();while(old.size()>50)old.removeLast();json["params"]=old;const auto restored=setfile::deviceFromJson(json);
-    CHECK(restored.params.size()==66&&restored.params[ds::mute(ds::Snare)].value==0,"Old saved Drum Studios acquire unmuted channels");
+    CHECK(restored.params.size()==ds::kParams&&restored.params[ds::mute(ds::Snare)].value==0,"Old saved Drum Studios acquire unmuted channels");
     audio::Engine engine(&project);Transport transport(&project,&engine);DeviceView view(&project,&transport);view.resize(1240,600);view.show();QApplication::processEvents();
     view.findChild<QPushButton*>("studioExpand")->click();QApplication::processEvents();auto* editor=view.expandedEditor();QPointer<devui::DeviceBody> stable=editor;
     CHECK(view.editorExpanded()&&editor&&!editor->isWindow()&&editor->objectName()=="drumStudioEditor","Drum Studio expands inside the main device pane");

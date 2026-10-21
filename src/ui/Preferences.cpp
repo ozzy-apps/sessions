@@ -3,6 +3,8 @@
 #include "audio/Engine.h"
 #include "audio/Driver.h"
 #include "audio/MidiInput.h"
+#include "core/WarpPreferences.h"
+#include "core/Recovery.h"
 #include <QComboBox>
 #include <QCheckBox>
 #include <QFormLayout>
@@ -217,7 +219,7 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     refreshAudioStatus();
 
     // ---- Record
-    auto* recTab = page("Record", rows, tabs);
+    auto* recTab = page("Record / Warp", rows, tabs);
     auto* countIn = new QComboBox(recTab);
     countIn->setObjectName("countIn");
     for (int bars : {0, 1, 2, 4}) countIn->addItem(bars == 0 ? QString("None") : bars == 1 ? QString("1 Bar") : QString("%1 Bars").arg(bars), bars);
@@ -226,9 +228,19 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     rows->addWidget(row("Count-in", countIn, "Bars of click before a recording starts from a standstill (Arrangement Record, or ● in a slot). "
                                              "Also on the metronome button's right-click menu. During the count-in the position shows "
                                              "the bars left in red; nothing is recorded until it ends.", recTab));
-    rows->addStretch(1);
     connect(countIn, &QComboBox::activated, this, [countIn] { QSettings("Sessions", "Sessions").setValue("record/countIn", countIn->currentData().toInt()); });
-    addPage(recTab, "Record");
+    auto* warpMode = new QComboBox(recTab);
+    warpMode->setObjectName("defaultWarpMode");
+    for (WarpMode mode : {WarpMode::Beats, WarpMode::Tones, WarpMode::Texture, WarpMode::Repitch, WarpMode::Complex, WarpMode::ComplexPro})
+        warpMode->addItem(warpModeName(mode), int(mode));
+    warpMode->setCurrentIndex(warpMode->findData(int(clipsettings::defaultWarpMode())));
+    warpMode->setToolTip("Warp algorithm for newly imported audio clips. Existing clips keep their own settings.");
+    rows->addWidget(row("Default Warp Mode", warpMode, "Used for newly imported audio clips. Existing clips keep their settings.", recTab));
+    connect(warpMode, &QComboBox::activated, this, [warpMode] {
+        clipsettings::setDefaultWarpMode(WarpMode(warpMode->currentData().toInt()));
+    });
+    rows->addStretch(1);
+    addPage(recTab, "Record / Warp");
 
     // ---- MIDI
     auto* midiTab = page("MIDI", rows, tabs);
@@ -366,6 +378,22 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
         connect(b, &QRadioButton::toggled, this, [key = key](bool on) { if (on) QSettings("Sessions", "Sessions").setValue("startup/open", key); });
     }
     rows->addWidget(row("Open", openBox, "When Sessions starts without a set to open.", startTab));
+    auto* autosave = new QComboBox(startTab); autosave->setObjectName("recoveryInterval");
+    for (int seconds : {0, 60, 120, 300, 600}) autosave->addItem(seconds ? QString("Every %1 min").arg(seconds / 60) : "Off", seconds);
+    if (autosave->findData(RecoveryManager::intervalSeconds()) < 0) autosave->addItem(QString("Every %1 s").arg(RecoveryManager::intervalSeconds()), RecoveryManager::intervalSeconds());
+    autosave->setCurrentIndex(autosave->findData(RecoveryManager::intervalSeconds()));
+    connect(autosave, &QComboBox::currentIndexChanged, this, [this, autosave](int) {
+        settings().setValue("recovery/intervalSeconds", autosave->currentData()); emit recoverySettingsChanged();
+    });
+    rows->addWidget(row("Recovery snapshots", autosave, "Keeps three snapshots separately from your saved set. Recover them after an interrupted session.", startTab));
+    auto* backups = new QComboBox(startTab); backups->setObjectName("recoveryBackups");
+    for (int count : {0, 5, 10, 20}) backups->addItem(count ? QString("Keep %1 saves").arg(count) : "Off", count);
+    if (backups->findData(RecoveryManager::backupCount()) < 0) backups->addItem(QString("Keep %1 saves").arg(RecoveryManager::backupCount()), RecoveryManager::backupCount());
+    backups->setCurrentIndex(backups->findData(RecoveryManager::backupCount()));
+    connect(backups, &QComboBox::currentIndexChanged, this, [this, backups](int) {
+        settings().setValue("recovery/backupCount", backups->currentData()); emit recoverySettingsChanged();
+    });
+    rows->addWidget(row("Project backups", backups, "Saved in Backups beside the set. File → Show Backups opens its folder.", startTab));
     rows->addStretch(1);
     addPage(startTab, "Startup");
 

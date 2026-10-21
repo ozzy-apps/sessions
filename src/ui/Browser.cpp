@@ -60,7 +60,7 @@ const QVector<Category>& catalogue() {
             const char kind = s.kind == DeviceKind::Instrument ? 'i' : s.kind == DeviceKind::AudioEffect ? 'f' : 'm';
             const RackRecipe* rig = preset ? rackRecipe(s.name) : nullptr;
             const bool guitar = (!preset && isGuitarType(s.type)) || (rig && rig->guitar);
-            const int cat = guitar ? 4 : preset ? 0 : drums ? 1 : s.kind == DeviceKind::Instrument ? 2 : s.kind == DeviceKind::AudioEffect ? 3 : 5;
+            const int cat = guitar ? 4 : preset && s.type != DeviceType::DrumStudio ? 0 : drums ? 1 : s.kind == DeviceKind::Instrument ? 2 : s.kind == DeviceKind::AudioEffect ? 3 : 5;
             cats[cat].items.push_back({s.name, kind});
         }
         for (int k : {0, 2, 3, 5})

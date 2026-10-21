@@ -869,6 +869,35 @@ public:
     }
 };
 
+class StereoWidthDisplay : public Display {
+public:
+    StereoWidthDisplay(DeviceBody* b):Display(b,300,170){setObjectName("stereoWidthDisplay");b->animate(this);}
+    void draw(QPainter& p,const QRectF& r)override{
+        p.setRenderHint(QPainter::Antialiasing);const QRectF field=r.adjusted(12,22,-12,-53);
+        const QPointF c=field.center();const double radius=std::min(field.width()*.43,field.height()*.7);
+        p.setPen(col::grid);p.drawLine(QPointF(c.x(),field.top()),QPointF(c.x(),field.bottom()));p.drawLine(QPointF(field.left(),c.y()),QPointF(field.right(),c.y()));
+        const double amount=m_body->real(stereowidth::Width);const double spread=m_body->pos(stereowidth::Spread);
+        // The outline is the width setting. Correlation and side energy below are measured audio.
+        p.setPen(QPen(col::cyan,1.5));p.setBrush(theme::withAlpha(col::cyan,25));p.drawEllipse(c,std::max(1.,radius*amount*.48),radius*.75);
+        p.setPen(col::label);p.drawText(r.adjusted(8,5,-8,-5),Qt::AlignTop|Qt::AlignLeft,"STEREO FIELD");p.drawText(r.adjusted(8,5,-8,-5),Qt::AlignTop|Qt::AlignRight,QString("%1 %").arg(int(amount*100)));
+        const auto bar=r.adjusted(12,r.height()-37,-12,-23);p.fillRect(bar,col::grid);p.setPen(col::gridText);p.drawText(QRectF(bar.left(),bar.top()-17,bar.width(),15),Qt::AlignLeft,QString("Correlation %1").arg(m_body->meter(0),0,'f',2));
+        const double value=std::clamp(double(m_body->meter(0)),-1.,1.);const double x=bar.left()+(value+1)*bar.width()*.5;
+        p.setPen(QPen(value<0?theme::devMissing:col::curve,3));p.drawLine(QPointF(x,bar.top()-1),QPointF(x,bar.bottom()+1));
+        p.setPen(col::gridText);p.drawText(r.adjusted(12,0,-12,-5),Qt::AlignBottom|Qt::AlignLeft,QString("Side %1 %").arg(int(m_body->meter(1)*100)));p.drawText(r.adjusted(12,0,-12,-5),Qt::AlignBottom|Qt::AlignRight,QString("Peak %1 dBFS").arg(m_body->meter(2),0,'f',1));
+        Q_UNUSED(spread);
+    }
+};
+class StereoWidthBody : public DeviceBody {
+public:
+    StereoWidthBody(const DeviceContext& c,QWidget* parent):DeviceBody(c,parent){
+        auto* root=rootRow(this,9);root->addWidget(new StereoWidthDisplay(this));auto* settings=vbox(5);
+        auto* upper=hbox(4);upper->addWidget(knob(stereowidth::Width,38,"Width"));upper->addWidget(knob(stereowidth::Spread,32,"Mono Spread"));upper->addWidget(knob(stereowidth::Delay,28,"Delay"));settings->addLayout(upper);
+        auto* lower=hbox(4);lower->addWidget(knob(stereowidth::BassCutoff,28,"Bass Below"));lower->addWidget(knob(stereowidth::Output,28,"Output",true));lower->addWidget(knob(stereowidth::Mix,28,"Mix"));settings->addLayout(lower);
+        auto* options=hbox(5);options->addWidget(toggle(stereowidth::MonoBass,"Mono Bass",66));options->addWidget(choices(stereowidth::Monitor,{"Stereo","Mono","Side"},{},128,20));settings->addLayout(options);root->addLayout(settings);setFixedWidth(560);
+        InfoView::attach(this,"Stereo Width","Width scales side information while keeping the centre. Mono Spread creates side information from a short difference delay; it cancels in mono. Mono Bass high-passes only the side channel. Monitor checks mono compatibility or isolates the sides. The outline shows the width setting; correlation, side energy and peak are measured from output audio.");
+    }
+};
+
 // ============================================================================ Utility
 
 class UtilityBody : public DeviceBody {
@@ -1321,6 +1350,7 @@ DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent) {
     case T::Chorus:     return new ChorusBody(ctx, parent);
     case T::Phaser:     return new PhaserBody(ctx, parent);
     case T::Utility:    return new UtilityBody(ctx, parent);
+    case T::StereoWidth:return new StereoWidthBody(ctx, parent);
     case T::AutoPan:    return new AutoPanBody(ctx, parent);
     case T::Redux:      return new ReduxBody(ctx, parent);
     case T::Gate:       return new GateBody(ctx, parent);

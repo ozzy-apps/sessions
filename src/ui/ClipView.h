@@ -1,16 +1,7 @@
 #pragma once
-// ClipView: clip settings on the left in narrow boxes side by side,
-// the editor on the right (the PianoRoll for MIDI clips, the SampleEditor for audio clips).
-// The round L / ♪ / E switches at the bottom left show or hide the Launch, Notes (or Sample)
-// and Envelopes boxes (remembered in QSettings clipView/launch, notes, envelopes); the Clip box always shows.
-//  - Clip: name, signature, start (the start marker), position (the loop's), length, loop, grid, Duplicate Loop, Clear
-//  - Launch: launch mode, legato, quantization, follow actions
-//  - Notes (MIDI): transpose, :2 / x2, reverse, invert, legato, scale + Fold
-//  - Sample (audio): file, Warp on/off, warp mode and its slices, original tempo (:2 / x2),
-//    gain, transpose, reverse; Takes swaps the editor for the TakesEditor (loop-recorded clips)
-//  - Envelopes: pick a parameter (Mixer or a device, then the parameter); Show swaps the
-//    editor for the EnvelopeEditor, where the clip's envelope for it is drawn
-// Note tools act on the selected notes, or the whole clip when none are selected.
+// ClipView: persistent timing controls beside Sample/Notes, Launch and Envelopes pages.
+// The inspector stays compact while the waveform/MIDI editor fills the remaining width.
+// Follow is independent of Arrangement Follow; its button never narrows the overview.
 
 #include <QWidget>
 #include <memory>
@@ -23,6 +14,7 @@ class QComboBox;
 class QCheckBox;
 class QStackedWidget;
 class QToolButton;
+class QTabBar;
 
 namespace sessions {
 
@@ -90,9 +82,10 @@ private:
     QWidget*   m_notesBox = nullptr;   // shown for MIDI clips
     QWidget*   m_sampleBox = nullptr;  // shown for audio clips
     QWidget*   m_envBox = nullptr;
-    QToolButton* m_launchToggle = nullptr;   // round switches: which boxes show (QSettings clipView/*)
-    QToolButton* m_notesToggle = nullptr;
-    QToolButton* m_envToggle = nullptr;
+    QWidget* m_clipBox = nullptr;
+    QTabBar* m_pageTabs = nullptr;
+    QStackedWidget* m_pages = nullptr;
+    QStackedWidget* m_contentPages = nullptr;
     void       showBoxes();
     bool       m_refreshing = false;
 
@@ -103,6 +96,7 @@ private:
     DragValue* m_position;   // Clip::loopStart
     QPushButton* m_loop;
     QPushButton* m_grid;
+    QLabel* m_gridLabel = nullptr;
     QPushButton* m_dupLoop;
     QPushButton* m_clear;
     QPushButton* m_save = nullptr;   // Save Clip to User Library (0.22)

@@ -7,7 +7,8 @@
 //    "" = the first physical ones, "-" = none). Pulse: output device and buffer ("audio/device",
 //    "audio/bufferMs"), the input device for recording ("audio/input")
 //  - MIDI: which input ports play Sessions ("midi/off" lists the ones switched off)
-//  - Record: the count-in before recordings ("record/countIn": 0, 1, 2 or 4 bars)
+//  - Record / Warp: count-in ("record/countIn": 0, 1, 2 or 4 bars), and the Warp
+//    algorithm for newly imported audio clips ("clips/defaultWarpMode": WarpMode)
 //  - Look: interface zoom ("ui/zoom", applies on restart); which way a drag zooms in the overview
 //    and the rulers ("ui/zoomDragUp": true = dragging up zooms in; off, dragging down does)
 //  - Startup: open the demo, an empty set, or the last set ("startup/open": demo / empty / last)
@@ -42,6 +43,7 @@ public:
 
 signals:
     void midiControllerSettingsChanged();
+    void recoverySettingsChanged();
 
 private:
     void applyAudio();

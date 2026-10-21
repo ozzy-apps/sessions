@@ -10,6 +10,8 @@
 #include "Bodies.h"
 #include "audio/Devices.h"
 #include "audio/DrumSamples.h"
+#include "audio/DrumMicModel.h"
+#include "audio/Engine.h"
 #include "core/Grooves.h"
 #include "core/Model.h"
 #include "core/Transport.h"
@@ -21,6 +23,13 @@
 #include <QFileDialog>
 #include <QHideEvent>
 #include <QLineEdit>
+#include <QKeyEvent>
+#include <QMenu>
+#include <QGridLayout>
+#include <QScrollArea>
+#include <QSignalBlocker>
+#include <QIcon>
+#include <complex>
 #include <QSlider>
 #include <QTimer>
 #include <QDrag>
@@ -44,74 +53,155 @@ namespace ds = drumstudio;
 QHash<int, int>& studioPages() { static QHash<int, int> p; return p; }   // device id -> the page shown
 QHash<int, int>& studioDrums() { static QHash<int, int> d; return d; }   // device id -> the drum selected
 
-// Where each drum is drawn, seen from above (0 .. 1 of the display), and how big.
-struct DrumSpot { double x, y, r; };
-const DrumSpot kSpots[ds::kDrums] = {
-    {0.50, 0.70, 0.17},   // kick
-    {0.33, 0.56, 0.11},   // snare
-    {0.13, 0.50, 0.10},   // hi-hat
-    {0.40, 0.30, 0.095},  // tom 1
-    {0.60, 0.28, 0.105},  // tom 2
-    {0.80, 0.56, 0.13},   // floor tom
-    {0.86, 0.24, 0.13},   // ride
-    {0.18, 0.20, 0.12},   // crash
-};
-
-// The kit from above. Click a drum to select it (its knobs show) and hear it; a hit lights it.
+// Native, resolution-independent kit stage. The same geometry drives drawing and hit testing.
 class KitView : public Display {
 public:
-    KitView(DeviceBody* b, int w, int h, std::function<void(int)> selected) : Display(b, w, h), m_selected(std::move(selected)) {
-        setCursor(Qt::PointingHandCursor);
-        InfoView::attach(this, "Kit", "The kit from the drummer's seat: click a drum to select it (its knobs show beside the kit) and hear it. A drum lights when it's hit.");
+    KitView(DeviceBody* b, int w, int h, std::function<void(int)> selected) : Display(b,w,h), m_selected(std::move(selected)) {
+        setCursor(Qt::PointingHandCursor); setFocusPolicy(Qt::StrongFocus);
+        setAccessibleName("Drum kit stage");
+        InfoView::attach(this,"Kit stage","Click a piece to select and audition it. Move pieces enables drag positioning; horizontal position changes stereo placement. Delete removes the selected piece. Empty slots can be added again. In Microphones, drag a mic to change its distance and angle.");
     }
-    void tick() override {
-        for (int d = 0; d < ds::kDrums; ++d) m_glow[d] = std::max(double(m_body->scope(d)), m_glow[d] - .08);
-        update();
+    void setMoveMode(bool on) { m_move=on; setCursor(on?Qt::OpenHandCursor:Qt::PointingHandCursor); update(); }
+    void setAudition(std::function<void(int)> fn) { m_audition=std::move(fn); }
+    void setMicMode(std::function<void(int)> fn) { m_mics=true; m_micSelected=std::move(fn); }
+    void selectMic(int d) { m_mic=d; update(); }
+    void tick() override { for(int d=0;d<ds::kDrums;++d)m_glow[d]=std::max(double(m_body->scope(d)),m_glow[d]-.07); update(); }
+    QRectF stage() const {
+        if(height()<=230)return inner().adjusted(8,8,-8,-20);
+        const QRectF r=inner().adjusted(20,24,-20,-30);
+        const double scale=std::min(r.width(),r.height()*1.3);
+        return QRectF(r.center().x()-scale*.5,r.center().y()-scale/2.6,scale,scale/1.3);
+    }
+    QPointF center(int d) const { const auto r=stage(); return {r.left()+m_body->pos(ds::piece(d,ds::StageX))*r.width(),r.top()+m_body->pos(ds::piece(d,ds::StageY))*r.height()}; }
+    double radius(int d) const { return ds::stageRadius[d]*stage().height(); }
+    QPointF micPoint(int d, bool right=false) const {
+        const auto r=stage();
+        if(d==ds::kDrums)return {r.center().x()+(right?1:-1)*(.16+.2*m_body->pos(ds::Width))*r.width(),r.top()+(.025+.06*m_body->pos(ds::OhHeight))*r.height()};
+        if(d==ds::kDrums+1)return {r.left()+(right?.94:.06)*r.width(),r.top()+(.94-.08*m_body->pos(ds::RoomDistance))*r.height()};
+        const double theta=(-135+m_body->real(ds::piece(d,ds::MicAngle)))*3.14159265359/180;
+        const double distance=radius(d)+r.height()*(.025+.1*m_body->pos(ds::piece(d,ds::MicDistance)));
+        return center(d)+QPointF(std::cos(theta)*distance,std::sin(theta)*distance);
     }
     int drumAt(const QPointF& pt) const {
-        const QRectF r = inner();
-        int best = -1; double bestD = 1e9;
-        for (int d = 0; d < ds::kDrums; ++d) {
-            const QPointF c(r.left() + kSpots[d].x * r.width(), r.top() + kSpots[d].y * r.height());
-            const double rad = kSpots[d].r * r.height(), dist = std::hypot(pt.x() - c.x(), pt.y() - c.y());
-            if (dist <= rad + 3 && dist < bestD) { best = d; bestD = dist; }
-        }
+        int best=-1; double score=1e9;
+        for(int d=0;d<ds::kDrums;++d){const auto c=center(d);const double dist=std::hypot(pt.x()-c.x(),pt.y()-c.y());if(dist<radius(d)+5&&dist/radius(d)<score){best=d;score=dist/radius(d);}}
         return best;
     }
 protected:
-    void draw(QPainter& p, const QRectF& r) override {
-        p.setRenderHint(QPainter::Antialiasing, true);
-        const int sel = studioDrums().value(m_body->ctx().deviceId, ds::Snare);
-        QFont f = p.font(); f.setPixelSize(height() > 220 ? 12 : 9); p.setFont(f);
-        for (int d = 0; d < ds::kDrums; ++d) {
-            const QPointF c(r.left() + kSpots[d].x * r.width(), r.top() + kSpots[d].y * r.height());
-            const double rad = kSpots[d].r * r.height();
-            const bool cymbal = d == ds::HiHat || d == ds::Ride || d == ds::Crash;
-            const bool lit = m_glow[d] > .04;
-            QColor fill = cymbal ? theme::withAlpha(col::curve, 90) : theme::devCell;
-            if (lit) fill = col::curve;
-            p.setPen(QPen(d == sel ? col::handle : col::gridStrong, d == sel ? 1.6 : 1.0));
-            p.setBrush(fill);
-            p.drawEllipse(c, rad, rad);
-            if (!cymbal) { p.setPen(QPen(col::gridStrong, 0.8)); p.setBrush(Qt::NoBrush); p.drawEllipse(c, rad * 0.78, rad * 0.78); }
-            else { p.setPen(QPen(col::gridStrong, 0.8)); p.setBrush(col::display); p.drawEllipse(c, rad * 0.18, rad * 0.18); }
-            if (d == ds::HiHat) { p.setPen(QPen(col::gridStrong, 0.8)); p.setBrush(Qt::NoBrush); p.drawEllipse(c + QPointF(2, 2), rad, rad); }
-            p.setPen(d == sel ? col::value : col::label);
-            p.drawText(QRectF(c.x() - 45, c.y() + rad - 1, 90, 16), Qt::AlignCenter, ds::drumName(d));
+    void draw(QPainter& p,const QRectF& r) override {
+        p.setRenderHint(QPainter::Antialiasing); const bool large=height()>230; const auto room=stage();
+        if(large){
+            QLinearGradient ground(r.topLeft(),r.bottomRight());ground.setColorAt(0,col::display);ground.setColorAt(1,theme::devCell);
+            p.fillRect(r,ground);
+            const QRectF rug=room.adjusted(-10,-5,10,12);
+            p.setPen(QPen(col::gridStrong,1));p.setBrush(theme::withAlpha(col::grid,55));p.drawRoundedRect(rug,18,18);
+            p.setPen(QPen(theme::withAlpha(col::gridStrong,65),.7));
+            for(double x=rug.left()+12;x<rug.right();x+=14)p.drawLine(QPointF(x,rug.top()+8),QPointF(x,rug.bottom()-8));
+            p.setPen(QPen(theme::withAlpha(col::gridStrong,100),1,Qt::DashLine));p.setBrush(Qt::NoBrush);
+            p.drawEllipse(room.center()+QPointF(0,room.height()*.05),room.width()*.39,room.height()*.4);
         }
-        drawCaption(p, r, m_body->text(ds::Kit), Qt::AlignTop | Qt::AlignRight);
+        const int selected=studioDrums().value(m_body->ctx().deviceId,ds::Snare);
+        QFont font=p.font();font.setPixelSize(large?11:9);p.setFont(font);
+        // Stands and the kick pedal sit underneath the kit.
+        if(large)for(int d=0;d<ds::kDrums;++d)if(m_body->on(ds::piece(d,ds::Present))){
+            const QPointF c=center(d);const double rad=radius(d);
+            p.setPen(QPen(col::gridStrong,2));
+            if(d!=ds::Kick)for(int i=0;i<3;++i){double a=(i*120+90)*3.14159265359/180;p.drawLine(c,c+QPointF(std::cos(a)*rad*1.22,std::sin(a)*rad*1.22));}
+            else {p.setBrush(col::grid);p.drawRoundedRect(QRectF(c.x()-rad*.14,c.y()+rad*.8,rad*.28,rad*.55),3,3);}
+        }
+        for(int d : {ds::Kick,ds::Tom1,ds::Tom2,ds::Tom3,ds::Snare,ds::HiHat,ds::Ride,ds::Crash}){
+            const QPointF c=center(d);const double rad=radius(d);const bool present=m_body->on(ds::piece(d,ds::Present));
+            if(!present){
+                p.setBrush(Qt::NoBrush);p.setPen(QPen(col::gridStrong,1,Qt::DashLine));p.drawEllipse(c,rad,rad);
+                p.setPen(col::label);p.drawText(QRectF(c.x()-rad,c.y()-10,rad*2,20),Qt::AlignCenter,"+");
+                if(large)p.drawText(QRectF(c.x()-60,c.y()+rad+4,120,16),Qt::AlignCenter,ds::drumName(d));continue;
+            }
+            const bool cymbal=d==ds::HiHat||d==ds::Ride||d==ds::Crash;
+            if(large){p.setPen(Qt::NoPen);p.setBrush(theme::withAlpha(Qt::black,65));p.drawEllipse(c+QPointF(3,6),rad+2,rad+2);}
+            if(d==selected){p.setBrush(theme::withAlpha(theme::accent,20));p.setPen(QPen(theme::accent,1.8));p.drawEllipse(c,rad+5,rad+5);}
+            if(cymbal){
+                const QColor metal=QColor(179,145,78);QRadialGradient finish(c-QPointF(rad*.3,rad*.4),rad*1.6);
+                finish.setColorAt(0,metal.lighter(165));finish.setColorAt(.45,metal);finish.setColorAt(.7,metal.darker(135));finish.setColorAt(1,metal.lighter(125));
+                p.setBrush(finish);p.setPen(QPen(metal.lighter(130),1));p.drawEllipse(c,rad,rad);
+                p.setBrush(Qt::NoBrush);p.setPen(QPen(QColor(60,44,21,65),.6));
+                for(double rr=rad*.25;rr<rad;rr+=large?3.2:4.5)p.drawEllipse(c,rr,rr);
+                p.setBrush(metal.lighter(120));p.setPen(QPen(metal.darker(145),1));p.drawEllipse(c,rad*.2,rad*.2);
+                p.setBrush(col::display);p.setPen(Qt::NoPen);p.drawEllipse(c,large?2.5:1.5,large?2.5:1.5);
+                if(d==ds::HiHat){p.setBrush(Qt::NoBrush);p.setPen(QPen(metal.darker(150),1));p.drawEllipse(c+QPointF(0,3),rad,rad);}
+            }else{
+                const int source=m_body->pick(ds::piece(d,ds::Source));const int bank=source?source-1:audio::drums::bankFor(m_body->pick(ds::Kit));
+                const QColor shell=bank==0?QColor(61,75,83):bank==1?QColor(110,66,49):QColor(151,121,76);
+                p.setBrush(shell);p.setPen(QPen(col::gridStrong,2));p.drawEllipse(c,rad,rad);
+                const bool light=col::display.lightness()>128;
+                QRadialGradient head(c-QPointF(rad*.22,rad*.28),rad*1.5);head.setColorAt(0,light?QColor(244,243,235):QColor(125,132,135));head.setColorAt(.42,light?QColor(220,221,217):QColor(74,79,82));head.setColorAt(1,light?QColor(179,185,183):QColor(33,36,39));
+                p.setBrush(head);p.setPen(QPen(col::label,1));p.drawEllipse(c,rad*.88,rad*.88);
+                p.setBrush(Qt::NoBrush);p.setPen(QPen(theme::withAlpha(col::value,65),.7));p.drawEllipse(c,rad*.79,rad*.79);
+                if(large){
+                    for(int i=0;i<(d==ds::Kick?10:8);++i){double a=i*6.28318530718/(d==ds::Kick?10:8);QPointF at=c+QPointF(std::cos(a)*rad*.95,std::sin(a)*rad*.95);p.setPen(QPen(col::label,2.5));p.drawLine(at,at+(c-at)*.09);}
+                    p.setPen(QPen(theme::withAlpha(col::value,35),.8));p.drawEllipse(c,rad*.31,rad*.31);
+                    if(d==ds::Snare)for(int i=-2;i<=2;++i)p.drawLine(c+QPointF(-rad*.5,i*2),c+QPointF(rad*.5,i*2));
+                }
+            }
+            if(m_glow[d]>.04){p.setBrush(theme::withAlpha(theme::accent,int(m_glow[d]*100)));p.setPen(Qt::NoPen);p.drawEllipse(c,rad*.85,rad*.85);}
+            const QRectF label(c.x()-59,c.y()+rad+7,118,large?19:13);
+            p.setPen(d==selected?col::value:col::label);p.drawText(label,Qt::AlignCenter,ds::drumName(d));
+            if(m_body->on(ds::mute(d))){p.setPen(theme::accent);p.drawText(QRectF(c.x()-10,c.y()-9,20,18),Qt::AlignCenter,"M");}
+        }
+        if(m_mics){
+            auto mic=[&](int d,bool right){const QPointF at=micPoint(d,right);const bool sel=d==m_mic;const QColor color=sel?theme::accent:col::cyan;
+                if(d<ds::kDrums){p.setPen(QPen(theme::withAlpha(color,140),1,Qt::DashLine));p.drawLine(center(d),at);}
+                else {p.setPen(QPen(theme::withAlpha(color,70),1,Qt::DashLine));p.drawLine(at,room.center());}
+                p.setBrush(col::display);p.setPen(QPen(color,sel?2:1));p.drawEllipse(at,sel?10:8,sel?10:8);
+                p.drawRoundedRect(QRectF(at.x()-2.5,at.y()-5,5,8),2,2);p.drawLine(at+QPointF(-4,0),at+QPointF(-4,4));p.drawLine(at+QPointF(-4,4),at+QPointF(4,4));p.drawLine(at+QPointF(4,4),at+QPointF(4,0));
+                if(d>=ds::kDrums){p.setPen(color);p.drawText(QRectF(at.x()-40,at.y()+(d==ds::kDrums?-29:13),80,16),Qt::AlignCenter,QString(d==ds::kDrums?"OH %1":"Room %1").arg(right?"R":"L"));}
+            };
+            for(int d=0;d<ds::kDrums;++d)if(m_body->on(ds::piece(d,ds::Present)))mic(d,false);
+            for(int d=ds::kDrums;d<ds::kDrums+2;++d){mic(d,false);mic(d,true);}
+        }
+        p.setPen(col::label);p.drawText(r.adjusted(12,8,-12,-8),Qt::AlignTop|Qt::AlignLeft,m_mics?"MICROPHONE POSITION":m_move?"MOVE PIECES":"KIT");
+        if(large){p.setPen(col::gridText);p.drawText(r.adjusted(12,8,-12,-8),Qt::AlignBottom|Qt::AlignHCenter,m_mics?"Drag mic · distance / angle":"Drummer perspective");}
     }
     void mousePressEvent(QMouseEvent* e) override {
-        const int d = drumAt(e->position());
-        if (d < 0) return;
-        studioDrums().insert(m_body->ctx().deviceId, d);
-        m_selected(d);
-        if (Transport* t = m_body->ctx().transport) t->previewNote(m_body->ctx().track, ds::noteFor(d), 0.9);
-        update();
+        if(e->button()!=Qt::LeftButton)return;
+        setFocus();m_press=e->position();m_drag=-1;m_dragged=false;
+        if(m_mics){
+            double best=18;int hit=-1;
+            for(int d=0;d<ds::kDrums+2;++d){if(d<ds::kDrums&&!m_body->on(ds::piece(d,ds::Present)))continue;
+                for(bool right:{false,true}){if(d<ds::kDrums&&right)continue;const auto pt=micPoint(d,right);const double distance=std::hypot(pt.x()-m_press.x(),pt.y()-m_press.y());if(distance<best){best=distance;hit=d;}}}
+            if(hit<0)hit=drumAt(m_press);
+            if(hit>=0){m_drag=hit;m_mic=hit;if(hit<ds::kDrums){studioDrums().insert(m_body->ctx().deviceId,hit);m_selected(hit);}if(m_micSelected)m_micSelected(hit);update();}return;
+        }
+        m_drag=drumAt(m_press);if(m_drag<0)return;studioDrums().insert(m_body->ctx().deviceId,m_drag);m_selected(m_drag);update();
+    }
+    void mouseMoveEvent(QMouseEvent* e) override {
+        if(!(e->buttons()&Qt::LeftButton)||m_drag<0||(!m_mics&&!m_move))return;
+        if(!m_dragged&&(e->position()-m_press).manhattanLength()<QApplication::startDragDistance())return;
+        m_dragged=true;const auto r=stage();
+        if(m_mics){
+            if(m_drag<ds::kDrums){const auto delta=e->position()-center(m_drag);const double len=std::hypot(delta.x(),delta.y());const double angle=std::atan2(delta.y(),delta.x())*180/3.14159265359+135;
+                m_body->editMany({{ds::piece(m_drag,ds::MicDistance),(len-radius(m_drag)-r.height()*.025)/(r.height()*.1)},{ds::piece(m_drag,ds::MicAngle),angle/90}},16+m_drag);
+            }else if(m_drag==ds::kDrums)m_body->editMany({{ds::Width,(std::abs(e->position().x()-r.center().x())/r.width()-.16)/.2},{ds::OhHeight,(e->position().y()-r.top()-r.height()*.025)/(r.height()*.06)}},24);
+            else m_body->editMany({{ds::RoomDistance,(r.top()+r.height()*.94-e->position().y())/(r.height()*.08)}},25);
+        }else{
+            const int d=m_drag;const double margin=ds::stageRadius[d]+.04;
+            m_body->editMany({{ds::piece(d,ds::StageX),std::clamp((e->position().x()-r.left())/r.width(),margin,1-margin)},{ds::piece(d,ds::StageY),std::clamp((e->position().y()-r.top())/r.height(),margin,1-margin)}},d);
+        }update();
+    }
+    void mouseReleaseEvent(QMouseEvent* e) override {
+        if(e->button()!=Qt::LeftButton)return;
+        if(m_drag>=0&&!m_dragged&&!m_mics){if(!m_body->on(ds::piece(m_drag,ds::Present)))m_body->edit(ds::piece(m_drag,ds::Present),1);else if(!m_move)audition(m_drag);}
+        m_drag=-1;
+    }
+    void keyPressEvent(QKeyEvent* e) override {
+        const int d=studioDrums().value(m_body->ctx().deviceId,ds::Snare);
+        if(e->key()==Qt::Key_Delete){m_body->edit(ds::piece(d,ds::Present),0);e->accept();}
+        else if(e->key()==Qt::Key_Return||e->key()==Qt::Key_Space){if(m_body->on(ds::piece(d,ds::Present)))audition(d);e->accept();}
+        else Display::keyPressEvent(e);
     }
 private:
-    std::function<void(int)> m_selected;
-    double m_glow[ds::kDrums]{};
+    void audition(int d) { if(m_audition)m_audition(d);else if(m_body->ctx().transport)m_body->ctx().transport->previewNote(m_body->ctx().track,ds::noteFor(d),.8); }
+    std::function<void(int)> m_selected,m_micSelected,m_audition;
+    bool m_move=false,m_mics=false,m_dragged=false;int m_drag=-1,m_mic=ds::Snare;QPointF m_press;double m_glow[ds::kDrums]{};
 };
 
 // The mics around the kit: the close mics as dots on the drums, the overhead pair above (spread
@@ -130,8 +220,8 @@ protected:
         const QRectF kit = r.adjusted(10, 14, -34, -8);
         // the kit, faint
         for (int d = 0; d < ds::kDrums; ++d) {
-            const QPointF c(kit.left() + kSpots[d].x * kit.width(), kit.top() + 0.35 * kit.height() + kSpots[d].y * kit.height() * 0.6);
-            const double rad = kSpots[d].r * kit.height() * 0.55;
+            const QPointF c(kit.left() + ds::stageX[d] * kit.width(), kit.top() + 0.35 * kit.height() + ds::stageY[d] * kit.height() * 0.6);
+            const double rad = ds::stageRadius[d] * kit.height() * 0.55;
             p.setPen(QPen(col::gridStrong, 0.8));
             p.setBrush(theme::devCell);
             p.drawEllipse(c, rad, rad);
@@ -277,7 +367,7 @@ private:
         row->addWidget(kitView, 0, Qt::AlignTop);
         auto* side = vbox(3);
         side->addWidget(section("Kit"));
-        side->addWidget(chooser(ds::Kit, 120));
+        side->addWidget(chooser(ds::ContentLibrary, 120));side->addWidget(chooser(ds::Kit, 120));
         m_drumTitle = section("Snare");
         side->addWidget(m_drumTitle);
         m_drumPages = new QStackedWidget(page);
@@ -408,25 +498,78 @@ private:
 
 // Expanded editors live in DeviceView, share the same parameters and undo stack,
 // and retain their page/selection while the compact chain is rebuilt.
+// Cached min/max envelopes of the actual selected recording and velocity layer.
 class DrumWave : public Display {
 public:
-    DrumWave(DeviceBody* b, std::function<int()> note) : Display(b, 360, 90), m_note(std::move(note)) {
-        setMinimumWidth(240); setMaximumWidth(QWIDGETSIZE_MAX);
+    DrumWave(DeviceBody* b,std::function<int()> note,std::function<int()> drum,std::function<double()> velocity)
+        :Display(b,360,164),m_note(std::move(note)),m_drum(std::move(drum)),m_velocity(std::move(velocity)) {
+        setObjectName("studioWaveform");setMinimumSize(280,112);setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);
+        InfoView::attach(this,"Recorded source","The original recording at the audition velocity. The velocity layer follows the selected library; RR 1 previews the first repeated-hit variation. Tune changes playback rate; Decay is shown as a damping envelope when below ×1.");
     }
-    void draw(QPainter& p, const QRectF& r) override {
-        const int gm = m_note();
-        const auto& s = audio::drums::library()[audio::drums::bankFor(m_body->pick(ds::Kit))].notes[audio::drums::sampleNote(gm)][3];
-        if (s.mono.empty()) return;
-        p.setPen(QPen(col::curve, 1));
-        for (int x = 0; x < int(r.width()); ++x) {
-            const size_t a = size_t(x * s.mono.size() / r.width()), b = std::min(s.mono.size(), size_t((x + 1) * s.mono.size() / r.width()) + 1);
-            float lo = 0, hi = 0; for (size_t i = a; i < b; i += 2) { lo = std::min(lo, s.mono[i]); hi = std::max(hi, s.mono[i]); }
-            p.drawLine(QPointF(r.left() + x, r.center().y() - hi * r.height() * .43), QPointF(r.left() + x, r.center().y() - lo * r.height() * .43));
+    void draw(QPainter& p,const QRectF& r) override {
+        const int drum=m_drum(),gm=m_note(),source=m_body->pick(ds::piece(drum,ds::Source));
+        const int bank=source?source-1:audio::drums::bankFor(m_body->pick(ds::Kit));
+        const int v=std::clamp(int(std::lround(m_velocity()*127)),1,127);const int layer=v<=26?0:v<=52?1:v<=77?2:v<=102?3:4;
+        int layers=5,shownLayer=layer+1;const auto* sample=&audio::drums::library()[bank].notes[audio::drums::sampleNote(gm)][layer];
+        const auto positions=m_body->positions();const int content=audio::drums::contentIndex(positions.data(),drum);
+        if(content>=0){if(content!=m_contentIndex||!m_contentBank){m_contentBank=audio::drums::loadContentBank(content);m_contentIndex=content;}
+            if(m_contentBank)if(const auto* hit=audio::drums::recordedHit(*m_contentBank,gm,v,0,&layers)){sample=m_body->on(ds::recordedMic(drum))&&!hit->alternate.mono.empty()?&hit->alternate:&hit->close;shownLayer=1;for(const auto& group:m_contentBank->notes[size_t(gm)]){if(v<=group.high)break;++shownLayer;}}}
+        else m_contentBank.reset();const auto& s=*sample;
+        const auto plot=r.adjusted(10,28,-10,-26);const int width=std::max(1,int(plot.width()));
+        if(m_sample!=&s||m_width!=width){
+            m_sample=&s;m_width=width;m_peaks.assign(size_t(width),{});
+            for(int x=0;x<width;++x){const size_t a=size_t(x)*s.mono.size()/width,b=size_t(x+1)*s.mono.size()/width;float lo=0,hi=0;
+                for(size_t i=a;i<b;++i){lo=std::min(lo,s.mono[i]);hi=std::max(hi,s.mono[i]);}m_peaks[size_t(x)]={lo,hi};}
         }
-        drawCaption(p, r, QString("%1 s · 5 layers").arg(s.mono.size() / s.rate, 0, 'f', 2));
+        p.setRenderHint(QPainter::Antialiasing);p.setPen(col::grid);p.drawLine(plot.topLeft()+QPointF(0,plot.height()*.5),plot.topRight()+QPointF(0,plot.height()*.5));
+        const double seconds=s.mono.size()/s.rate; p.setFont(QFont(p.font().family(),8));
+        for(int i=0;i<5;++i){double x=plot.left()+plot.width()*i/4.;p.setPen(col::grid);p.drawLine(QPointF(x,plot.top()),QPointF(x,plot.bottom()));p.setPen(col::gridText);p.drawText(QRectF(x-18,plot.bottom()+6,40,15),Qt::AlignCenter,QString::number(seconds*i/4.,'f',2));}
+        p.setPen(QPen(col::curve,1));for(int x=0;x<width;++x){auto pair=m_peaks[size_t(x)];p.drawLine(QPointF(plot.left()+x,plot.center().y()-pair.second*plot.height()*.46),QPointF(plot.left()+x,plot.center().y()-pair.first*plot.height()*.46));}
+        double decay=m_body->real(ds::param(drum,ds::Decay));const int recipe=m_body->pick(ds::Kit);decay*=recipe==2?.65:recipe==3?.8:1;
+        if(decay<.999){const double tau=(drum>=ds::Ride?1.5:.35)*decay/(1-decay);QPainterPath path;for(int x=0;x<=width;++x){double y=plot.center().y()-std::exp(-(seconds*x/width)/tau)*plot.height()*.46;if(!x)path.moveTo(plot.left()+x,y);else path.lineTo(plot.left()+x,y);}p.setPen(QPen(col::cyan,1,Qt::DashLine));p.drawPath(path);}
+        p.setPen(col::label);p.drawText(r.adjusted(10,7,-10,-7),Qt::AlignTop|Qt::AlignLeft,"RECORDED SOURCE");
+        p.setPen(col::curve);p.drawText(r.adjusted(10,7,-10,-7),Qt::AlignTop|Qt::AlignRight,QString("%1 / %2 · RR 1 · %3 s").arg(shownLayer).arg(layers).arg(seconds,0,'f',2));
     }
-private: std::function<int()> m_note;
+private:
+    std::shared_ptr<const audio::drums::ContentBank> m_contentBank;int m_contentIndex=-2;
+    std::function<int()> m_note,m_drum;std::function<double()> m_velocity;const audio::drums::Layer* m_sample=nullptr;int m_width=0;std::vector<std::pair<float,float>>m_peaks;
 };
+
+class MicResponse : public Display {
+public:
+    MicResponse(DeviceBody* b,std::function<int()> selected):Display(b,360,176),m_selected(std::move(selected)){
+        setObjectName("studioMicResponse");setMinimumSize(280,136);setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);
+        InfoView::attach(this,"Mic response","Static frequency response of the selected generic tonal model, including close-mic angle and distance gain. Original recording acoustics and the room reverb are not measured here. These are modeled microphones, not alternate recorded mic channels.");
+    }
+    void draw(QPainter& p,const QRectF& r)override{
+        const int d=m_selected();const bool close=d<ds::kDrums,oh=d==ds::kDrums;
+        const int model=m_body->pick(close?ds::piece(d,ds::MicModel):oh?ds::OhModel:ds::RoomModel);
+        const float angle=close?m_body->real(ds::piece(d,ds::MicAngle)):0,cm=close?m_body->real(ds::piece(d,ds::MicDistance)):10;
+        const double rate=m_body->ctx().transport&&m_body->ctx().transport->engine()?m_body->ctx().transport->engine()->sampleRate():48000;
+        const double extra=close?0:10*std::log10((oh?1.5:3)/m_body->real(oh?ds::OhHeight:ds::RoomDistance));
+        const auto grid=r.adjusted(35,30,-16,-25);p.setFont(QFont(p.font().family(),8));
+        auto y=[&](double db){return grid.top()+(6-db)/30*grid.height();};
+        for(int db:{-24,-12,0,6}){p.setPen(db==0?col::gridStrong:col::grid);p.drawLine(QPointF(grid.left(),y(db)),QPointF(grid.right(),y(db)));p.setPen(col::gridText);p.drawText(QRectF(r.left()+1,y(db)-8,29,16),Qt::AlignRight|Qt::AlignVCenter,QString::number(db));}
+        for(int hz:{30,100,1000,10000}){const double x=grid.left()+std::log(double(hz)/20)/std::log(1000.)*grid.width();p.setPen(col::grid);p.drawLine(QPointF(x,grid.top()),QPointF(x,grid.bottom()));p.setPen(col::gridText);p.drawText(QRectF(x-16,grid.bottom()+4,35,16),Qt::AlignCenter,hz>=1000?QString("%1k").arg(hz/1000):QString::number(hz));}
+        QPainterPath path;for(int i=0;i<=int(grid.width());++i){double hz=20*std::pow(1000.,i/grid.width());double db=audio::drums::micResponse(hz,model,angle,cm,rate)+extra;QPointF point(grid.left()+i,y(std::clamp(db,-24.,6.)));if(i==0)path.moveTo(point);else path.lineTo(point);}
+        p.setRenderHint(QPainter::Antialiasing);p.setPen(QPen(col::cyan,1.8));p.drawPath(path);
+        path.lineTo(grid.bottomRight());path.lineTo(grid.bottomLeft());path.closeSubpath();p.fillPath(path,theme::withAlpha(col::cyan,18));
+        p.setPen(col::label);p.drawText(r.adjusted(10,7,-10,-7),Qt::AlignTop|Qt::AlignLeft,"MODELED RESPONSE · dB");
+        p.setPen(col::cyan);p.drawText(r.adjusted(10,7,-10,-7),Qt::AlignTop|Qt::AlignRight,QStringList{"Recording","Dynamic","Condenser","Ribbon"}[model]);
+    }
+private:std::function<int()>m_selected;
+};
+
+// Small functional navigation icons; generated natively so theme changes stay sharp.
+QIcon studioIcon(int kind,const QColor& color){
+    QPixmap pix(20,20);pix.fill(Qt::transparent);QPainter p(&pix);p.setRenderHint(QPainter::Antialiasing);p.setPen(QPen(color,1.4,Qt::SolidLine,Qt::RoundCap,Qt::RoundJoin));p.setBrush(Qt::NoBrush);
+    if(kind==0){p.drawEllipse(QRectF(2,6,13,8));p.drawLine(2,10,2,15);p.drawArc(QRectF(2,11,13,8),180*16,180*16);p.drawLine(6,2,17,7);}
+    else if(kind==1){for(int i=0;i<3;++i){int x=4+i*6;p.drawLine(x,2,x,18);p.fillRect(QRectF(x-2,5+i*3,4,4),color);}}
+    else if(kind==2){for(int y=0;y<3;++y)for(int x=0;x<4;++x){QRectF r(2+x*4.5,4+y*5,2.5,2.5);if((x+y)%3==0)p.fillRect(r,color);else p.drawRect(r);}}
+    else {p.drawRoundedRect(QRectF(7,2,6,10),3,3);p.drawArc(QRectF(4,6,12,10),180*16,180*16);p.drawLine(10,16,10,19);p.drawLine(7,19,13,19);}
+    return QIcon(pix);
+}
+
 class GrooveGrid : public Display {
 public:
     GrooveGrid(DeviceBody* b) : Display(b, 650, 260) { setMinimumSize(440, 220); setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX); }
@@ -469,23 +612,19 @@ private: int m_drum;
 class DrumStudioEditor : public DeviceBody {
 public:
     DrumStudioEditor(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
-        setObjectName("drumStudioEditor"); setMinimumSize(980, 460); setMaximumHeight(QWIDGETSIZE_MAX);
-        auto* root = new QVBoxLayout(this); root->setContentsMargins(8, 6, 8, 6); root->setSpacing(6);
-        auto* bar = hbox(8); bar->addWidget(section("DRUM STUDIO")); bar->addWidget(chooser(ds::Kit, 150));
-        auto* source = new QLabel(this); bar->addWidget(source); bar->addStretch();
-        m_refreshers.push_back([this, source] { source->setText(QString("%1 · 5 velocity layers").arg(audio::drums::sourceName(pick(ds::Kit)))); });
-        m_pages = new QStackedWidget(this);
-        for (int i = 0; i < 3; ++i) {
-            auto* b = new QPushButton(QStringList{"Kit", "Mixer", "Grooves"}[i], this); b->setObjectName(QString("studioTab%1").arg(i)); b->setCheckable(true); m_tabs.push_back(b);
-            connect(b, &QPushButton::clicked, this, [this, i] { setPage(i); }); bar->addWidget(b);
-        }
-        root->addLayout(bar); root->addWidget(m_pages, 1);
-        m_pages->addWidget(kitPage()); m_pages->addWidget(mixerPage()); m_pages->addWidget(groovePage());
-        setPage(0); selectDrum(ds::Snare); applyStyle(); refresh();
-        connect(theme::notifier(), &theme::Notifier::changed, this, [this] { applyStyle(); });
-        connect(c.project, &Project::restored, this, [this] { refresh(); });
-        m_preview.setInterval(4); m_preview.setTimerType(Qt::PreciseTimer);
-        connect(&m_preview, &QTimer::timeout, this, [this] { previewTick(); });
+        setObjectName("drumStudioEditor");setMinimumSize(880,500);setMaximumHeight(QWIDGETSIZE_MAX);
+        auto* root=new QVBoxLayout(this);root->setContentsMargins(10,8,10,8);root->setSpacing(8);
+        auto* bar=hbox(10);auto* title=new QLabel("DRUM STUDIO",this);title->setObjectName("studioHeading");bar->addWidget(title);
+        auto* library=chooser(ds::ContentLibrary,160);library->setObjectName("studioContentLibrary");bar->addWidget(library);bar->addWidget(chooser(ds::Kit,112));auto* source=new QLabel(this);source->setObjectName("studioSourceInfo");source->setMinimumWidth(0);bar->addWidget(source,1);bar->addWidget(new QLabel("Output",this));bar->addWidget(field(ds::Volume,66));
+        m_refreshers.push_back([this,source]{int pieces=0;for(int d=0;d<ds::kDrums;++d)pieces+=on(ds::piece(d,ds::Present));source->setText(QString("%1 pieces%2").arg(pieces).arg(pick(ds::ContentLibrary)>0&&!audio::drums::contentInstalled(pick(ds::ContentLibrary)-1)?" · Content missing":""));});
+        root->addLayout(bar);auto* nav=hbox(4);m_pages=new QStackedWidget(this);
+        for(int i=0;i<4;++i){auto* b=new QPushButton(QStringList{"Kit","Mixer","Grooves","Microphones"}[i],this);b->setObjectName(QString("studioTab%1").arg(i));b->setCheckable(true);b->setMinimumHeight(30);b->setIconSize(QSize(20,20));m_tabs.push_back(b);connect(b,&QPushButton::clicked,this,[this,i]{setPage(i);});nav->addWidget(b);}
+        nav->addStretch();root->addLayout(nav);root->addWidget(m_pages,1);
+        m_pages->addWidget(kitPage());m_pages->addWidget(mixerPage());m_pages->addWidget(groovePage());m_pages->addWidget(micPage());
+        setPage(0);selectDrum(studioDrums().value(c.deviceId,ds::Snare));applyStyle();refresh();
+        connect(theme::notifier(),&theme::Notifier::changed,this,[this]{applyStyle();});
+        connect(c.project,&Project::restored,this,[this]{refresh();});
+        m_preview.setInterval(4);m_preview.setTimerType(Qt::PreciseTimer);connect(&m_preview,&QTimer::timeout,this,[this]{previewTick();});
     }
     void refresh() override {
         m_ctx.track = ctx().project->indexOfTrack(ctx().trackId); DeviceBody::refresh();
@@ -494,12 +633,12 @@ public:
 protected:
     void hideEvent(QHideEvent* e) override { stopPreview(); DeviceBody::hideEvent(e); }
 private:
-    void setPage(int i) { if (i != 2) stopPreview(); m_pages->setCurrentIndex(i); for (int k = 0; k < 3; ++k) m_tabs[k]->setChecked(k == i); }
+    void setPage(int i) { if (i != 2) stopPreview(); m_pages->setCurrentIndex(i); for (int k = 0; k < 4; ++k) m_tabs[k]->setChecked(k == i); }
     int track() const { return ctx().project->indexOfTrack(ctx().trackId); }
     QPushButton* action(const QString& text, const QString& id, std::function<void()> fn) {
         auto* b = new QPushButton(text, this); b->setObjectName(id); connect(b, &QPushButton::clicked, this, std::move(fn)); return b;
     }
-    void audition(int note) { if (ctx().transport) ctx().transport->previewNote(track(), note, m_velocity ? m_velocity->value() : .8); }
+    void audition(int note) { const int d=ds::drumFor(note); if(d>=0 && !on(ds::piece(d,ds::Present)))return; if (ctx().transport) ctx().transport->previewNote(track(), note, m_velocity ? m_velocity->value() : .8); }
     void selectDrum(int d) {
         m_drum = d; studioDrums().insert(ctx().deviceId, d); m_drumTitle->setText(ds::drumName(d)); m_drumControls->setCurrentIndex(d);
         m_articulations->clear();
@@ -509,27 +648,55 @@ private:
             {{"Center",41},{"Edge",43}}, {{"Bow",51},{"Bell",53},{"Shank",59}},
             {{"Crash 1",49},{"Crash 2",57},{"Splash",55},{"China",52}}};
         for (const auto& a : arts[d]) m_articulations->addItem(a.first, a.second);
-        m_note = ds::noteFor(d); update();
+        m_note = ds::noteFor(d); refresh(); update();
     }
     QWidget* kitPage() {
-        auto* page = new QWidget(this); auto* row = new QHBoxLayout(page); row->setContentsMargins(0,0,0,0); row->setSpacing(12);
-        auto* kit = new KitView(this, 500, 330, [this](int d) { selectDrum(d); }); kit->setMinimumSize(380,260); kit->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX); animate(kit); row->addWidget(kit, 5);
-        auto* side = vbox(8); m_drumTitle = section("Snare"); side->addWidget(m_drumTitle);
-        auto* artRow = hbox(5); m_articulations = new QComboBox(this); m_articulations->setObjectName("studioArticulation"); artRow->addWidget(m_articulations, 1);
-        connect(m_articulations, &QComboBox::activated, this, [this](int i) { m_note = m_articulations->itemData(i).toInt(); audition(m_note); update(); });
-        artRow->addWidget(action("Audition", "studioAudition", [this] { audition(m_note); })); side->addLayout(artRow);
-        auto* wave = new DrumWave(this, [this] { return m_note; }); watch(wave); side->addWidget(wave);
-        m_drumControls = new QStackedWidget(this);
-        for (int d = 0; d < ds::kDrums; ++d) {
-            auto* w = new QWidget(this); auto* knobs = new QHBoxLayout(w); knobs->setContentsMargins(0,0,0,0);
-            for (int k = 0; k < ds::kPerDrum; ++k) knobs->addWidget(knob(ds::param(d,k), 34, QStringList{"Level","Pan","Tune","Decay","Tone"}[k], k == ds::Pan || k == ds::Tune));
-            m_drumControls->addWidget(w);
-        }
-        side->addWidget(m_drumControls);
-        auto* lower = hbox(5); lower->addWidget(knob(ds::Wires, 28, "Wires")); lower->addWidget(knob(ds::Beater, 28, "Beater")); lower->addWidget(knob(ds::Velocity,28,"Response"));
-        m_velocity = new DragValue(this); m_velocity->setRange(.05,1); m_velocity->setValue(.8,false); m_velocity->setFixedSize(72,24);
-        m_velocity->setFormatter([](double v) { return QString("Vel %1").arg(int(std::lround(v * 127))); }); lower->addWidget(m_velocity); side->addLayout(lower); side->addStretch();
-        row->addLayout(side, 4); return page;
+        auto* page=new QWidget(this);auto* row=new QHBoxLayout(page);row->setContentsMargins(0,0,0,0);row->setSpacing(10);
+        auto* stageCol=vbox(6);auto* tools=hbox(5);
+        auto* move=action("Move pieces","studioMovePieces",[this]{m_kit->setMoveMode(m_moveButton->isChecked());});move->setCheckable(true);m_moveButton=move;tools->addWidget(move);
+        auto* add=action("Add piece","studioAddPiece",[]{});auto* menu=new QMenu(add);add->setMenu(menu);
+        for(int d=0;d<ds::kDrums;++d){auto* a=menu->addAction(ds::drumName(d));a->setObjectName(QString("studioAdd%1").arg(d));connect(a,&QAction::triggered,this,[this,d]{edit(ds::piece(d,ds::Present),1);selectDrum(d);});connect(menu,&QMenu::aboutToShow,a,[this,d,a]{a->setEnabled(!on(ds::piece(d,ds::Present)));});}
+        tools->addWidget(add);tools->addStretch();tools->addWidget(action("Reset layout","studioResetLayout",[this]{std::vector<std::pair<int,double>>changes;for(int d=0;d<ds::kDrums;++d){changes.push_back({ds::piece(d,ds::StageX),ds::stageX[d]});changes.push_back({ds::piece(d,ds::StageY),ds::stageY[d]});}editMany(changes,12);}));stageCol->addLayout(tools);
+        m_kit=new KitView(this,580,380,[this](int d){selectDrum(d);});m_kit->setAudition([this](int d){audition(ds::noteFor(d));});m_kit->setObjectName("studioKitStage");m_kit->setMinimumSize(360,260);m_kit->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);animate(m_kit);stageCol->addWidget(m_kit,1);
+        auto* pads=hbox(3);
+        for(int d=0;d<ds::kDrums;++d){auto* hit=action(ds::drumName(d),QString("studioSelect%1").arg(d),[this,d]{selectDrum(d);if(on(ds::piece(d,ds::Present)))audition(ds::noteFor(d));else edit(ds::piece(d,ds::Present),1);});hit->setCheckable(true);hit->setMinimumWidth(0);pads->addWidget(hit,1);m_refreshers.push_back([this,d,hit]{hit->setChecked(d==m_drum);hit->setText(QString(on(ds::piece(d,ds::Present))?"%1":"+ %1").arg(ds::drumName(d)));});}stageCol->addLayout(pads);row->addLayout(stageCol,6);
+        auto* sideFrame=new QFrame(page);sideFrame->setObjectName("studioCard");sideFrame->setMinimumWidth(330);sideFrame->setMaximumWidth(420);auto* side=new QVBoxLayout(sideFrame);side->setContentsMargins(12,10,12,10);side->setSpacing(8);
+        auto* heading=hbox(6);m_drumTitle=new QLabel("Snare",this);m_drumTitle->setObjectName("studioPieceTitle");heading->addWidget(m_drumTitle);heading->addStretch();m_present=action("Remove","studioPresent",[this]{edit(ds::piece(m_drum,ds::Present),on(ds::piece(m_drum,ds::Present))?0:1);});heading->addWidget(m_present);side->addLayout(heading);
+        auto* artRow=hbox(5);m_articulations=new QComboBox(this);m_articulations->setObjectName("studioArticulation");artRow->addWidget(m_articulations,1);
+        connect(m_articulations,&QComboBox::activated,this,[this](int i){m_note=m_articulations->itemData(i).toInt();audition(m_note);update();});
+        artRow->addWidget(action("Audition","studioAudition",[this]{audition(m_note);}));side->addLayout(artRow);
+        m_wave=new DrumWave(this,[this]{return m_note;},[this]{return m_drum;},[this]{return m_velocity?m_velocity->value():.8;});watch(m_wave);side->addWidget(m_wave,1);
+        m_drumControls=new QStackedWidget(this);
+        for(int d=0;d<ds::kDrums;++d){
+            auto* w=new QWidget(this);auto* controls=new QVBoxLayout(w);controls->setContentsMargins(0,0,0,0);controls->setSpacing(7);
+            auto* contentRow=hbox(6);contentRow->addWidget(new QLabel("Library",w));auto* content=chooser(ds::contentSource(d),232);content->setObjectName(QString("studioContentSource%1").arg(d));contentRow->addWidget(content,1);controls->addLayout(contentRow);
+            auto* sourceRow=hbox(6);sourceRow->addWidget(new QLabel("Original",w));auto* source=chooser(ds::piece(d,ds::Source),232);source->setObjectName(QString("studioPieceSource%1").arg(d));sourceRow->addWidget(source,1);controls->addLayout(sourceRow);
+            auto* knobs=hbox(3);for(int k=0;k<ds::kPerDrum;++k)knobs->addWidget(knob(ds::param(d,k),42,QStringList{"Level","Pan","Tune","Decay","Tone"}[k],k==ds::Pan||k==ds::Tune),1);controls->addLayout(knobs);
+            auto* switches=hbox(6);switches->addWidget(toggle(ds::piece(d,ds::Present),"In kit",46));switches->addWidget(toggle(ds::mute(d),"Mute",44));switches->addWidget(toggle(ds::solo(d),"Solo",44));switches->addStretch();switches->addWidget(new QLabel("X",w));switches->addWidget(field(ds::piece(d,ds::StageX),42));switches->addWidget(new QLabel("Y",w));switches->addWidget(field(ds::piece(d,ds::StageY),42));controls->addLayout(switches);m_drumControls->addWidget(w);
+        }side->addWidget(m_drumControls);
+        auto* lower=hbox(5);lower->addWidget(knob(ds::Wires,32,"Wires"));lower->addWidget(knob(ds::Beater,32,"Beater"));lower->addWidget(knob(ds::Velocity,32,"Response"));lower->addStretch();
+        auto* velCol=vbox(3);velCol->addWidget(new QLabel("Audition velocity",this));m_velocity=new DragValue(this);m_velocity->setObjectName("studioVelocity");m_velocity->setRange(.05,1);m_velocity->setValue(.8,false);m_velocity->setFixedSize(92,28);m_velocity->setFormatter([](double v){return QString::number(int(std::lround(v*127)));});connect(m_velocity,&DragValue::valueEdited,this,[this]{m_wave->update();});velCol->addWidget(m_velocity);lower->addLayout(velCol);side->addLayout(lower);row->addWidget(sideFrame,4);
+        m_refreshers.push_back([this]{if(m_present){const bool present=on(ds::piece(m_drum,ds::Present));m_present->setText(present?"Remove":"Add to kit");m_present->setProperty("mapTarget",target(ds::piece(m_drum,ds::Present)));}});
+        return page;
+    }
+    void selectMic(int d){
+        m_mic=std::clamp(d,0,ds::kDrums+1);if(m_micChoices){QSignalBlocker block(m_micChoices);m_micChoices->setCurrentIndex(m_mic);}if(m_micControls)m_micControls->setCurrentIndex(m_mic);if(m_micStage)m_micStage->selectMic(m_mic);if(m_response)m_response->update();
+    }
+    QWidget* micPage(){
+        auto* page=new QWidget(this);auto* row=new QHBoxLayout(page);row->setContentsMargins(0,0,0,0);row->setSpacing(10);
+        auto* stageCol=vbox(7);auto* tools=hbox(8);tools->addWidget(section("MICROPHONES"));tools->addStretch();auto* modeled=new QLabel("Recorded channels + mic models",this);modeled->setObjectName("studioModelNotice");tools->addWidget(modeled);stageCol->addLayout(tools);
+        m_micStage=new KitView(this,580,380,[this](int d){selectDrum(d);});m_micStage->setObjectName("studioMicStage");m_micStage->setMicMode([this](int d){selectMic(d);});m_micStage->setMinimumSize(360,280);m_micStage->setMaximumSize(QWIDGETSIZE_MAX,QWIDGETSIZE_MAX);animate(m_micStage);stageCol->addWidget(m_micStage,1);
+        auto* buses=hbox(10);for(auto pair:{std::pair<int,QString>{ds::Overheads,"Overheads"},{ds::Room,"Room"},{ds::RoomSize,"Size"},{ds::Bleed,"Bleed"},{ds::Width,"Width"}})buses->addWidget(knob(pair.first,34,pair.second),1);stageCol->addLayout(buses);row->addLayout(stageCol,6);
+        auto* card=new QFrame(page);card->setObjectName("studioCard");card->setMinimumWidth(330);card->setMaximumWidth(420);auto* side=new QVBoxLayout(card);side->setContentsMargins(12,10,12,10);side->setSpacing(10);
+        m_micChoices=new QComboBox(card);m_micChoices->setObjectName("studioMicSelection");for(int d=0;d<ds::kDrums;++d)m_micChoices->addItem(QString("%1 · Close mic").arg(ds::drumName(d)));m_micChoices->addItem("Overhead pair");m_micChoices->addItem("Room pair");side->addWidget(m_micChoices);connect(m_micChoices,&QComboBox::currentIndexChanged,this,[this](int d){selectMic(d);});
+        m_response=new MicResponse(this,[this]{return m_mic;});watch(m_response);side->addWidget(m_response,1);m_micControls=new QStackedWidget(this);
+        for(int d=0;d<ds::kDrums+2;++d){
+            auto* w=new QWidget(card);auto* controls=new QVBoxLayout(w);controls->setContentsMargins(0,0,0,0);controls->setSpacing(10);const bool close=d<ds::kDrums,oh=d==ds::kDrums;
+            auto* modelRow=hbox(6);modelRow->addWidget(new QLabel("Model",w));auto* model=chooser(close?ds::piece(d,ds::MicModel):oh?ds::OhModel:ds::RoomModel,220);model->setObjectName(QString("studioMicModel%1").arg(d));modelRow->addWidget(model,1);controls->addLayout(modelRow);
+            if(close){auto* recorded=hbox(6);recorded->addWidget(new QLabel("Recorded source",w));auto* variant=chooser(ds::recordedMic(d),152);variant->setObjectName(QString("studioRecordedMic%1").arg(d));InfoView::attach(variant,"Recorded source","Primary or alternate recorded microphone when supplied by this library. If no alternate recording exists, Primary is used. Tonal Model is applied after the chosen recording.");recorded->addWidget(variant,1);controls->addLayout(recorded);}
+            auto* knobs=hbox(8);if(close){knobs->addWidget(knob(ds::piece(d,ds::MicDistance),52,"Distance · cm"),1);knobs->addWidget(knob(ds::piece(d,ds::MicAngle),52,"Off axis"),1);knobs->addWidget(knob(ds::param(d,ds::Level),42,"Level"),1);}
+            else{knobs->addWidget(knob(oh?ds::OhHeight:ds::RoomDistance,52,oh?"Height · m":"Distance · m"),1);knobs->addWidget(knob(oh?ds::Overheads:ds::Room,52,"Level"),1);knobs->addWidget(knob(oh?ds::Width:ds::RoomSize,42,oh?"Width":"Size"),1);}controls->addLayout(knobs);m_micControls->addWidget(w);
+        }side->addWidget(m_micControls);auto* micTools=hbox(6);micTools->addWidget(action("Audition","studioMicAudition",[this]{audition(ds::noteFor(m_mic<ds::kDrums?m_mic:m_drum));}));micTools->addWidget(action("Reset mic","studioResetMic",[this]{std::vector<std::pair<int,double>>changes;const auto* spec=specOf(ctx().type);if(m_mic<ds::kDrums){for(int k:{ds::MicModel,ds::MicDistance,ds::MicAngle}){int i=ds::piece(m_mic,k);changes.push_back({i,spec->params[size_t(i)].def});}}else{for(int i: m_mic==ds::kDrums?std::vector<int>{ds::OhModel,ds::OhHeight}:std::vector<int>{ds::RoomModel,ds::RoomDistance})changes.push_back({i,spec->params[size_t(i)].def});}editMany(changes,28);}));micTools->addStretch();side->addLayout(micTools);row->addWidget(card,4);selectMic(ds::Snare);return page;
     }
     QWidget* mixerPage() {
         auto* page = new QWidget(this); auto* row = new QHBoxLayout(page); row->setContentsMargins(0,0,0,0); row->setSpacing(4);
@@ -601,14 +768,22 @@ private:
         while(m_next<m_notes.size()&&m_notes[m_next].start<=phase){const auto& n=m_notes[m_next++];ctx().transport->previewNote(track(),n.pitch,n.velocity);}
         m_grid->playhead=phase;m_grid->update();
     }
-    void applyStyle(){ setStyleSheet(QString(
+    void applyStyle(){
+        setStyleSheet(QString(
         "QWidget#drumStudioEditor{background:%1;color:%2;} QLabel{color:%2;background:transparent;border:0;font-size:11px;}"
-        "QFrame#studioStrip{background:%3;border:1px solid %4;border-radius:2px;}"
-        "QPushButton{background:%5;color:%2;border:1px solid %4;border-radius:2px;padding:4px 8px;font-size:11px;}"
-        "QPushButton:checked{background:%6;color:%7;} QComboBox,QLineEdit{background:%3;color:%2;border:1px solid %4;border-radius:2px;min-height:24px;padding:0 5px;}"
-        "QListWidget{background:%3;color:%2;border:1px solid %4;font-size:11px;} QListWidget::item{padding:5px;} QListWidget::item:selected{background:%6;color:%7;}"
-        "QSlider::groove:vertical{background:%3;width:5px;}QSlider::handle:vertical{background:%2;height:8px;margin:0 -7px;}"
-        ).arg(theme::panel.name(),col::value.name(),col::display.name(),col::separator.name(),col::button.name(),theme::accent.name(),col::buttonOnText.name())); }
+        "QLabel#studioHeading{font-size:13px;font-weight:600;letter-spacing:1px;} QLabel#studioPieceTitle{font-size:17px;font-weight:600;}"
+        "QLabel#studioSourceInfo,QLabel#studioModelNotice{color:%8;font-size:11px;}"
+        "QFrame#studioCard,QFrame#studioStrip{background:%9;border:1px solid %4;border-radius:8px;}"
+        "QPushButton{background:%5;color:%2;border:1px solid %4;border-radius:6px;padding:5px 8px;font-size:11px;}"
+        "QPushButton:hover{border-color:%8;}QPushButton:checked{background:%6;color:%7;border-color:%6;} QPushButton:disabled{color:%8;}"
+        "QComboBox,QLineEdit{background:%3;color:%2;border:1px solid %4;border-radius:5px;min-height:26px;padding:0 5px;}"
+        "QListWidget{background:%3;color:%2;border:1px solid %4;border-radius:6px;font-size:11px;} QListWidget::item{padding:6px;} QListWidget::item:selected{background:%6;color:%7;}"
+        "QSlider::groove:vertical{background:%3;width:5px;border-radius:2px;}QSlider::handle:vertical{background:%2;height:9px;margin:0 -7px;border-radius:3px;}"
+        ).arg(theme::panel.name(),col::value.name(),col::display.name(),col::separator.name(),col::button.name(),theme::accent.name(),col::buttonOnText.name(),col::label.name(),theme::devCell.name()));
+        for(int i=0;i<int(m_tabs.size());++i)m_tabs[size_t(i)]->setIcon(studioIcon(i,col::value));
+    }
+    KitView *m_kit=nullptr,*m_micStage=nullptr; DrumWave* m_wave=nullptr; MicResponse* m_response=nullptr;
+    QPushButton *m_present=nullptr,*m_moveButton=nullptr;QComboBox* m_micChoices=nullptr;QStackedWidget* m_micControls=nullptr;int m_mic=ds::Snare;
     QStackedWidget* m_pages=nullptr; QStackedWidget* m_drumControls=nullptr; QLabel* m_drumTitle=nullptr;
     QComboBox* m_articulations=nullptr; QComboBox* m_style=nullptr; QLineEdit* m_search=nullptr;
     GrooveList* m_list=nullptr; GrooveGrid* m_grid=nullptr; QLabel* m_info=nullptr; QPushButton* m_play=nullptr;

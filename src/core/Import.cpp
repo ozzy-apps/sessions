@@ -5,14 +5,91 @@
 #include "audio/Nam.h"
 #include "Presets.h"
 #include "Tempo.h"
+#include "BeatGrid.h"
 #include <QDir>
 #include <QDirIterator>
 #include <QFileInfo>
 #include <QSettings>
+#include <QRegularExpression>
+#include <QSet>
 #include <QStandardPaths>
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 
 namespace sessions::import {
+
+QString stemRole(const QString& path) {
+    static const QRegularExpression role(
+        "^(?:[0-9]+[ _.-]+)?(drums?|percussion|bass|keyboards?|keys?|synths?|other|vocals?|voices?|guitars?|pianos?|strings?|pads?|mix|master|instrumental)(?:[ _.-]+[0-9]+)?$",
+        QRegularExpression::CaseInsensitiveOption);
+    const auto m = role.match(QFileInfo(path).completeBaseName().trimmed());
+    QString name = m.hasMatch() ? m.captured(1).toLower() : QString();
+    if (name == "drum") name = "drums";
+    if (name == "key" || name == "keys" || name == "keyboards") name = "keyboard";
+    if (name == "synths") name = "synth";
+    return name;
+}
+
+bool matchingStemSource(const Clip& a, const Clip& b, bool requireRoles) {
+    if (!a.isAudio() || !b.isAudio() || !a.sample || !b.sample || a.sample->seconds() < 30 || b.sample->seconds() < 30) return false;
+    const QFileInfo ai(a.samplePath), bi(b.samplePath);
+    auto folder = [](const QFileInfo& f) { const QString canonical = f.dir().canonicalPath(); return canonical.isEmpty() ? f.absolutePath() : canonical; };
+    if (folder(ai) != folder(bi)) return false;
+    const double tolerance = 1.0 / std::max({1.0, a.sample->rate, b.sample->rate});
+    if (std::abs(a.sample->seconds() - b.sample->seconds()) > tolerance + 1e-12) return false;
+    if (requireRoles && (stemRole(a.samplePath).isEmpty() || stemRole(b.samplePath).isEmpty())) return false;
+    return true;
+}
+
+namespace {
+quint64 sourceMapFingerprint(const Clip& c) {
+    quint64 hash = 1469598103934665603ULL;
+    auto add = [&hash](double value) { quint64 bits = 0; std::memcpy(&bits, &value, sizeof(bits)); hash ^= bits; hash *= 1099511628211ULL; };
+    for (const auto& point : c.warpMarkers) { add(point.beat); add(point.seconds); }
+    add(c.length); add(c.start); add(c.loopStart); add(c.loop); add(c.warp); add(c.reverse);
+    return hash;
+}
+}
+
+void rememberAutomaticSourceMap(Clip& c) { c.sourceTempoMapFingerprint = sourceMapFingerprint(c); }
+
+bool automaticSourceMap(const Clip& c) {
+    if (c.sourceTempoOrigin != SourceTempoOrigin::Detected && c.sourceTempoOrigin != SourceTempoOrigin::Shared
+        && c.sourceTempoOrigin != SourceTempoOrigin::Unknown) return false;
+    if (!c.sample || c.reverse || !c.takes.isEmpty() || c.warpMarkers.size() < 2 || c.start != 0 || c.loopStart != 0
+        || c.sourceTempoMapFingerprint == 0 || c.sourceTempoMapFingerprint != sourceMapFingerprint(c)) return false;
+    const auto& first = c.warpMarkers.first(); const auto& last = c.warpMarkers.last();
+    return std::abs(first.beat) < 1e-9 && std::abs(first.seconds) < 1e-9
+        && std::abs(last.seconds - c.sample->seconds()) < 1e-9 && std::abs(last.beat - c.length) < 1e-9;
+}
+
+tempo::Estimate sharedSourceTempo(const QVector<ClipPtr>& clips, ClipPtr* guide) {
+    if (guide) *guide = nullptr;
+    ClipPtr prescribed;
+    for (const auto& c : clips) {
+        if (!c || c->detectedBpm <= 0 || (c->sourceTempoOrigin != SourceTempoOrigin::Manual && c->sourceTempoOrigin != SourceTempoOrigin::Metadata)) continue;
+        if (prescribed && std::abs(prescribed->detectedBpm - c->detectedBpm) > 0.01) return {}; // incompatible explicit source grids
+        prescribed = c;
+    }
+    if (prescribed) { if (guide) *guide = prescribed; return {prescribed->detectedBpm, 1.0, prescribed->sourceTempoOrigin == SourceTempoOrigin::Metadata}; }
+    ClipPtr best;
+    double bestScore = -1;
+    for (const auto& c : clips) {
+        if (!c || c->detectedBpm <= 0 || c->sourceTempoOrigin == SourceTempoOrigin::Legacy || !automaticSourceMap(*c)) continue;
+        const QString role = stemRole(c->samplePath);
+        const int rhythmRank = role == "drums" || role == "mix" || role == "master" || role == "instrumental" ? 4 : role == "percussion" ? 3 : 0;
+        QSet<QString> supports;
+        for (const auto& other : clips) if (other && other->detectedBpm > 0 && other->sourceTempoOrigin != SourceTempoOrigin::Legacy
+            && std::abs(other->detectedBpm / c->detectedBpm - 1) < 0.015) supports.insert(QFileInfo(other->samplePath).absoluteFilePath());
+        // A pitched stem's periodic notes alone do not establish the recording's meter.
+        if (rhythmRank == 0 && supports.size() < 2 && c->sourceTempoConfidence < 0.6) continue;
+        const double score = rhythmRank * 10.0 + std::min(3, int(supports.size())) + c->sourceTempoConfidence;
+        if (score > bestScore) { bestScore = score; best = c; }
+    }
+    if (guide) *guide = best;
+    return best ? tempo::Estimate{best->detectedBpm, best->sourceTempoConfidence, false} : tempo::Estimate{};
+}
 
 QVector<ClipPtr> audioClips(Project& p, const QStringList& paths, QStringList* errors) {
     return audioClips(p, paths, samples::loadMany(paths, errors));
@@ -21,7 +98,66 @@ QVector<ClipPtr> audioClips(Project& p, const QStringList& paths, QStringList* e
 QVector<ClipPtr> audioClips(Project& p, const QStringList& paths, const QVector<SamplePtr>& loaded) {
     QVector<ClipPtr> out;
     for (int i = 0; i < paths.size() && i < loaded.size(); ++i)
-        if (loaded[i]) out.push_back(p.newAudioClip(paths[i], loaded[i]));
+        if (loaded[i]) out.push_back(p.newAudioClip(paths[i], loaded[i], false));
+    const QVector<ClipPtr> existing = p.audioClips();
+    QSet<int> grouped;
+    bool coherentChanges = false;
+    for (const ClipPtr& seed : out) {
+        if (grouped.contains(seed->id)) continue;
+        QVector<ClipPtr> group{seed};
+        QSet<QString> distinct{QFileInfo(seed->samplePath).absoluteFilePath()};
+        for (const ClipPtr& c : out) if (c != seed && matchingStemSource(*seed, *c, false)) {
+            group.push_back(c); distinct.insert(QFileInfo(c->samplePath).absoluteFilePath());
+        }
+        for (const ClipPtr& c : existing) if (matchingStemSource(*seed, *c)) {
+            group.push_back(c); distinct.insert(QFileInfo(c->samplePath).absoluteFilePath());
+        }
+        if (distinct.size() < 2) continue;
+        ClipPtr guide;
+        const auto shared = sharedSourceTempo(group, &guide);
+        QVector<WarpMarker> sharedMap;
+        if (guide && shared.bpm > 0) {
+            // Track one rhythmic reference; independent stem grids would destroy their phase relationship.
+            const bool fullOrigin = guide->warpMarkers.size() >= 2 && std::abs(guide->warpMarkers.first().beat) < 1e-9
+                && std::abs(guide->warpMarkers.first().seconds) < 1e-9
+                && std::abs(guide->warpMarkers.last().seconds - guide->sample->seconds()) < 1e-9;
+            if ((guide->sourceTempoOrigin == SourceTempoOrigin::Manual || guide->sourceTempoOrigin == SourceTempoOrigin::Metadata) && !fullOrigin)
+                sharedMap = {{0, 0}, {guide->sample->seconds() * shared.bpm / 60, guide->sample->seconds()}};
+            else if (guide->sourceTempoOrigin == SourceTempoOrigin::Manual || guide->sourceTempoOrigin == SourceTempoOrigin::Metadata
+                || (automaticSourceMap(*guide) && guide->warpMarkers.size() > 2)) sharedMap = guide->warpMarkers;
+            else for (const auto& point : tempo::trackGrid(*guide->sample, shared.bpm).points) sharedMap.push_back({point.beat, point.seconds});
+        }
+        EditScope edit(&p, "Import Stem Tempo");
+        for (const ClipPtr& c : group) {
+            grouped.insert(c->id);
+            if (!automaticSourceMap(*c)) continue; // manual, legacy and edited maps retain their source grid
+            coherentChanges = true;
+            if (shared.bpm > 0) {
+                if (sharedMap.size() >= 2) p.setClipWarpMap(c, sharedMap);
+                c->detectedBpm = shared.bpm; c->warp = true;
+                c->sourceTempoOrigin = SourceTempoOrigin::Shared;
+                c->sourceTempoConfidence = shared.confidence;
+            } else {
+                // Uncertain groups play together at recorded speed instead of at conflicting guesses.
+                const double beats = c->sample->seconds() * std::max(1.0, p.tempo) / 60.0;
+                p.setClipWarpMap(c, {{0, 0}, {beats, c->sample->seconds()}});
+                c->loop = false; c->warp = false; c->detectedBpm = 0;
+                c->sourceTempoOrigin = SourceTempoOrigin::Unknown; c->sourceTempoConfidence = 0;
+            }
+            rememberAutomaticSourceMap(*c);
+        }
+    }
+    for (const auto& c : out) if (!grouped.contains(c->id) && c->sample && c->sample->seconds() >= 30
+        && c->detectedBpm > 0 && c->sourceTempoOrigin == SourceTempoOrigin::Detected) {
+        const auto grid = tempo::trackGrid(*c->sample, c->detectedBpm);
+        if (grid.variable && grid.points.size() >= 2) {
+            c->warpMarkers.clear();
+            for (const auto& point : grid.points) c->warpMarkers.push_back({point.beat, point.seconds});
+            c->length = c->warpMarkers.last().beat;
+            rememberAutomaticSourceMap(*c);
+        }
+    }
+    if (coherentChanges) { emit p.clipChanged(); emit p.structureChanged(); }
     return out;
 }
 

@@ -136,7 +136,7 @@ int main(int argc, char** argv) {
     check(!tail->isVisible(), "tail controls appear only for the mode that uses them");
     recovered->warpMode = WarpMode::Beats; recovered->warp = false;
     emit p.clipChanged();
-    check(tail->isVisible() && !tail->isEnabled(), "Beats tail follows Warp enable state");
+    check(tail->isVisible() && tail->isEnabled(), "Beats tail can be prepared while Warp is off");
     std::printf("warp_ui: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;
 }

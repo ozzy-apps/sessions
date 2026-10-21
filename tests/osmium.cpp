@@ -53,7 +53,8 @@ static std::vector<float> render(std::vector<float> params, const QVector<ModRou
 static double energy(const std::vector<float>& out, int a, int b) { double sum = 0; for (int i = a; i < b; ++i) sum += out[size_t(i)] * out[size_t(i)]; return std::sqrt(sum / (b - a)); }
 int main(int argc, char** argv) {
     QApplication app(argc, argv); theme::apply(theme::Kind::Dark);
-    CHECK(paramCount(DeviceType::Monolith) == 170 && paramCount(DeviceType::Osmium) == 182, "Monolith keeps its layout; Osmium has 12 independent envelope bends");
+    CHECK(paramCount(DeviceType::Monolith) == 170 && paramCount(DeviceType::Osmium) == osmium::kParams && osmium::kParams == 191,
+          "Monolith keeps its layout; Osmium appends table banks, warp shapes and per-oscillator folders after its original 182 parameters");
     Project p; p.scenes = {"1"}; p.addTrack("Osmium", theme::osmiumGreen); p.tracks[0].devices = {p.makeDevice("Osmium", DeviceKind::Instrument)};
     const int id = p.tracks[0].devices[0].id;
     auto current = [&]() -> Device& { return p.tracks[0].devices[0]; };
@@ -74,9 +75,10 @@ int main(int argc, char** argv) {
     auto* editor = panel.findChild<devui::DeviceBody*>("osmiumEditor"); auto* dialog = &deviceView;
     CHECK(editor && dialog->isVisible() && deviceView.editorExpanded() && !editor->isWindow() && editor->width() >= 1060, "The integrated editor expands inside DeviceView with a full modulation workspace");
     auto* knob = editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::fparam(0, mo::FCutoff)));
-    bool allLarge = true;
-    for (auto* k : editor->findChildren<QWidget*>()) if (k->objectName().startsWith("osmiumKnob_")) allLarge &= k->property("dialDiameter").toInt() >= 64;
-    CHECK(allLarge, "Every expanded Osmium dial has a 64px minimum dial with a 34px knob face");
+    bool usableSizes = true;
+    for (auto* k : editor->findChildren<QWidget*>()) if (k->objectName().startsWith("osmiumKnob_")) usableSizes &= k->property("dialDiameter").toInt() >= 52;
+    CHECK(usableSizes && knob->property("dialDiameter").toInt() >= 64,
+          "Osmium uses compact readable dials while retaining larger filter cutoff controls");
     CHECK(editor->findChild<QWidget*>(QString("osmiumKnob_%1").arg(mo::macro(0)))->property("dialDiameter").toInt() == 84,
           "Macros have larger 84px dials and 54px faces");
     const double base = current().params[mo::fparam(0, mo::FCutoff)].value, amount = current().mods[0].amount;
@@ -291,9 +293,14 @@ int main(int argc, char** argv) {
     QTest::keyClick(dialog, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     CHECK(std::abs(current().params[mo::FDrive].value - 0.42) < 1e-6, "Ctrl+Shift+Z in the integrated editor restores the instrument edit");
     auto* patches = editor->findChild<QComboBox*>("osmiumPatch");
-    CHECK(patches->isEditable() && patches->count() == 67, "The searchable selector contains the original five entries, all 40 DnB presets and the 20 wobble basses, each group after a separator");
+    bool completeBank = true;
+    for (const auto& preset : osmium::factoryPresets()) completeBank &= patches->findData(QString::fromUtf8(preset.name)) >= 0;
+    CHECK(patches->isEditable() && patches->count() == int(osmium::factoryPresets().size()) + 7 && completeBank,
+          "The searchable selector contains all factory presets and the five original starting sounds");
     patches->completer()->setCompletionPrefix("dubstep");
     CHECK(patches->completer()->completionCount() == 10, "Searching Dubstep lists the ten Dubstep wobble basses");
+    patches->completer()->setCompletionPrefix("dnb bass");
+    CHECK(patches->completer()->completionCount() == 10, "Searching DnB Bass lists the ten DnB wobble basses");
     patches->completer()->setCompletionPrefix("seismic");
     CHECK(patches->completer()->completionCount() == 1, "Preset search matches a name within its category without case sensitivity");
     const QString oldName = current().name; const auto oldCurves = current().curves; const int oldId = current().id;

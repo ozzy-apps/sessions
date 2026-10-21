@@ -6,6 +6,7 @@
 #include "TakesEditor.h"
 #include "EnvelopeEditor.h"
 #include "InfoView.h"
+#include "TempoActions.h"
 #include "core/Model.h"
 #include "core/Scales.h"
 #include "core/Theme.h"
@@ -23,6 +24,7 @@
 #include <QComboBox>
 #include <QCheckBox>
 #include <QStackedWidget>
+#include <QTabBar>
 #include <QSignalBlocker>
 #include <QSettings>
 #include <QPainter>
@@ -35,8 +37,8 @@ namespace sessions {
 
 namespace {
 
-constexpr int kBoxWidth = 132;   // the clip boxes are narrow: small fields, short labels
-constexpr int kSampleBoxWidth = 296, kWarpColumnWidth = 176;   // the Sample box (0.37): the warp column and the pitch / gain column
+constexpr int kBoxWidth = 156;
+constexpr int kSampleBoxWidth = 280, kWarpColumnWidth = 164;
 
 const double kQuantBeats[] = {-1, 0, 16, 8, 4, 2, 1, 0.5, 0.25};
 const char*  kQuantNames[] = {"Global", "None", "4 Bars", "2 Bars", "1 Bar", "1/2", "1/4", "1/8", "1/16"};
@@ -91,30 +93,7 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
     auto* pl = new QHBoxLayout(m_props);   // the clip boxes, side by side
     pl->setContentsMargins(0, 0, 0, 0);
     pl->setSpacing(1);
-    // little round switches at the bottom left: which boxes show (the Clip box always does)
-    auto* toggles = new QWidget(m_props);
-    toggles->setObjectName("clipToggles");
-    toggles->setFixedWidth(18);
-    auto* tl = new QVBoxLayout(toggles);
-    tl->setContentsMargins(3, 2, 2, 4);
-    tl->setSpacing(3);
-    tl->addStretch(1);
-    auto toggleButton = [&](const QString& text, const QString& key, const QString& title, const QString& help) {
-        auto* b = new QToolButton(toggles);
-        b->setObjectName("clipBoxToggle");
-        b->setProperty("boxKey", key);
-        b->setText(text);
-        b->setCheckable(true);
-        b->setFocusPolicy(Qt::NoFocus);
-        b->setChecked(QSettings("Sessions", "Sessions").value("clipView/" + key, true).toBool());
-        InfoView::attach(b, title, help);
-        tl->addWidget(b);
-        return b;
-    };
-    m_launchToggle = toggleButton("L", "launch", "Launch Box", "Shows or hides the Launch box (launch mode, quantization, follow actions).");
-    m_notesToggle = toggleButton("♪", "notes", "Notes / Sample Box", "Shows or hides the Notes box (MIDI clips) or the Sample box (audio clips).");
-    m_envToggle = toggleButton("E", "envelopes", "Envelopes Box", "Shows or hides the Envelopes box.");
-    pl->addWidget(toggles);
+    m_props->setFixedWidth(kBoxWidth + kSampleBoxWidth + 1);
     m_editors = new QStackedWidget(this);
     m_roll = new PianoRoll(project, transport, m_editors);
     m_sampleEditor = new SampleEditor(project, transport, m_editors);
@@ -127,19 +106,20 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
     m_editors->addWidget(m_envEditor);
     m_editors->addWidget(m_takesEditor);
 
-    // A box: a title strip over its controls.
-    auto box = [&](const QString& title, QWidget* content, const QString& help) {
+    // Timing stays visible; one focused page sits beside it.
+    auto box = [&](const QString& title, QWidget* content, const QString& help, bool heading) {
         auto* frame = new QWidget(m_props);
         frame->setObjectName("clipBox");
-        frame->setFixedWidth(kBoxWidth);
+        frame->setProperty("inspectorSection", title);
+        frame->setFixedWidth(heading ? kBoxWidth : kSampleBoxWidth);
         auto* fl = new QVBoxLayout(frame);
         fl->setContentsMargins(0, 0, 0, 0);
         fl->setSpacing(0);
-        auto* label = new QLabel(title, frame);
-        label->setObjectName("clipBoxTitle");
-        label->setFixedHeight(16);
-        InfoView::attach(label, title, help);
-        if (title == "Clip") {
+        if (heading) {
+            auto* label = new QLabel(title, frame);
+            label->setObjectName("clipBoxTitle");
+            label->setFixedHeight(24);
+            InfoView::attach(label, title, help);
             auto* titleRow = new QHBoxLayout;
             titleRow->setContentsMargins(0, 0, 0, 0);
             titleRow->setSpacing(0);
@@ -149,25 +129,60 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
             m_playheadFollow->setText("Follow");
             m_playheadFollow->setCheckable(true);
             m_playheadFollow->setFocusPolicy(Qt::NoFocus);
-            m_playheadFollow->setFixedHeight(15);
+            m_playheadFollow->setFixedHeight(24);
             InfoView::attach(m_playheadFollow, "Follow Clip Playhead", "On: the sample or MIDI editor scrolls when its playhead reaches the edge. Off: the view stays fixed. Independent from Arrangement Follow.");
             titleRow->addWidget(m_playheadFollow);
             fl->addLayout(titleRow);
-        } else fl->addWidget(label);
+        }
         auto* inner = new QVBoxLayout;
-        inner->setContentsMargins(4, 4, 4, 4);
+        inner->setContentsMargins(6, 6, 6, 6);
         content->setParent(frame);
         inner->addWidget(content, 1);
         fl->addLayout(inner, 1);
-        pl->addWidget(frame);
         return frame;
     };
-    box("Clip", buildClipTab(), "The clip's name, length, loop and grid.");
-    m_launchBox = box("Launch", buildLaunchTab(), "How the clip behaves when launched from the Session View: mode, legato, quantization, follow actions.");
-    m_notesBox = box("Notes", buildNotesTab(), "Note tools and the clip's scale.");
-    m_sampleBox = box("Sample", buildSampleTab(), "The clip's sample: warp mode, original tempo, gain, transpose, reverse.");
-    m_sampleBox->setFixedWidth(kSampleBoxWidth);   // the warp column plus the pitch and gain column (0.37)
-    m_envBox = box("Envelopes", buildEnvelopeTab(), "Clip envelopes: a parameter's line that plays with the clip and loops with it.");
+    m_clipBox = box("Clip", buildClipTab(), "Clip timing, loop and grid.", true);
+    pl->addWidget(m_clipBox);
+    auto* details = new QWidget(m_props);
+    details->setFixedWidth(kSampleBoxWidth);
+    auto* detailLayout = new QVBoxLayout(details);
+    detailLayout->setContentsMargins(0, 0, 0, 0);
+    detailLayout->setSpacing(0);
+    m_pageTabs = new QTabBar(details);
+    m_pageTabs->setObjectName("clipInspectorTabs");
+    m_pageTabs->setExpanding(true);
+    m_pageTabs->setDrawBase(false);
+    m_pageTabs->setFocusPolicy(Qt::NoFocus);
+    m_pageTabs->addTab("Notes");
+    m_pageTabs->addTab("Launch");
+    m_pageTabs->addTab("Envelopes");
+    m_pageTabs->setFixedHeight(24);
+    detailLayout->addWidget(m_pageTabs);
+    m_pages = new QStackedWidget(details);
+    m_pages->setObjectName("clipInspectorPages");
+    m_contentPages = new QStackedWidget(m_pages);
+    m_notesBox = box("Notes", buildNotesTab(), "Note tools and scale.", false);
+    m_sampleBox = box("Sample", buildSampleTab(), "Source, Warp, pitch and gain.", false);
+    m_contentPages->addWidget(m_notesBox);
+    m_contentPages->addWidget(m_sampleBox);
+    m_launchBox = box("Launch", buildLaunchTab(), "Launch behavior and follow actions.", false);
+    m_envBox = box("Envelopes", buildEnvelopeTab(), "Clip automation.", false);
+    m_pages->addWidget(m_contentPages);
+    m_pages->addWidget(m_launchBox);
+    m_pages->addWidget(m_envBox);
+    detailLayout->addWidget(m_pages, 1);
+    pl->addWidget(details);
+    for (DragValue* field : m_props->findChildren<DragValue*>())
+        if (field != m_transposeKnob && field != m_gainFader) field->setFixedHeight(20);
+    connect(m_pageTabs, &QTabBar::currentChanged, this, [this](int page) {
+        m_pages->setCurrentIndex(page);
+        QSettings("Sessions", "Sessions").setValue("clipView/inspectorPage", page);
+        if (page == 2) showEnvelope(true);
+        else { showEnvelope(false); showTakes(false); }
+    });
+    const int page = std::clamp(QSettings("Sessions", "Sessions").value("clipView/inspectorPage", 0).toInt(), 0, 2);
+    m_pageTabs->setCurrentIndex(page);
+    m_pages->setCurrentIndex(page);
     lay->addWidget(m_props);
     // the editor column: the clip in miniature on top (what's on screen outlined; drag it sideways to scroll,
     // up / down to zoom, click to centre there), the editor under it
@@ -197,11 +212,7 @@ ClipView::ClipView(Project* project, Transport* transport, QWidget* parent)
     cl->addWidget(m_strip);
     cl->addWidget(m_editors, 1);
     lay->addWidget(column, 1);
-    for (QToolButton* b : {m_launchToggle, m_notesToggle, m_envToggle})
-        connect(b, &QToolButton::toggled, this, [this, b](bool on) {
-            QSettings("Sessions", "Sessions").setValue("clipView/" + b->property("boxKey").toString(), on);
-            showBoxes();
-        });
+
 
     connect(m_roll, &PianoRoll::gridChanged, this, [this](double) { m_grid->setText(gridLabel()); });
     connect(m_roll, &PianoRoll::notesChanged, this, [this] { emit m_project->clipChanged(); });
@@ -236,12 +247,6 @@ QWidget* ClipView::buildClipTab() {
     form->setContentsMargins(0, 0, 0, 0);
     form->setHorizontalSpacing(4);
     form->setVerticalSpacing(3);
-    auto fixed = [&](const QString& v, const QString& title, const QString& help) {
-        auto* d = new DragValue(w); d->setEditable(false); d->setAccentText(false); d->setCursor(Qt::ArrowCursor);
-        d->setMinimumChars(5); d->setFormatter([v](double) { return v; });
-        InfoView::attach(d, title, help); return d;
-    };
-    form->addRow(dimLabel("Signature", w), fixed("4 / 4", "Clip Time Signature", "Fixed at 4/4 for now."));
     auto position = [&](const QString& title, const QString& help) {   // the start marker and the loop's position (0.23)
         auto* d = new DragValue(w);
         d->setRange(0, 1024); d->setStep(0.25); d->setDefault(0); d->setDragSensitivity(400); d->setMinimumChars(5);
@@ -254,7 +259,7 @@ QWidget* ClipView::buildClipTab() {
     form->addRow(dimLabel("Start", w), m_start);
     m_position = position("Loop Position", "Where the loop brace begins. With Loop on the clip goes round the brace from here for the length; with Loop off it stops at the brace's end.");
     connect(m_position, &DragValue::valueEdited, this, [this](double v) { editClip("Move Loop", 4, [v](Clip& c) { c.loopStart = v; }); m_roll->update(); });
-    form->addRow(dimLabel("Position", w), m_position);
+    form->addRow(dimLabel("Loop Pos", w), m_position);
 
     m_length = new DragValue(w);
     m_length->setRange(1, 256);
@@ -273,7 +278,8 @@ QWidget* ClipView::buildClipTab() {
 
     m_grid = toolButton("", "Grid", "Click to cycle the note grid. Ctrl+1 makes it finer, Ctrl+2 coarser.", w);
     connect(m_grid, &QPushButton::clicked, this, [this] { double g = m_roll->gridSize() <= 1.0 / 32 ? 1.0 : m_roll->gridSize() / 2; m_roll->setGridSize(g); });
-    form->addRow(dimLabel("Grid", w), m_grid);
+    m_gridLabel = dimLabel("Grid", w);
+    form->addRow(m_gridLabel, m_grid);
     l->addLayout(form);
 
     auto* dupLoop = m_dupLoop = toolButton("Dupl. Loop", "Duplicate Loop", "Doubles the clip length and copies its notes into the new half.", w);
@@ -513,7 +519,7 @@ QWidget* ClipView::buildSampleTab() {
     form->setHorizontalSpacing(4);
     form->setVerticalSpacing(3);
     m_warpOn = toolButton("Warp", "Warp", "On: the clip follows the set's tempo (through its warp markers). "
-                                          "Off: it plays at the file's own speed, whatever the tempo, like a recording should.", w, true);
+                                          "Off: playback follows the recording, independent of project tempo; transpose and detune change pitch and speed together.", w, true);
     m_warpOn->setObjectName("warpOn");
     connect(m_warpOn, &QPushButton::clicked, this, [this](bool on) { editClip(on ? "Warp On" : "Warp Off", 0, [on](Clip& c) { c.warp = on; }); });
     m_warp = new QComboBox(w);
@@ -527,7 +533,7 @@ QWidget* ClipView::buildSampleTab() {
     connect(m_warp, &QComboBox::activated, this, [this](int i) { editClip("Warp Mode", 0, [i](Clip& c) { c.warpMode = WarpMode(i); }); });
     auto* warpRow = new QHBoxLayout; warpRow->setSpacing(3);
     warpRow->addWidget(m_warpOn); warpRow->addWidget(m_warp, 1);
-    form->addRow(dimLabel("Warp", w), warpRow);
+    form->addRow(warpRow);
     m_slices = new QComboBox(w);
     for (const char* n : kGrainNames) m_slices->addItem(n);
     m_slices->setFocusPolicy(Qt::NoFocus);
@@ -594,7 +600,8 @@ QWidget* ClipView::buildSampleTab() {
     m_bpm->setMinimumChars(6);
     m_bpm->setFormatter([this](double v) { return m_clip && m_clip->detectedBpm <= 0 ? QString::fromUtf8("—") : QString::number(v, 'f', 2); });
     InfoView::attach(m_bpm, "Original Tempo", "The tempo the audio was played at. Set it right and the clip follows the set's tempo. "
-                                              "Changing it moves the warp markers (and the clip's length) with it.");
+                                              "Changing it moves the warp markers (and the clip's length) with it. "
+                                              "Right-click for tempo analysis, a known project tempo, or matching stem corrections.");
     connect(m_bpm, &DragValue::valueEdited, this, [this](double v) {
         if (v > 0) setSampleBpm(v);
         else if (m_clip) m_bpm->setValue(m_clip->detectedBpm > 0 ? m_clip->sampleBpm() : 0, false);
@@ -605,7 +612,7 @@ QWidget* ClipView::buildSampleTab() {
     connect(twice, &QPushButton::clicked, this, [this] { if (m_clip) setSampleBpm(m_clip->sampleBpm() * 2); });
     auto* bpmRow = new QHBoxLayout; bpmRow->setSpacing(3);
     bpmRow->addWidget(m_bpm, 1); bpmRow->addWidget(half); bpmRow->addWidget(twice);
-    form->addRow(dimLabel("Source BPM", w), bpmRow);
+    form->addRow(dimLabel("Source", w), bpmRow);
     // the tempo found in the audio and how the clip sits against the set's tempo; Sync fits it again
     m_tempoInfo = new ElidedLabel(w);
     m_tempoInfo->setObjectName("sourceTempoInfo");
@@ -616,9 +623,19 @@ QWidget* ClipView::buildSampleTab() {
                                                    "then sets the warp markers and the loop. Use it on a clip whose markers you've moved, or one from an older set.", w);
     sync->setObjectName("syncTempo");
     connect(sync, &QPushButton::clicked, this, [this] { if (m_clip && m_project->syncClipToTempo(m_clip)) m_sampleEditor->setClip(m_clip); });
+    auto tempoMenu = [this](QWidget* control, const QPoint& pos) {
+        if (!m_clip || !m_clip->isAudio()) return;
+        QMenu menu(control);
+        addSourceTempoActions(menu, m_project, m_clip, [this] { m_sampleEditor->setClip(m_clip); });
+        menu.exec(control->mapToGlobal(pos));
+    };
+    m_bpm->setContextMenuPolicy(Qt::CustomContextMenu);
+    sync->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_bpm, &QWidget::customContextMenuRequested, this, [this, tempoMenu](const QPoint& pos) { tempoMenu(m_bpm, pos); });
+    connect(sync, &QWidget::customContextMenuRequested, this, [sync, tempoMenu](const QPoint& pos) { tempoMenu(sync, pos); });
     auto* tempoRow = new QHBoxLayout; tempoRow->setSpacing(3);
     tempoRow->addWidget(m_tempoInfo, 1); tempoRow->addWidget(sync, 0, Qt::AlignTop);
-    form->addRow(dimLabel("Tempo", w), tempoRow);
+    form->addRow(tempoRow);
     left->addLayout(form);
 
     // ---- the pitch and gain column
@@ -629,14 +646,14 @@ QWidget* ClipView::buildSampleTab() {
     auto* pitchLabel = dimLabel("Transpose", w);
     pitchLabel->setAlignment(Qt::AlignHCenter);
     right->addWidget(pitchLabel, 0, 0);
-    m_transposeKnob = new Knob(w, 30);
+    m_transposeKnob = new Knob(w, 38);
     m_transposeKnob->setObjectName("clipTransposeKnob");
     m_transposeKnob->setRange(-48, 48);
     m_transposeKnob->setStep(1);
     m_transposeKnob->setDefault(0);
     m_transposeKnob->setBipolar(true);
     m_transposeKnob->setDragSensitivity(240);
-    const QString transposeHelp = "Shifts the clip's pitch in semitones (every warp mode but Re-Pitch, where the tempo sets the pitch). Drag the knob or the field; Delete resets it.";
+    const QString transposeHelp = "Shifts pitch in semitones. With Warp off, pitch changes playback speed too. With Warp on, every mode but Re-Pitch keeps timing independent of pitch. Drag the knob or field; Delete resets it.";
     InfoView::attach(m_transposeKnob, "Transpose", transposeHelp);
     connect(m_transposeKnob, &DragValue::valueEdited, this, [this](double v) { editClip("Transpose", 7, [v](Clip& c) { c.transpose = int(std::lround(v)); }); });
     right->addWidget(m_transposeKnob, 1, 0, Qt::AlignHCenter);
@@ -674,7 +691,7 @@ QWidget* ClipView::buildSampleTab() {
     m_gainFader->setRange(-36, 12);   // 0 dB at the fader's tick (three quarters up); the field below reaches further
     m_gainFader->setDefault(0);
     m_gainFader->setDragSensitivity(240);
-    m_gainFader->setFixedSize(24, 66);
+    m_gainFader->setFixedSize(24, 82);
     const QString gainHelp = "How loud the clip plays, before the track's devices and fader. Drag the fader or the field (down to -inf, up to +24 dB); Delete resets it.";
     InfoView::attach(m_gainFader, "Clip Gain", gainHelp);
     connect(m_gainFader, &DragValue::valueEdited, this, [this](double v) { editClip("Clip Gain", 6, [v](Clip& c) { c.gain = v; }); });
@@ -718,30 +735,7 @@ QWidget* ClipView::buildSampleTab() {
 }
 
 void ClipView::setSampleBpm(double bpm) {
-    if (!m_clip || !m_clip->isAudio() || m_clip->warpMarkers.size() < 2 || bpm <= 0) return;
-    const double source = std::clamp(bpm, 20.0, 999.0);
-    const double k = source / m_clip->sampleBpm();
-    if (std::abs(k - 1) < 1e-9 && m_clip->warp && m_clip->detectedBpm > 0) return;
-    editClip("Original Tempo", 5, [this, k, source](Clip& c) {
-        const double b0 = c.warpMarkers.first().beat;
-        auto scaled = [b0, k](double beat) { return b0 + (beat - b0) * k; };
-        for (WarpMarker& m : c.warpMarkers) m.beat = b0 + (m.beat - b0) * k;
-        c.length = std::clamp(c.length * k, 0.25, 4096.0);
-        c.start = scaled(c.start);
-        c.loopStart = scaled(c.loopStart);
-        for (Envelope& e : c.envelopes) for (AutoPoint& point : e.points) point.beat = scaled(point.beat);
-        for (CompRegion& region : c.comp) { region.start = scaled(region.start); region.end = scaled(region.end); }
-        for (Take& take : c.takes) take.startBeat = scaled(take.startBeat);
-        for (Track& track : m_project->tracks) for (ArrangementClip& a : track.arrangement) if (a.clip.get() == &c) {
-            a.length *= k;
-            a.offset = scaled(a.offset);
-            a.fadeIn *= k;
-            a.fadeOut *= k;
-        }
-        c.detectedBpm = source;
-        c.warp = true;
-    });
-    m_sampleEditor->setClip(m_clip);   // refit
+    if (m_project->setClipSourceBpm(m_clip, bpm)) m_sampleEditor->setClip(m_clip);
 }
 
 QWidget* ClipView::buildEnvelopeTab() {
@@ -822,6 +816,17 @@ void ClipView::refreshEnvelopeChoosers() {
 
 void ClipView::showEnvelope(bool on) {
     on = on && m_clip;
+    if (on && m_pageTabs->currentIndex() != 2) {
+        QSignalBlocker block(m_pageTabs);
+        m_pageTabs->setCurrentIndex(2);
+        m_pages->setCurrentIndex(2);
+        QSettings("Sessions", "Sessions").setValue("clipView/inspectorPage", 2);
+    } else if (!on && m_clip && m_pageTabs->currentIndex() == 2) {
+        QSignalBlocker block(m_pageTabs);
+        m_pageTabs->setCurrentIndex(0);
+        m_pages->setCurrentIndex(0);
+        QSettings("Sessions", "Sessions").setValue("clipView/inspectorPage", 0);
+    }
     m_envShow->setChecked(on);
     if (on) m_takesShow->setChecked(false);
     m_editors->setCurrentIndex(on ? 2 : m_takesShow->isChecked() ? 3 : audio() ? 1 : 0);
@@ -829,6 +834,12 @@ void ClipView::showEnvelope(bool on) {
 
 void ClipView::showTakes(bool on) {
     on = on && m_clip && !m_clip->takes.isEmpty();
+    if (on && m_pageTabs->currentIndex() != 0) {
+        QSignalBlocker block(m_pageTabs);
+        m_pageTabs->setCurrentIndex(0);
+        m_pages->setCurrentIndex(0);
+        QSettings("Sessions", "Sessions").setValue("clipView/inspectorPage", 0);
+    }
     m_takesShow->setChecked(on);
     if (on) m_envShow->setChecked(false);
     m_editors->setCurrentIndex(m_envShow->isChecked() ? 2 : on ? 3 : audio() ? 1 : 0);
@@ -890,18 +901,13 @@ void ClipView::setClip(ClipPtr clip) {
     m_editors->setCurrentIndex(m_envShow->isChecked() && clip ? 2 : takes ? 3 : isAudio ? 1 : 0);
     showBoxes();
     refresh();
+    if (clip && m_pageTabs->currentIndex() == 2) showEnvelope(true);
 }
 
-// Which boxes show: the Clip box always, the others by their switches; Notes or Sample by the clip's kind.
+// Page width stays fixed when clip type or selected section changes.
 void ClipView::showBoxes() {
-    const bool isAudio = audio();
-    // hide one box before showing the other: the boxes' row never counts both
-    QWidget* shown = isAudio ? m_sampleBox : m_notesBox;
-    QWidget* hidden = isAudio ? m_notesBox : m_sampleBox;
-    hidden->hide();
-    shown->setVisible(m_notesToggle->isChecked());
-    m_launchBox->setVisible(m_launchToggle->isChecked());
-    m_envBox->setVisible(m_envToggle->isChecked());
+    m_contentPages->setCurrentIndex(audio() ? 1 : 0);
+    m_pageTabs->setTabText(0, audio() ? "Sample" : "Notes");
 }
 
 void ClipView::refresh() {
@@ -917,9 +923,10 @@ void ClipView::refresh() {
     m_length->setValue(m_clip->length, false);
     m_start->setValue(m_clip->start, false);
     m_position->setValue(m_clip->loopStart, false);
-    m_dupLoop->setEnabled(!isAudio);
-    m_clear->setEnabled(!isAudio);
-    m_grid->setEnabled(!isAudio);
+    m_dupLoop->setVisible(!isAudio);
+    m_clear->setVisible(!isAudio);
+    m_grid->setVisible(!isAudio);
+    m_gridLabel->setVisible(!isAudio);
     if (isAudio) {
         QSignalBlocker b7(m_warp);
         const QFileInfo fi(m_clip->samplePath);
@@ -933,7 +940,7 @@ void ClipView::refresh() {
         m_file->setStyleSheet(m_clip->sample ? QString() : "color:" + theme::record.name() + ";");
         m_warp->setCurrentIndex(int(m_clip->warpMode));
         m_warpOn->setChecked(m_clip->warp);
-        m_warp->setEnabled(m_clip->warp);
+        m_warp->setEnabled(bool(m_clip->sample));
         m_bpm->setEnabled(bool(m_clip->sample));
         int g = 3;
         for (int i = 0; i < 5; ++i) if (std::abs(kGrains[i] - m_clip->grain) < 1e-9) g = i;
@@ -941,40 +948,49 @@ void ClipView::refresh() {
         const WarpMode wm = m_clip->warpMode;
         m_beatsTail->setVisible(wm == WarpMode::Beats);
         m_beatsTailLabel->setVisible(wm == WarpMode::Beats);
-        m_beatsTail->setEnabled(m_clip->warp);
+        m_beatsTail->setEnabled(bool(m_clip->sample));
         { QSignalBlocker tailBlock(m_beatsTail); m_beatsTail->setCurrentIndex(std::clamp(m_clip->beatsTail, 0, 2)); }
-        m_slices->setVisible(wm == WarpMode::Beats || wm == WarpMode::Repitch);
-        m_slices->setEnabled(m_clip->warp && wm == WarpMode::Beats);
+        m_slices->setVisible(wm == WarpMode::Beats);
+        m_slices->setEnabled(bool(m_clip->sample));
         m_grainSize->setVisible(wm == WarpMode::Tones || wm == WarpMode::Texture);
         m_flux->setVisible(wm == WarpMode::Texture);
-        m_formants->setVisible(wm == WarpMode::Complex || wm == WarpMode::ComplexPro);
-        m_formants->setEnabled(m_clip->warp && wm == WarpMode::ComplexPro);
-        m_grainSize->setEnabled(m_clip->warp);
-        m_flux->setEnabled(m_clip->warp);
+        m_formants->setVisible(wm == WarpMode::ComplexPro);
+        m_formants->setEnabled(bool(m_clip->sample));
+        m_grainSize->setEnabled(bool(m_clip->sample));
+        m_flux->setEnabled(bool(m_clip->sample));
         m_grainSize->setValue(m_clip->grainMs, false);
         m_flux->setValue(m_clip->flux * 100, false);
         m_formants->setValue(m_clip->formants * 100, false);
+        m_warpExtraLabel->setVisible(wm != WarpMode::Complex && wm != WarpMode::Repitch);
         m_warpExtraLabel->setText(wm == WarpMode::Texture ? "Grain Flux" : wm == WarpMode::Tones ? "Grain" : wm == WarpMode::Complex || wm == WarpMode::ComplexPro ? "Formants" : "Slices");
         m_bpm->setValue(m_clip->detectedBpm > 0 ? m_clip->sampleBpm() : 0, false);
         m_bpm->update(); // an unknown and a verified source can share the same underlying value
         if (m_clip->detectedBpm > 0) {
             const double own = m_clip->sampleBpm();
+            const QString range = sourceTempoRange(*m_clip);
             auto compactBpm = [](double bpm) { return QString::number(bpm, 'f', std::abs(bpm - std::round(bpm)) < 0.005 ? 0 : 2); };
-            const QString full = m_clip->warp ? QString("%1 → %2 BPM").arg(compactBpm(own), compactBpm(m_project->tempo))
+            const QString source = range.isEmpty() ? compactBpm(own) : range;
+            const QString full = m_clip->warp ? QString(range.isEmpty() ? "%1 → %2 BPM" : "%1 → %2").arg(source, compactBpm(m_project->tempo))
                                               : QString("Source %1 BPM · Warp off").arg(own, 0, 'f', 2);
             m_tempoInfo->setText(full);
-            m_tempoInfo->setToolTip(QString("Source %1 BPM → Project %2 BPM\nSource tempo reference: %3 BPM. The editable field describes the current warp-marker grid.")
-                                      .arg(own, 0, 'f', 2).arg(m_project->tempo, 0, 'f', 2).arg(m_clip->detectedBpm, 0, 'f', 2));
+            const QString detail = range.isEmpty()
+                ? QString("Source %1 BPM → Project %2 BPM\nSource tempo reference: %3 BPM. The editable field describes the current warp-marker grid.")
+                      .arg(own, 0, 'f', 2).arg(m_project->tempo, 0, 'f', 2).arg(m_clip->detectedBpm, 0, 'f', 2)
+                : QString("Variable source: %1 BPM → Project %2 BPM\nSource BPM is the map's average (%3 BPM). Editing it scales the complete map and retains its tempo changes.")
+                      .arg(range).arg(m_project->tempo, 0, 'f', 2).arg(own, 0, 'f', 2);
+            m_tempoInfo->setToolTip(detail);
+            m_bpm->setToolTip(detail);
         } else {
             m_tempoInfo->setText(m_clip->sample ? "Source tempo unknown · set BPM" : "");
             m_tempoInfo->setToolTip(m_clip->sample ? "No steady source tempo was found. Set Source BPM to the tempo of the original recording to enable Warp." : QString());
+            m_bpm->setToolTip(m_tempoInfo->toolTip());
         }
         m_gain->setValue(m_clip->gain, false);
         m_gainFader->setValue(m_clip->gain, false);
         m_transpose->setValue(m_clip->transpose, false);
         m_transposeKnob->setValue(m_clip->transpose, false);
         m_detune->setValue(m_clip->detune, false);
-        const bool pitched = m_clip->warp && m_clip->warpMode != WarpMode::Repitch;
+        const bool pitched = m_clip->sample && (!m_clip->warp || m_clip->warpMode != WarpMode::Repitch);
         m_transpose->setEnabled(pitched);
         m_transposeKnob->setEnabled(pitched);
         m_detune->setEnabled(pitched);

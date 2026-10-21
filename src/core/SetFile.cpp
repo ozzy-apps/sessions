@@ -143,6 +143,11 @@ QJsonObject writeClip(const Clip& c, const QString& baseDir) {
         audio.insert("flux", c.flux);
         audio.insert("formants", c.formants);
         if (c.detectedBpm > 0) audio.insert("detectedBpm", c.detectedBpm);
+        if (c.sourceTempoOrigin != SourceTempoOrigin::Legacy) {
+            audio.insert("sourceTempoOrigin", int(c.sourceTempoOrigin));
+            audio.insert("sourceTempoConfidence", c.sourceTempoConfidence);
+            if (c.sourceTempoMapFingerprint) audio.insert("sourceTempoMap", QString::number(c.sourceTempoMapFingerprint, 16));
+        }
         o.insert("audio", audio);
         if (!c.takes.isEmpty()) {   // loop-recorded passes, and which plays where (none: the newest)
             QJsonArray takes, comp;
@@ -310,6 +315,9 @@ Clip readClip(const QJsonObject& o, const QString& baseDir) {
         c.flux = std::clamp(num(audio, "flux", 0.25), 0.0, 1.0);
         c.formants = std::clamp(num(audio, "formants", 0), 0.0, 1.0);
         c.detectedBpm = std::clamp(num(audio, "detectedBpm", 0), 0.0, 999.0);
+        c.sourceTempoOrigin = SourceTempoOrigin(std::clamp(integer(audio, "sourceTempoOrigin", 0), 0, int(SourceTempoOrigin::Manual)));
+        c.sourceTempoConfidence = std::clamp(num(audio, "sourceTempoConfidence", 0), 0.0, 1.0);
+        c.sourceTempoMapFingerprint = text(audio, "sourceTempoMap").toULongLong(nullptr, 16);
         if (c.grain != 0) c.grain = std::clamp(c.grain, 1.0 / 32, 4.0);
         for (const QJsonValue& v : audio.value("markers").toArray()) {
             const QJsonArray m = v.toArray();
@@ -701,9 +709,14 @@ void applyToProject(const Extras& x, Project& project) {
 bool save(const QString& path, const Project& project, const Extras& extras, QString* error) {
     Extras x = extras;
     fillFromProject(x, project);
+    return saveState(path, project.captureEditState(), x, error);
+}
+
+bool saveState(const QString& path, const EditState& state, const Extras& extras, QString* error) {
     QSaveFile f(path);
     if (!f.open(QIODevice::WriteOnly)) { if (error) *error = f.errorString(); return false; }
-    f.write(toJson(project.captureEditState(), x, QFileInfo(path).absolutePath()));
+    const auto bytes = toJson(state, extras, QFileInfo(path).absolutePath());
+    if (f.write(bytes) != bytes.size()) { if (error) *error = f.errorString(); return false; }
     if (!f.commit()) { if (error) *error = f.errorString(); return false; }
     return true;
 }

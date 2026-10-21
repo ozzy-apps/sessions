@@ -697,6 +697,13 @@ public:
         help(cell, namdev::Mix, "How much of the processed sound you hear against the dry input.");
         knobs->addWidget(cell);
         mid->addLayout(knobs);
+        auto* tone = hbox(2);
+        for (int i : {namdev::Bass, namdev::Mid, namdev::Treble, namdev::Presence}) {
+            auto* control = knob(i, 28, {}, true); control->setObjectName(QString("namTone%1").arg(i));
+            help(control, i, "Tone after the capture, before its cabinet IR. Centre is flat; range is −12 to +12 dB. This does not change the controls used when the capture was recorded.");
+            tone->addWidget(control);
+        }
+        mid->addLayout(tone);
         auto* normRow = hbox(4);
         QWidget* norm = toggle(namdev::Normalize, "Normalize", 66);
         InfoView::attach(norm, "Normalize", QString("Brings the capture to a standard loudness (%1 dB, from the loudness in its metadata), so different captures sit at the same level. Does nothing for a capture without loudness data.").arg(namdev::kNormalizeTargetDb));

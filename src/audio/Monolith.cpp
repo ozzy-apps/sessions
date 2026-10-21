@@ -44,6 +44,52 @@ float monolithWarpPhase(int mode, float ph, float a) {
     }
 }
 
+float osmiumWarpPhase(int mode, float ph, float a) {
+    if (mode < 3) return monolithWarpPhase(mode, ph, a);
+    if (a <= 0 || mode == 7) return ph; // Cross FM uses the next oscillator's actual phase in renderRange.
+    float warped = ph;
+    switch (mode) {
+    case 3: warped = ph + 0.28f * a * sinTable(ph); warped -= std::floor(warped); break;
+    case 4: {
+        const float x = ph * (1 + 6 * a);
+        const float cycle = x - 2 * std::floor(x * 0.5f);
+        warped = cycle <= 1 ? cycle : 2 - cycle;
+        break;
+    }
+    case 5: warped = std::pow(ph, 1 + 5 * a); break;
+    case 6: {
+        const float steps = 64 - 60 * a;
+        warped = ph + a * (std::floor(ph * steps) / steps - ph);
+        break;
+    }
+    default: break;
+    }
+    return std::clamp(warped, 0.0f, 0.999999f);
+}
+
+namespace {
+float foldCurve(float x) {
+    const float u = x + 1 - 4 * std::floor((x + 1) * 0.25f);
+    return u <= 2 ? u - 1 : 3 - u;
+}
+// Periodic antiderivative of foldCurve. Divided differences suppress the
+// harmonics otherwise aliased by an instantaneous wavefolder.
+double foldIntegral(double x) {
+    const double u = x + 1 - 4 * std::floor((x + 1) * 0.25);
+    return u <= 2 ? 0.5 * u * u - u : 3 * u - 0.5 * u * u - 4;
+}
+float foldAntialiased(float x, float previous, float amount) {
+    const double gain = 1 + 8 * double(amount);
+    const double a = gain * previous, b = gain * x, dx = b - a;
+    const float shaped = std::abs(dx) > 1e-6 ? float((foldIntegral(b) - foldIntegral(a)) / dx)
+                                            : foldCurve(float((a + b) * 0.5));
+    return x + amount * (shaped - x);
+}
+}
+float osmiumFold(float x, float amount) {
+    return amount <= 0 ? x : x + amount * (foldCurve(x * (1 + 8 * amount)) - x);
+}
+
 float monolithFilterQ(int type, float reso) {
     if (type == 6) return 0.8f + reso * reso * 10.0f;   // Scream
     if (type == 5) return reso * 0.95f;                  // Comb: its feedback
@@ -118,9 +164,12 @@ struct Voice {
     float envStart[kEnvs] = {}, envDuration[kEnvs][3] = {}, envBend[kEnvs][3] = {};
     int envStage[kEnvs] = {};
     float dt[kOscs][kMaxUnison] = {}, wl[kOscs][kMaxUnison] = {}, wr[kOscs][kMaxUnison] = {};
-    int   table[kOscs] = {}, level[kOscs] = {}, mode[kOscs] = {};
+    int   table[kOscs] = {}, level[kOscs] = {}, mode[kOscs] = {}, fmLevel[kOscs] = {};
     const Wavetable* tbl[kOscs] = {};
     float pos[kOscs] = {}, inten[kOscs] = {}, lvl[kOscs] = {}, fmixO[kOscs] = {};
+    float fold[kOscs] = {}, foldPrevious[kOscs][kMaxUnison] = {};
+    float foldDcX[kOscs][kMaxUnison] = {}, foldDcY[kOscs][kMaxUnison] = {};
+    bool foldReady[kOscs][kMaxUnison] = {};
     float modDt = 0, modPhaseAmt = 0, ring = 0, noiseLvl = 0, noiseCoef = 0, fb = 0, routing = 0, fmix = 0, drive = 1, makeup = 1;
     int   insert = 0, modWave = 0, subWave = 0;
     float subPh = 0, subDt = 0, subLvl = 0, fdrive = 1, fdriveNorm = 1;
@@ -130,6 +179,7 @@ struct Voice {
 class Monolith : public DeviceProcessor {
 public:
     explicit Monolith(float sr, bool osmium = false) : m_sr(sr), m_volCoef(onePoleCoef(0.01f, sr)),
+        m_foldDcCoef(std::exp(-2 * dsp::kPi * 5 / sr)),
         m_spec(specOf(osmium ? T::Osmium : kType)), m_osmium(osmium), m_params(osmium ? osmium::kParams : kParams) {
         wavetable(0);   // the tables are built here, never on the audio thread
         sinTable(0);
@@ -224,6 +274,9 @@ private:
             const bool restart = m_p[OscRestart] >= 0.5f;
             for (auto& o : v.ph) for (float& x : o) x = restart ? 0.0f : v.rng.uniform() * 0.999f;
             v.modPh = 0; v.fbL = v.fbR = 0; v.noiseZ = 0;
+            for (auto& osc : v.foldReady) std::fill(std::begin(osc), std::end(osc), false);
+            for (auto& osc : v.foldDcX) std::fill(std::begin(osc), std::end(osc), 0.0f);
+            for (auto& osc : v.foldDcY) std::fill(std::begin(osc), std::end(osc), 0.0f);
             for (VoiceFilter& f : v.f) f.reset();
         }
         if (retrigger || fresh) {
@@ -391,15 +444,28 @@ private:
         for (int o = 0; o < kOscs; ++o) {
             const float semis = rv(p, oparam(o, Pitch)) + rv(p, oparam(o, Fine)) / 100.0f + bend;
             const float freq = mtof(v.note + semis);
-            v.table[o] = rc(p, oparam(o, Table));
+            v.table[o] = m_osmium ? osmium::tableIndex(p[oparam(o, Table)], p[osmium::tableExtension(o)]) : rc(p, oparam(o, Table));
             v.tbl[o] = &wavetable(v.table[o]);
-            v.mode[o] = rc(p, oparam(o, Mode));
+            v.mode[o] = m_osmium ? osmium::warpMode(p[oparam(o, Mode)], p[osmium::warpExtension(o)]) : rc(p, oparam(o, Mode));
             v.inten[o] = p[oparam(o, Intensity)];
             v.pos[o] = p[oparam(o, Position)];
             v.lvl[o] = p[oparam(o, Level)];
             v.fmixO[o] = p[oparam(o, FilterMix)];
+            v.fold[o] = m_osmium ? p[osmium::fold(o)] : 0;
             // warping reads the table faster: pick the band limit for that speed
-            const float speed = v.mode[o] == 0 ? 1 + 3 * v.inten[o] : 1 + 7 * v.inten[o];
+            float speed = v.mode[o] == 0 ? 1 + 3 * v.inten[o] : 1 + 7 * v.inten[o];
+            if (v.mode[o] == 3) speed = 1 + 1.76f * v.inten[o];
+            if (v.mode[o] == 5) speed = 1 + 5 * v.inten[o];
+            if (v.mode[o] == 7) {
+                const int next = (o + 1) % kOscs;
+                const float difference = rv(p, oparam(next, Pitch)) + rv(p, oparam(next, Fine)) / 100 - semis + bend;
+                const float ratio = std::exp2(difference / 12);
+                v.fmLevel[o] = wavetableLevel(freq * ratio * std::exp2(detune / 1200.0f), m_sr);
+                const auto& sourceTable = wavetable(osmium::tableIndex(p[oparam(next, Table)], p[osmium::tableExtension(next)]));
+                const float slope = wavetableSlope(sourceTable, v.fmLevel[o], p[oparam(next, Position)]);
+                speed = 1 + 1.5f * v.inten[o] * v.inten[o] * slope * ratio;
+            }
+            if (v.fold[o] > 0) speed *= 1 + 4 * v.fold[o];
             v.level[o] = wavetableLevel(freq * speed * std::exp2(detune / 1200.0f), m_sr);
             for (int u = 0; u < m_unison; ++u) {
                 v.dt[o][u] = freq * std::exp2(offs[u] * detune / 1200.0f) / m_sr;
@@ -505,18 +571,41 @@ private:
                     }
                 }
                 const float m = shapeAt(v.modWave, v.modPh);
-                v.modPh += v.modDt; if (v.modPh >= 1) v.modPh -= 1;
+                v.modPh += v.modDt; if (v.modPh >= 1) v.modPh -= v.modPh < 2 ? 1 : std::floor(v.modPh);
                 float in1L = 0, in1R = 0, in2L = 0, in2R = 0;
+                float fmSource[kOscs][kMaxUnison]{};
+                if (m_osmium) for (int o = 0; o < kOscs; ++o) if (v.mode[o] == 7 && v.inten[o] > 0) {
+                    const int next = (o + 1) % kOscs;
+                    // Read all modulators before advancing any phase: mutual FM
+                    // is deterministic and independent of oscillator loop order.
+                    for (int u = 0; u < m_unison; ++u)
+                        fmSource[o][u] = wavetableRead(*v.tbl[next], v.fmLevel[o], v.pos[next], v.ph[next][u]);
+                }
                 for (int o = 0; o < kOscs; ++o) {
                     float sL = 0, sR = 0;
                     const Wavetable& t = *v.tbl[o];
                     for (int u = 0; u < m_unison; ++u) {
                         float ph = v.ph[o][u] + v.modPhaseAmt * m * 0.5f;
+                        if (v.mode[o] == 7) ph += fmSource[o][u] * 1.5f * v.inten[o] * v.inten[o];
                         ph -= std::floor(ph);
-                        const float s = v.lvl[o] > 0.0005f ? wavetableRead(t, v.level[o], v.pos[o], monolithWarpPhase(v.mode[o], ph, v.inten[o])) : 0.0f;
+                        const float phase = m_osmium ? osmiumWarpPhase(v.mode[o], ph, v.inten[o]) : monolithWarpPhase(v.mode[o], ph, v.inten[o]);
+                        float s = v.lvl[o] > 0.0005f ? wavetableRead(t, v.level[o], v.pos[o], phase) : 0.0f;
+                        const float input = s;
+                        if (v.fold[o] > 0) s = v.foldReady[o][u] ? foldAntialiased(s, v.foldPrevious[o][u], v.fold[o]) : osmiumFold(s, v.fold[o]);
+                        if (m_osmium) {
+                            // New phase shapes and folders can introduce DC. Keep
+                            // a 5 Hz blocker warm in bypass without changing dry audio.
+                            const float dcFree = s - v.foldDcX[o][u] + m_foldDcCoef * v.foldDcY[o][u];
+                            v.foldDcX[o][u] = s; v.foldDcY[o][u] = dcFree;
+                            if (v.fold[o] > 0 || (v.mode[o] >= 3 && v.inten[o] > 0)) s = dcFree;
+                        }
+                        // Keep the previous input even while bypassed; enabling
+                        // the folder does not replay a stale oscillator sample.
+                        v.foldPrevious[o][u] = input;
+                        v.foldReady[o][u] = true;
                         sL += s * v.wl[o][u];
                         sR += s * v.wr[o][u];
-                        v.ph[o][u] += v.dt[o][u]; if (v.ph[o][u] >= 1) v.ph[o][u] -= 1;
+                        v.ph[o][u] += v.dt[o][u]; if (v.ph[o][u] >= 1) v.ph[o][u] -= v.ph[o][u] < 2 ? 1 : std::floor(v.ph[o][u]);
                     }
                     const float g = v.lvl[o] * (1 - v.ring + v.ring * m);   // ring modulation
                     sL *= g; sR *= g;
@@ -531,7 +620,7 @@ private:
                 }
                 if (v.subLvl > 0.0005f) {   // the sub, straight into filter 1
                     const float sub = shapeAt(v.subWave == 1 ? 3 : v.subWave == 2 ? 1 : 0, v.subPh) * v.subLvl * 0.7f;
-                    v.subPh += v.subDt; if (v.subPh >= 1) v.subPh -= 1;
+                    v.subPh += v.subDt; if (v.subPh >= 1) v.subPh -= v.subPh < 2 ? 1 : std::floor(v.subPh);
                     in1L += sub; in1R += sub;
                 }
                 in1L += v.fbL * v.fb; in1R += v.fbR * v.fb;
@@ -635,7 +724,7 @@ private:
     float rv(const float* p, int i) const { return float(paramValue(m_spec->params[size_t(i)], p[i])); }
     int   rc(const float* p, int i) const { return choiceIndex(m_spec->params[size_t(i)], p[i]); }
 
-    float   m_sr, m_volCoef;
+    float   m_sr, m_volCoef, m_foldDcCoef;
     const DeviceSpec* m_spec;
     bool m_osmium;
     int m_params;

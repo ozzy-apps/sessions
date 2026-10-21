@@ -1,4 +1,6 @@
 #include "MainWindow.h"
+#include "RecoveryDialog.h"
+#include "core/Recovery.h"
 #include "widgets/DragValue.h"
 #include "ControlBar.h"
 #include "Browser.h"
@@ -66,6 +68,9 @@
 #include <QMimeData>
 #include <QProgressDialog>
 #include <QSpinBox>
+#include <QEventLoop>
+#include <QScopedValueRollback>
+#include <QElapsedTimer>
 
 namespace sessions {
 namespace {
@@ -354,6 +359,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 
 MainWindow::~MainWindow() {
     m_engine->shutdown();   // stop the audio thread before anything it reads goes away
+    delete m_recovery; m_recovery = nullptr; // finish value-only writer jobs before Project is destroyed
     // The project and transport are deleted after this destructor has run, and the undo
     // stack's clear() still emits cleanChanged: nothing may call back into this window.
     disconnect(m_project->undoStack(), nullptr, this, nullptr);
@@ -379,6 +385,13 @@ void MainWindow::buildMenus() {
     command(file, "Save", QKeySequence(Qt::CTRL | Qt::Key_S), [this] { fileSave(); });
     command(file, "Save As…", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_S), [this] { fileSaveAs(); });
     command(file, "Collect All and Save", {}, [this] { fileCollectAllAndSave(); });
+    command(file, "Recover Set…", {}, [this] { enableRecovery(); offerRecovery(); });
+    m_backupsAction = command(file, "Show Backups", {}, [this] {
+        if (m_setPath.isEmpty()) return;
+        const auto folder = RecoveryManager::backupFolder(m_setPath);
+        if (!QDir(folder).exists()) { m_info->show("No project backups", "Enable project backups in Preferences → Startup and save the set."); return; }
+        QDesktopServices::openUrl(QUrl::fromLocalFile(folder));
+    });
     file->addSeparator();
     command(file, "Export Audio…", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_R), [this] { fileExportAudio(); });
     file->addSeparator();
@@ -630,15 +643,17 @@ void MainWindow::applyExtras(const setfile::Extras& x) {
 }
 
 bool MainWindow::setModified() const {
-    return m_forcedModified || !m_project->undoStack()->isClean() || currentExtras() != m_savedExtras;
+    return m_forcedModified || !m_project->undoStack()->isClean() || currentExtras() != m_savedExtras || m_transport->recordingInProgress();
 }
 
 void MainWindow::updateTitle() {
     setWindowTitle(m_setName + "[*] - Sessions");
     setWindowModified(setModified());
+    if (m_backupsAction) m_backupsAction->setEnabled(!m_setPath.isEmpty());
 }
 
 bool MainWindow::loadSetFile(const QString& file, QString* error) {
+    if (m_saveInProgress) { if (error) *error = "A save is still in progress"; return false; }
     EditState state;
     setfile::Extras x;
     if (!setfile::read(file, state, x, error)) return false;   // a broken file leaves the current set alone
@@ -652,7 +667,8 @@ bool MainWindow::loadSetFile(const QString& file, QString* error) {
 }
 
 // After New / Open: remember where the set lives and show its first clip.
-void MainWindow::setReplaced(const QString& path, const QString& name) {
+void MainWindow::setReplaced(const QString& path, const QString& name, bool keepRecovery) {
+    if (m_recovery && !keepRecovery) m_recovery->clear();
     m_setPath = path;
     m_setName = name;
     m_browser->setProjectFolder(path.isEmpty() ? QString() : QFileInfo(path).absolutePath());
@@ -671,6 +687,7 @@ void MainWindow::setReplaced(const QString& path, const QString& name) {
 }
 
 void MainWindow::newSet() {
+    if (m_saveInProgress) return;
     releaseMidiKeys();
     m_transport->reset();
     m_project->loadEmpty();
@@ -687,15 +704,38 @@ bool MainWindow::openSet(const QString& path, QString* error) {
 }
 
 bool MainWindow::saveSet(const QString& path, QString* error) {
-    if (!setfile::save(path, *m_project, currentExtras(), error)) return false;
+    if (m_saveInProgress) { if (error) *error = "A save is still in progress"; return false; }
+    QScopedValueRollback<bool> saving(m_saveInProgress, true);
+    const auto baseline = m_project->captureEditState(); auto state = baseline; auto extras = currentExtras(); setfile::fillFromProject(extras, *m_project);
+    if (!m_transport->captureRecovery(state, error)) return false;
+    if (m_recovery) {
+        m_info->show("Saving set", QFileInfo(path).fileName());
+        QEventLoop wait; bool finished = false, ok = false; QString why; quint64 request = 0;
+        connect(m_recovery, &RecoveryManager::manualSaveFinished, &wait, [&](quint64 id, bool success, const QString& message) {
+            if (id != request) return; finished = true; ok = success; why = message; wait.quit();
+        });
+        request = m_recovery->saveManual(state, extras, QFileInfo(path).absoluteFilePath());
+        wait.exec(); // service paints, edits, transport and recording; only file replacement waits
+        if (!finished || !ok) {
+            const QString message = finished ? why : "Save interrupted";
+            if (error) *error = message; m_info->show("Save failed", message); return false;
+        }
+    } else if (!setfile::saveState(path, state, extras, error)) return false;
+    auto nowExtras = currentExtras(); setfile::fillFromProject(nowExtras, *m_project);
+    const bool unchanged = m_project->captureEditState() == baseline && nowExtras == extras;
     const QFileInfo fi(path);
     m_setPath = fi.absoluteFilePath();
     m_setName = fi.completeBaseName();
     m_browser->setProjectFolder(fi.absolutePath());
     m_project->recordFolder = fi.absoluteDir().filePath("Samples/Recorded");
-    m_savedExtras = currentExtras();
-    m_forcedModified = false;
-    m_project->undoStack()->setClean();
+    m_savedExtras = extras;
+    m_forcedModified = !unchanged;
+    if (unchanged) m_project->undoStack()->setClean();
+    if (m_recovery) {
+        m_recovery->backup(std::move(state), std::move(extras), m_setPath);
+        if (unchanged) m_recovery->clear();
+        else saveRecoveryNow();
+    }
     addRecent(m_setPath);
     updateTitle();
     return true;
@@ -703,8 +743,8 @@ bool MainWindow::saveSet(const QString& path, QString* error) {
 
 bool MainWindow::reopenSnapshot(const QString& snapshot, const QString& path, const QString& name, bool modified, QString* error) {
     const bool ok = loadSetFile(snapshot, error);
-    QFile::remove(snapshot);
     if (!ok) return false;
+    QFile::remove(snapshot);
     setReplaced(path, name.isEmpty() ? QStringLiteral("Untitled") : name);
     m_forcedModified = modified;
     updateTitle();
@@ -712,21 +752,31 @@ bool MainWindow::reopenSnapshot(const QString& snapshot, const QString& path, co
 }
 
 bool MainWindow::maybeSave() {
+    if (m_transport->recordingInProgress()) {
+        releaseMidiKeys(); m_transport->stop();
+        // Let the already captured latency tail finish before asking to save a take.
+        QElapsedTimer deadline; deadline.start();
+        while (m_transport->audioRecording() && deadline.elapsed() < 250) {
+            QEventLoop wait; QTimer::singleShot(10, &wait, &QEventLoop::quit); wait.exec(QEventLoop::ExcludeUserInputEvents);
+        }
+    }
     if (!setModified()) return true;
     QMessageBox box(QMessageBox::Question, "Sessions", QString("Save changes to “%1”?").arg(m_setName),
                     QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, this);
     box.setInformativeText("If you don't save, your changes are lost.");
     box.setDefaultButton(QMessageBox::Save);
     switch (box.exec()) {
-    case QMessageBox::Save:    return fileSave();
+    case QMessageBox::Save:    return fileSave() && (!m_forcedModified || maybeSave());
     case QMessageBox::Discard: return true;
     default:                   return false;
     }
 }
 
 void MainWindow::closeEvent(QCloseEvent* e) {
+    if (m_saveInProgress) { e->ignore(); return; }
     if (!m_closeConfirmed && !maybeSave()) { e->ignore(); return; }
     m_closeConfirmed = true;   // don't ask twice when quitting closes the window again
+    if (m_recovery) m_recovery->clear();
     saveWindowState();
     e->accept();
 }
@@ -769,6 +819,10 @@ void MainWindow::openStartupSet() {
 void MainWindow::showPreferences() {
     PreferencesDialog dlg(m_engine, m_midi, [this] { restartReopeningSet(); }, this);
     connect(&dlg, &PreferencesDialog::midiControllerSettingsChanged, m_surface, &ControlSurface::reloadSettings);
+    connect(&dlg, &PreferencesDialog::recoverySettingsChanged, this, [this] {
+        if (!m_recoveryTimer) return;
+        m_recoveryTimer->stop(); if (const int interval = RecoveryManager::intervalSeconds()) m_recoveryTimer->start(interval * 1000);
+    });
     dlg.exec();
     m_transport->setCountInBars(PreferencesDialog::countInBars());
 }
@@ -809,17 +863,22 @@ void MainWindow::showShortcuts() {
 }
 
 void MainWindow::fileNew() {
+    if (m_saveInProgress) return;
     if (!maybeSave()) return;
     newSet();
     m_info->show("New Set", "Two MIDI tracks and two return tracks. Add an instrument from the browser, and save with Ctrl+S.");
 }
 
 void MainWindow::fileOpen() {
+    if (m_saveInProgress) return;
     const QString path = QFileDialog::getOpenFileName(this, "Open Set", setDialogDir(), setFilter() + ";;All files (*)");
     if (!path.isEmpty()) fileOpenPath(path);
 }
 
 void MainWindow::fileOpenPath(const QString& path) {
+    if (m_saveInProgress) {
+        QTimer::singleShot(100, this, [this, path] { fileOpenPath(path); }); return;
+    }
     if (!maybeSave()) return;
     QString error;
     if (!openSet(path, &error)) {
@@ -1048,6 +1107,7 @@ int MainWindow::collectSamples(QString* error) {
 }
 
 bool MainWindow::fileCollectAllAndSave() {
+    if (m_saveInProgress) return false;
     if (m_setPath.isEmpty() && !fileSaveAs()) return false;
     QString error;
     const int copied = collectSamples(&error);
@@ -1074,6 +1134,7 @@ void MainWindow::dropEvent(QDropEvent* e) {
 }
 
 bool MainWindow::fileSave() {
+    if (m_saveInProgress) return false;
     if (m_setPath.isEmpty()) return fileSaveAs();
     QString error;
     if (saveSet(m_setPath, &error)) { m_info->show("Saved " + m_setName, QDir::toNativeSeparators(m_setPath)); return true; }
@@ -1083,6 +1144,7 @@ bool MainWindow::fileSave() {
 }
 
 bool MainWindow::fileSaveAs() {
+    if (m_saveInProgress) return false;
     const QString suggested = m_setPath.isEmpty() ? QDir(setDialogDir()).filePath(m_setName + "." + setfile::kSuffix) : m_setPath;
     QString path = QFileDialog::getSaveFileName(this, "Save Set As", suggested, setFilter());
     if (path.isEmpty()) return false;
@@ -1144,6 +1206,7 @@ void MainWindow::rebuildRecentMenu() {
 
 // View > Zoom: the new instance opens a snapshot of the set as it is, saved or not, and deletes it.
 void MainWindow::restartReopeningSet() {
+    if (m_saveInProgress) return;
     const QString snapshot = QDir(QStandardPaths::writableLocation(QStandardPaths::TempLocation))
                                  .filePath(QString("sessions-restart-%1.%2").arg(QCoreApplication::applicationPid()).arg(setfile::kSuffix));
     QString error;
@@ -1168,6 +1231,7 @@ void MainWindow::restartReopeningSet() {
         return;
     }
     m_closeConfirmed = true;   // the new instance has the set
+    if (m_recovery) m_recovery->clear();
     QCoreApplication::quit();
 }
 
