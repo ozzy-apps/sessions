@@ -1,5 +1,19 @@
 # Sessions — handoff
 
+## APC Key 25 lights fix · 0.45.1 · 2026-10-21 (on the feature branch, not yet on main)
+
+The user installed 0.45.0. On their APC Key 25 the pads and buttons work, but the clip matrix doesn't light.
+
+1. **Cause:** `MidiInput::send` addressed messages straight to the device's ALSA port without connecting to it. The kernel's MIDI port driver (`seq_midi`) opens a hardware port's output only for a connected client, which is why `aplaymidi` connects before sending. Without a connection every light was dropped without an error. Input worked because Sessions connects every input. Tests captured messages at `MidiInput::sent`, before ALSA, and the container has no sequencer, so this wasn't visible.
+2. **Fix:**
+   - `MidiInput::send` connects "Sessions: MIDI Out" to the port on its first message (`snd_seq_connect_to`, `-EBUSY` is fine). It forgets the connection when the port goes away or is disconnected, records `sendError()`, and treats a non-blocking `-EAGAIN` drain as queued.
+   - `ApcKey25`'s sender now returns whether the message went out. A light counts as shown only once sent. A failure stops the burst and holds for a second, then the lights still due are sent. One second after the controller appears, every light is sent again (`m_settle`, as the FL Studio script waits a second).
+   - MainWindow shows the first failure's reason in the Info View ("APC Key 25: pads can't be lit").
+3. **Tests:** `sessions_apc_key25` is now **82 checks**: retry after a failed send, steady lights not resent, the settle resend and MIDI Out's error without a sequencer. The window check expects one try then a pause when no sequencer exists, and 55 lights when one does.
+4. **Verification:** all **28 CTest suites passed (819 s)**. The six optional drum libraries were skipped again, since the content isn't installed here. Installer **`dist/sessions_0.45.1+20261021231935_amd64.deb`**: the extracted binary reports Sessions 0.45.1 and completed **42 main-view + 59 device captures**. It was sent to the user; it upgrades 0.45.0.
+5. **Not done:** deleting the remote `sessions-0.43` / `sessions-0.44` branches. The session's git proxy answers HTTP 403 to ref deletion (pushes work), so the user deletes them locally with `git push origin --delete sessions-0.43 sessions-0.44`. Both are fully contained in main.
+6. **Next AI:** the user should install 0.45.1 and check that the pads light. `aconnect -l` should show Sessions' MIDI Out connected to the APC's second port. Pushing to main needs the user's request for this update. Then add an AGENTS.md integration record.
+
 ## Version reconciliation · 0.45.0 · 2026-10-21
 
 Cloud session (Claude) on `claude/tender-babbage-xm4lwn`. Sessions remains a native C++17 / Qt 6 Widgets DAW with immutable audio snapshots, preallocated DSP and ALSA sequencer MIDI.

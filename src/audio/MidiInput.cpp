@@ -2,6 +2,7 @@
 #include "MidiInput.h"
 #include <QSettings>
 #include <QSocketNotifier>
+#include <cerrno>
 #include <vector>
 #ifdef SESSIONS_HAVE_ALSA
 #include <alsa/asoundlib.h>
@@ -136,15 +137,24 @@ void MidiInput::findWritable() {
             m_writable.insert(name, QString("%1:%2").arg(c).arg(snd_seq_port_info_get_port(port)));
         }
     }
+    const QList<QString> ids = m_writable.values();
+    for (auto it = m_outConnected.begin(); it != m_outConnected.end();) it = ids.contains(*it) ? std::next(it) : m_outConnected.erase(it);   // gone: connect again when it's back
 #endif
 }
 
 bool MidiInput::send(const QString& portName, const QByteArray& message) {
     emit sent(portName, message);
 #ifdef SESSIONS_HAVE_ALSA
-    if (!m_seq || m_outPort < 0 || message.isEmpty()) return false;
-    const QStringList id = m_writable.value(portName).split(':');
-    if (id.size() != 2) return false;
+    if (!m_seq || m_outPort < 0) { m_sendError = m_seq ? "Sessions couldn't open MIDI Out." : m_status; return false; }
+    if (message.isEmpty()) return false;
+    const QString portId = m_writable.value(portName);
+    const QStringList id = portId.split(':');
+    if (id.size() != 2) { m_sendError = "No MIDI output named \"" + portName + "\"."; return false; }
+    if (!m_outConnected.contains(portId)) {   // the hardware port's output opens for a connection
+        const int rc = snd_seq_connect_to(m_seq, m_outPort, id[0].toInt(), id[1].toInt());
+        if (rc < 0 && rc != -EBUSY) { m_sendError = QString("Couldn't connect MIDI Out to %1: %2").arg(portName, snd_strerror(rc)); return false; }
+        m_outConnected.insert(portId);
+    }
     snd_seq_event_t ev;
     snd_seq_ev_clear(&ev);
     snd_seq_ev_set_source(&ev, m_outPort);
@@ -158,11 +168,14 @@ bool MidiInput::send(const QString& portName, const QByteArray& message) {
     } else if (type == 0x90 && message.size() == 3) snd_seq_ev_set_noteon(&ev, channel, d1, d2);
     else if (type == 0x80 && message.size() == 3) snd_seq_ev_set_noteoff(&ev, channel, d1, d2);
     else if (type == 0xB0 && message.size() == 3) snd_seq_ev_set_controller(&ev, channel, d1, d2);
-    else return false;
-    if (snd_seq_event_output(m_seq, &ev) < 0) return false;
-    return snd_seq_drain_output(m_seq) >= 0;
+    else { m_sendError = "Not a note, CC or SysEx message."; return false; }
+    if (const int rc = snd_seq_event_output(m_seq, &ev); rc < 0) { m_sendError = QString("Couldn't send to %1: %2").arg(portName, snd_strerror(rc)); return false; }
+    const int rc = snd_seq_drain_output(m_seq);   // -EAGAIN: it's queued and goes out with the next one
+    if (rc < 0 && rc != -EAGAIN) { m_sendError = QString("Couldn't send to %1: %2").arg(portName, snd_strerror(rc)); return false; }
+    return true;
 #else
     Q_UNUSED(portName);
+    m_sendError = m_status;
     return false;
 #endif
 }
@@ -239,6 +252,8 @@ void MidiInput::readEvents() {
             break;
         case SND_SEQ_EVENT_PORT_UNSUBSCRIBED:
             m_connected.remove(QString("%1:%2").arg(ev->data.connect.sender.client).arg(ev->data.connect.sender.port));
+            if (ev->data.connect.sender.client == snd_seq_client_id(m_seq) && ev->data.connect.sender.port == m_outPort)   // MIDI Out was disconnected (aconnect -d)
+                m_outConnected.remove(QString("%1:%2").arg(ev->data.connect.dest.client).arg(ev->data.connect.dest.port));
             portsMoved = true;
             break;
         default: break;

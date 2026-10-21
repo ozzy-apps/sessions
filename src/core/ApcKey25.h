@@ -25,7 +25,9 @@
 // Ports: the mk2 has two, the keys (with sustain) on the first and everything else on the
 // second, so its keys play as before and nothing from the second plays notes. The 2014 model
 // has one: channel 1's pad and button notes are taken, other channels play. Messages go out
-// through `sender` to the same port. User MIDI maps get first refusal (MainWindow).
+// through `sender` to the same port. A light counts as shown only once it was sent; a failed
+// send is tried again a second later, and a second after the controller appears every light is
+// sent again (it may still be starting up). User MIDI maps get first refusal (MainWindow).
 
 #include <QObject>
 #include <QHash>
@@ -59,7 +61,8 @@ public:
     void setEnabled(bool on);                        // the control surface profile isn't Off
     bool enabled() const { return m_enabled; }
     void setPorts(const QVector<Port>& ports);       // the MIDI inputs (ports change): finds the APC
-    void setSender(std::function<void(const QString& port, const QByteArray& message)> sender) { m_send = std::move(sender); }
+    // Sends one message to the controller's port; false when it couldn't be delivered.
+    void setSender(std::function<bool(const QString& port, const QByteArray& message)> sender) { m_send = std::move(sender); }
     void setDeviceChoice(std::function<int()> choice) { m_deviceChoice = std::move(choice); }   // the Device View's selected device id
     Role role(const QString& source) const;
     Model model() const { return m_model; }
@@ -104,7 +107,8 @@ private:
     void knob(int k, int value, bool relative);
     double phase() const;                            // beats: the transport's, else a 120 BPM clock
     int  padColour(int track, int scene, int* channel) const;
-    void send(int status, int d1, int d2);
+    bool send(int status, int d1, int d2);
+    void startLights(bool on);                       // the controller came (lights now and again in a second) or went
     double valueOf(const QString& target) const;   // a knob target's value now, 0..1
     bool canMove(int tracks, int scenes) const;
 
@@ -125,7 +129,9 @@ private:
     QHash<int, QPair<int, int>> m_lit;   // what the device shows (as last sent)
     QTimer     m_timer;
     qint64     m_started = 0;
-    std::function<void(const QString&, const QByteArray&)> m_send;
+    std::function<bool(const QString&, const QByteArray&)> m_send;
+    qint64     m_holdUntil = 0;     // after a failed send: when to try again (ms since epoch)
+    QTimer     m_settle;            // the full resend a second after connecting
     std::function<int()> m_deviceChoice;
 };
 }

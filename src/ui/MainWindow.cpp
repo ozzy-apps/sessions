@@ -124,7 +124,15 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_midi = new audio::MidiInput(this);
     m_surface = new ControlSurface(m_project, m_transport, m_mapper, this);
     m_apc = new ApcKey25(m_project, m_transport, m_mapper, this);
-    m_apc->setSender([this](const QString& port, const QByteArray& message) { m_midi->send(port, message); });
+    m_apc->setSender([this](const QString& port, const QByteArray& message) {
+        const bool sent = m_midi->send(port, message);
+        if (!sent && !m_apcLightsFailed && m_info) {   // once, so a missing output says why the pads stay dark
+            m_apcLightsFailed = true;
+            m_info->show("APC Key 25: pads can't be lit", m_midi->sendError());
+        }
+        if (sent) m_apcLightsFailed = false;
+        return sent;
+    });
 
     auto* central = new QWidget(this);
     auto* root = new QVBoxLayout(central);

@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
         Mapper mapper(&p, &transport);
         ApcKey25 apc(&p, &transport, &mapper);
         QVector<QPair<QString, QByteArray>> sent;
-        apc.setSender([&](const QString& port, const QByteArray& m) { sent.push_back({port, m}); });
+        apc.setSender([&](const QString& port, const QByteArray& m) { sent.push_back({port, m}); return true; });
         check(!apc.connected() && sent.isEmpty(), "APC: nothing is sent before a controller is there");
         apc.setPorts(mk2Ports());
         check(apc.connected() && apc.model() == ApcKey25::Model::Mk2 && apc.controlsPort() == mk2Controls
@@ -305,6 +305,32 @@ int main(int argc, char** argv) {
         check(dark && apc.lights().size() == 55, "APC lights: leaving darkens them");
         apc.setEnabled(false);
         check(!apc.connected() && apc.role(mk2Controls) == ApcKey25::Role::None && !apc.takesNote(mk2Controls, 0, 32), "APC: profile Off leaves the controller as a keyboard");
+        {   // Lights that couldn't be sent are sent again; a second after connecting, all of them are.
+            Project q; fill(q, 8);
+            Transport tq(&q, &engine); Mapper mq(&q, &tq); ApcKey25 retry(&q, &tq, &mq);
+            int attempts = 0, delivered = 0; bool down = true;
+            retry.setSender([&](const QString&, const QByteArray&) { ++attempts; if (down) return false; ++delivered; return true; });
+            retry.setPorts(mk2Ports());
+            const int firstTry = attempts;
+            retry.refreshLights();
+            const bool held = attempts == firstTry;
+            down = false;
+            QTest::qWait(1150);   // the hold has passed, and the settle resend has run
+            retry.refreshLights();
+            check(firstTry == 1 && held && delivered >= 55, "APC lights: a failed send stops the burst, waits a second, then every light goes out");
+            const int before = delivered;
+            QTest::qWait(1150);
+            retry.refreshLights();
+            check(delivered - before < 10, "APC lights: once shown, steady lights aren't sent again");
+            Project r; fill(r, 8);
+            Transport tr(&r, &engine); Mapper mr(&r, &tr); ApcKey25 settle(&r, &tr, &mr);
+            int count = 0;
+            settle.setSender([&](const QString&, const QByteArray&) { ++count; return true; });
+            settle.setPorts(mk2Ports());
+            const int initial = count;
+            QTest::qWait(1150);
+            check(initial == 55 && count >= 110, "APC lights: a second after the controller appears, every light is sent again");
+        }
         {
             Project q; fill(q, 2);
             Transport tq(&q, &engine); Mapper mq(&q, &tq); ApcKey25 old(&q, &tq, &mq);
@@ -386,7 +412,10 @@ int main(int argc, char** argv) {
         QObject::connect(input, &audio::MidiInput::sent, &window, [&](const QString& port, const QByteArray& m) { sent.push_back({port, m}); });
         apc->setPorts(mk2Ports());
         QApplication::processEvents();
-        check(apc->connected() && sent.size() >= 55 && sent.first().first == mk2Controls, "window: an APC Key 25 mk2 lights up through MIDI Out");
+        check(apc->connected() && !sent.isEmpty() && sent.first().first == mk2Controls && (input->available() ? sent.size() >= 55 : sent.size() == 1),
+              "window: an APC Key 25 mk2's lights go to its controls port through MIDI Out (without a sequencer: one try, then a pause)");
+        if (!input->available())
+            check(!input->send(mk2Controls, QByteArray::fromHex("902015")) && !input->sendError().isEmpty(), "window: without a sequencer, MIDI Out says why it can't send");
         ClipGrid* grid = window.sessionView()->grid();
         const QRect box = grid->controllerBoxRect();
         check(!box.isEmpty() && recordPixels(grid, grid->width()) > 0, "window: the Session View outlines the pads' box");

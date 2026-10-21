@@ -76,6 +76,9 @@ ApcKey25::ApcKey25(Project* project, Transport* transport, Mapper* mapper, QObje
     m_started = QDateTime::currentMSecsSinceEpoch();
     m_timer.setInterval(30);
     connect(&m_timer, &QTimer::timeout, this, [this] { refreshLights(); });
+    m_settle.setSingleShot(true);
+    m_settle.setInterval(1000);
+    connect(&m_settle, &QTimer::timeout, this, [this] { refreshLights(true); });
 }
 
 ApcKey25::~ApcKey25() = default;
@@ -93,8 +96,16 @@ void ApcKey25::setEnabled(bool on) {
     m_enabled = on;
     m_shift = false;
     m_held.clear();
-    if (connected()) { m_timer.start(); refreshLights(true); } else m_timer.stop();
+    startLights(connected());
     emit boxChanged();
+}
+
+void ApcKey25::startLights(bool on) {
+    m_holdUntil = 0;
+    if (!on) { m_timer.stop(); m_settle.stop(); return; }
+    m_timer.start();
+    refreshLights(true);
+    m_settle.start();   // and once more when the controller has settled
 }
 
 void ApcKey25::setPorts(const QVector<Port>& ports) {
@@ -127,7 +138,7 @@ void ApcKey25::setPorts(const QVector<Port>& ports) {
         m_lit.clear();
         m_shift = false;
         m_held.clear();
-        if (connected()) { m_timer.start(); refreshLights(true); } else m_timer.stop();
+        startLights(connected());
         emit boxChanged();
     }
 }
@@ -457,22 +468,29 @@ QHash<int, QPair<int, int>> ApcKey25::lights() const {
     return out;
 }
 
-void ApcKey25::send(int status, int d1, int d2) {
-    if (!m_send || m_controls.isEmpty()) return;
+bool ApcKey25::send(int status, int d1, int d2) {
+    if (!m_send || m_controls.isEmpty()) return false;
     QByteArray m(3, 0);
     m[0] = char(status); m[1] = char(d1 & 0x7F); m[2] = char(d2 & 0x7F);
-    m_send(m_controls, m);
+    return m_send(m_controls, m);
 }
 
 void ApcKey25::refreshLights(bool all) {
     if (!connected()) return;
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    if (!all && now < m_holdUntil) return;   // a send failed: wait a moment before trying again
     const auto want = lights();
     for (auto it = want.cbegin(); it != want.cend(); ++it) {
         const auto was = m_lit.constFind(it.key());
         if (!all && was != m_lit.constEnd() && *was == it.value()) continue;
-        send(0x90 | it.value().first, it.key(), it.value().second);
+        if (!send(0x90 | it.value().first, it.key(), it.value().second)) {   // not shown: it stays due
+            m_lit.remove(it.key());
+            m_holdUntil = now + 1000;
+            return;
+        }
         m_lit.insert(it.key(), it.value());
     }
+    m_holdUntil = 0;
 }
 
 void ApcKey25::darken() {

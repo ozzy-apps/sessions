@@ -7,8 +7,10 @@
 // Events are read on the UI thread through a socket notifier on the sequencer and come out
 // as signals. Without ALSA at build time this compiles to an input that's never available.
 //
-// It also sends: "Sessions: MIDI Out" delivers messages straight to a device's port by
-// name, for control surfaces' lights (the APC Key 25's pads). Nothing is routed there otherwise.
+// It also sends: "Sessions: MIDI Out" delivers messages to a device's port by name, for control
+// surfaces' lights (the APC Key 25's pads). The first message to a port connects MIDI Out to it:
+// the kernel only opens a hardware port's output while something is connected, and drops
+// messages sent to it otherwise. Nothing else is routed there.
 
 #include <QObject>
 #include <QSet>
@@ -45,6 +47,7 @@ public:
     // One MIDI message (note, CC or a complete SysEx) to the writable port with this name
     // (as ports() names it). False when it couldn't be delivered; sent() is emitted either way.
     bool    send(const QString& portName, const QByteArray& message);
+    QString sendError() const { return m_sendError; }   // why the last send() failed
 
 signals:
     void noteOn(int channel, int pitch, int velocity);   // velocity 1..127
@@ -65,6 +68,8 @@ private:
     int           m_port = -1;
     int           m_outPort = -1;   // "MIDI Out" (when the sequencer opened for output too)
     QHash<QString, QString> m_writable;   // port name -> "client:port", ports we can send to
+    QSet<QString> m_outConnected;         // "client:port" ids MIDI Out is connected to
+    QString       m_sendError;
     void    findWritable();
     QString       m_status;
     QSet<QString> m_connected;   // port ids we're subscribed to

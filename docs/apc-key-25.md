@@ -45,8 +45,10 @@ The mk2 shows up as two ports. The first carries the keys and the sustain button
 
 Track buttons light for what they'd change: playing tracks (Clip Stop, blinking while a stop is queued), soloed, armed, playing (Mute lit = track on, as in Live) or selected. Scene buttons light for scenes with clips and blink while one is queued. While **Shift** is held, track buttons 1–4 show which ways the box can move, 5–8 the knob mode, and the scene buttons the track-button mode. The lights go out when Sessions closes or the profile is switched off.
 
+Sessions connects its **MIDI Out** port to the APC's controls port when it first lights a pad; `aconnect -l` lists that connection. If the pads stay dark, the Info View says why (for example, no MIDI output by that name). Lights that couldn't be sent are tried again a second later, and every light is sent again a second after the controller appears.
+
 ## Scope and verification
 
-This profile is implemented by Sessions from Akai's published mk2 protocol and Ableton Live's layout for both models. It sends no firmware or mode commands. Blinking and pulsing are drawn by Sessions in time with the song, so no MIDI clock is needed. Regression tests (`sessions_apc_key25`) inject both models' messages and check every action, light and port rule. Physical hardware has not been tested yet; check the pads and lights once the controller is connected.
+This profile is implemented by Sessions from Akai's published mk2 protocol and Ableton Live's layout for both models. It sends no firmware or mode commands. Blinking and pulsing are drawn by Sessions in time with the song, so no MIDI clock is needed. Regression tests (`sessions_apc_key25`) inject both models' messages and check every action, light and port rule. On the user's mk2 (0.45.0) the pads and buttons worked but nothing lit: Sessions sent to the controller without connecting to it, and Linux drops messages to a hardware port nobody is connected to. 0.45.1 connects first. Lights on hardware are still to be confirmed with 0.45.1.
 
 Public references: [Akai APC Key 25 mk2](https://akaipro.com/apc-key-25-mkii), [Akai support](https://support.akaipro.com/en/support/solutions/articles/69000826281-akai-pro-apc-key-25-mk2-frequently-asked-questions).

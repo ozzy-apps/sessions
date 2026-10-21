@@ -189,7 +189,7 @@ private:
     QStackedWidget* m_detailStack;
     ClipView*       m_clipView;
     DeviceView*     m_deviceView;
-    InfoView*       m_info;
+    InfoView*       m_info = nullptr;
     OverviewBar*    m_overview = nullptr;   // the bottom strip: the clip and the device chain in miniature
     QLabel*         m_detailTitle;
     QToolButton*    m_clipTab;               // the Clip / Device tabs, on their side between the Info View and the detail (0.21)
@@ -221,6 +221,7 @@ private:
     audio::MidiInput* m_midi = nullptr;
     ControlSurface* m_surface = nullptr;
     ApcKey25*       m_apc = nullptr;
+    bool            m_apcLightsFailed = false;   // the Info View said why the pads stay dark
     void            updateApc();      // ports and profile (MIDI ports came or went, Preferences)
     void            updateApcBox();   // the Session View's outline of the pads
     Mapper*         m_mapper = nullptr;
