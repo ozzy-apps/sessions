@@ -151,7 +151,7 @@ Points runs(double length, std::initializer_list<Run> list) {
         at += r.beats;
         // A wobble closes on its own `from` even when the next run starts elsewhere (a chop starts open).
         const Run& next = all[(i + 1) % all.size()];
-        if (r.shape != 2 && r.to != r.from && next.from != r.from) points.push_back({at / length - 0.0005, r.from, 0, r.shape});
+        if (r.shape != 2 && r.to != r.from && next.from != r.from) points.push_back({at / length - 1e-5, r.from, 0, r.shape});
     }
     points.push_back({1, points.isEmpty() ? 0.0 : points.first().y});
     return points;
