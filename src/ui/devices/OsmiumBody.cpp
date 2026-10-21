@@ -822,15 +822,19 @@ public:
         m_patches = new ChoiceBox(this); m_patches->setObjectName("osmiumPatch"); m_patches->setFixedWidth(258);
         m_patches->addItems({"Init", "Basalt Bass", "Obsidian Reese", "Glacial Pad", "Pressure Sequence"});
         m_patches->insertSeparator(m_patches->count());
+        bool basses = false;   // the wobble basses (Dubstep, DnB Bass) follow the Drum & Bass bank after a separator
         for (const auto& patch : osmium::factoryPresets()) {
+            const QLatin1String category(patch.category);
+            if (!basses && (category == QLatin1String("Dubstep") || category == QLatin1String("DnB Bass"))) { m_patches->insertSeparator(m_patches->count()); basses = true; }
             m_patches->addItem(QString::fromUtf8(patch.name).mid(7), QString::fromUtf8(patch.name));
             m_patches->setItemData(m_patches->count() - 1, QString::fromUtf8(patch.description), Qt::ToolTipRole);
         }
         m_patches->setMaxVisibleItems(16); m_patches->setEditable(true); m_patches->setInsertPolicy(QComboBox::NoInsert);
         m_patches->completer()->setFilterMode(Qt::MatchContains); m_patches->completer()->setCaseSensitivity(Qt::CaseInsensitive);
         if (device()) { const int item = m_patches->findData(device()->name); if (item >= 0) m_patches->setCurrentIndex(item); m_presetName = device()->name; }
-        InfoView::attach(m_patches, "Patch", "Type to search 40 Drum & Bass factory presets plus the original starting patches. Loading a patch replaces the parameters, curves and routes in one undo step. "
-                         "Factory macros: Tone, Warp, Drive, Width, Space, Echo, Body and Air.");
+        InfoView::attach(m_patches, "Patch", "Type to search 60 factory presets: 40 Drum & Bass sounds, 20 Dubstep and DnB wobble basses, plus the original starting patches. "
+                         "Loading a patch replaces the parameters, curves and routes in one undo step. Factory macros: Tone, Warp, Drive, Width, Space, Echo, Body and Air. "
+                         "The wobble basses draw their rate changes into Curve 1; automate Curve 1 Rate to stretch or speed up the whole phrase.");
         connect(m_patches, &QComboBox::activated, this, [this](int i) { loadPatch(i); }); header->addWidget(m_patches);
         header->addStretch();
         auto* voices = new QLabel(this); header->addWidget(voices);

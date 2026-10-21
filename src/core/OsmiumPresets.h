@@ -12,6 +12,7 @@ struct FactoryPreset {
     std::array<double, kParams> values{};
     QVector<ModRoute> mods;
     QVector<QVector<CurvePoint>> curves;
+    double bpm = 174;   // the tempo it was voiced at (its phrases follow any tempo)
 };
 const std::vector<FactoryPreset>& factoryPresets();
 const FactoryPreset* factoryPreset(const QString& name);

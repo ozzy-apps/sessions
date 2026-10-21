@@ -1,5 +1,15 @@
 # Sessions — manual test checklist
 
+## 0.39 · Osmium wobble basses
+
+1. Expand Osmium and open the patch selector: a separator follows the 40 Drum & Bass sounds, then the 20 basses. Type `dubstep` → ten matches; `dnb bass` → ten matches.
+2. At 140 BPM load **Dubstep - Gravedigger** and hold F1 (MIDI 41) for two bars from a bar line → quarters, eighths, eighth triplets, sixteenths, then a 1/32 roll. Hold four bars → the phrase repeats with a slightly different timbre (Curve 2). Start a note mid-bar → the wobble keeps its place in the bar.
+3. Arrangement: add an automation lane for the track's **Curve1 Rate** and draw 2 bars, then 1 bar from bar 3 → from bar 3 the phrase plays twice as fast; 1/16 → a buzz. The Modulators page's Curve 1 **Length** follows the automation. Repeat with a MIDI clip envelope, and with a controller knob mapped to Curve1 Rate.
+4. **DnB Bass - Jump Up Wheeze** and **Stab Rewind** restart their one-bar phrase with every note; all others follow the song's bars.
+5. Play E0–F2 on several presets → each note has the same wobble colour (key-tracked filters) and a centred sub; switching presets keeps similar loudness.
+6. Turn each macro up while a phrase plays → audible change, no clipping with all eight at maximum. Save the set and reopen it, and save a user preset → both curves (21–91 nodes in Curve 1) and all routes return.
+7. Listen on full-range monitors or headphones: low end weight, wobble depth and the triplet / roll sections. Automated checks don't replace listening.
+
 ## 0.38 · Arrangement, groups and live controls
 
 1. Arrangement loop/start/end flags match the waveform and MIDI editors. Compare Dark, Mid and Light with strongly colored clips: markers remain neutral and legible. Drag the start flag, end flag, either loop edge and the brace body; grid snapping/Alt and transport loop values remain correct.

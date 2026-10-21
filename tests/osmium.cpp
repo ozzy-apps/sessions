@@ -291,7 +291,9 @@ int main(int argc, char** argv) {
     QTest::keyClick(dialog, Qt::Key_Z, Qt::ControlModifier | Qt::ShiftModifier); QApplication::processEvents();
     CHECK(std::abs(current().params[mo::FDrive].value - 0.42) < 1e-6, "Ctrl+Shift+Z in the integrated editor restores the instrument edit");
     auto* patches = editor->findChild<QComboBox*>("osmiumPatch");
-    CHECK(patches->isEditable() && patches->count() == 46, "The searchable selector contains all 40 DnB presets and the original five entries");
+    CHECK(patches->isEditable() && patches->count() == 67, "The searchable selector contains the original five entries, all 40 DnB presets and the 20 wobble basses, each group after a separator");
+    patches->completer()->setCompletionPrefix("dubstep");
+    CHECK(patches->completer()->completionCount() == 10, "Searching Dubstep lists the ten Dubstep wobble basses");
     patches->completer()->setCompletionPrefix("seismic");
     CHECK(patches->completer()->completionCount() == 1, "Preset search matches a name within its category without case sensitivity");
     const QString oldName = current().name; const auto oldCurves = current().curves; const int oldId = current().id;
@@ -332,6 +334,7 @@ int main(int argc, char** argv) {
         factoryCapture("Osmium Pad - Aurora", mo::SrcEnv2, "osmium-dnb-pad.png");
         factoryCapture("Osmium Wobble - Undertaker", mo::SrcCurve1, "osmium-dnb-wobble.png");
         dialog->resize(1920, 850); QApplication::processEvents();
+        factoryCapture("Osmium Dubstep - Gravedigger", mo::SrcCurve1, "osmium-bass-phrase.png");
         factoryCapture("Osmium Wobble - Undertaker", mo::SrcEnv2, "osmium-large-envelope.png");
         pageButton("Sound")->click(); QApplication::processEvents(); editor->grab().save(dir + "/osmium-large-sound.png");
         pageButton("Voice && mixer")->click(); QApplication::processEvents(); editor->grab().save(dir + "/osmium-large-voice.png");

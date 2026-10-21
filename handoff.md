@@ -1,5 +1,34 @@
 # Sessions — handoff
 
+## Milestone 39 · Osmium wobble basses · 0.39.0 · 2026-10-21
+
+Cloud session (Claude) on branch `claude/great-ptolemy-f8zozz`, based on origin/main **`e38f042` / 0.38.0**; origin/main was fetched again before the final run and had not moved. Stack unchanged: native C++17 / Qt 6 Widgets, Osmium's factory bank in `core/OsmiumPresets.cpp`, shared Monolith/Osmium DSP in `audio/Monolith.cpp`. No DSP, parameter index or file-format change.
+
+The user asked for 20 fat bass presets and whether the envelope / LFO length (1 bar, 1/2, 1/4, 1/8 …) can be automated for varied dubstep and DnB wobbles.
+
+1. **Answer:** yes, already. Every Osmium parameter is automatable (Arrangement lane, clip envelope, MIDI map), including **Curve1 Rate** (the curve page's Length) and LFO 1–4 Rate. Choices: 4 bars … 1/32 and Free (a bar for curves); no triplets. Rates read the unmodulated knob, so mod routes (macros, LFOs, steppers) cannot move a Rate; automation and MIDI mapping can. Song-locked phase is `beat / length`, so a switch stays in time with the song (to 1 bar or shorter on a bar line: from the top).
+2. **20 presets**, appended after the 40 DnB sounds: ten **Dubstep** (voiced at 140 BPM) and ten **DnB Bass** (174 BPM). `FactoryPreset::bpm` (default 174) records the voicing tempo for tests and audition. Rate variation is drawn into Curve 1 by `runs()`: a list of runs (`wob`, `roll`, `wheeze`, `chop`, `rest`), each at its own division. That gives quarters, eighths, dotted eighths, 1/4 / 1/8 / 1/16 triplets and 1/32 rolls in one-, two- or four-bar phrases (21–91 nodes). Curve 1 is song-locked except Jump Up Wheeze and Stab Rewind, which retrigger per note. Curve 2 is a four-bar timbre drift. `bass()` defines the common voice: mono, glide, four-voice unison, sine sub at 0.38, F Drive plus Soft insert and key-tracked filters (`keyFilter()` takes cutoffs as heard at F1 / MIDI 41). All audio passes filter 1 so the wobble closes everything; comb, band-pass and notch colours run in series after it (Routing 1). The bank's eight macros are unchanged.
+3. **Voicing findings:** an early draft held the filter open about 80 % of each cycle, sent a static share of osc 2 through filter 2 and played the sub at 22 Hz (F0). The fixes were closing shapes (turn 0.35, both halves fast-start), no parallel filter-2 path and voicing at F1. Spectrograms of all 20 confirm the intended rate sequence. Upper-band movement is 16–43 dB (above 500 Hz, 1/64-note windows). Peaks are about −12 dBFS at default, at most −9.5 dBFS with all macros up, and 75–95 % of the level sits below 150 Hz.
+4. **Editor:** `OsmiumBody` adds a separator before the basses (selector count 67) and help text about Curve1 Rate automation.
+5. **Tests:** `tests/osmium_bank.cpp` now expects 60 presets (40 + 10 + 10). Its renderer used Monolith's 32-node curve stride, which overflowed the stack with dense curves; it now uses `osmium::kCurvePoints` and sets `curveStride` as the Engine does. The original 40 renders are unchanged. Bass checks cover:
+   - a two-bar render at the preset's tempo, plus the other genre's tempo;
+   - valid curves (sorted, 0–1, ≤ 257 nodes) and at least three rates per beat in Curve 1;
+   - a Curve 1 route above 30 %, more than 70 % of the level below 150 Hz and more than 12 dB of wobble above 500 Hz;
+   - mono with at least three unison voices over the sub;
+   - Curve1 Rate switched mid-note inside Osmium (2 bars → 1 bar / 1/16, phase exact);
+   - the same switch through an Arrangement automation lane in a real `audio::Engine` (phase 0.641 → 0.499, audio identical before beat 4).
+
+   `tests/osmium.cpp` checks the selector count and a `dubstep` search (10), and captures `osmium-bass-phrase.png`.
+6. **Docs:** `docs/osmium-wobble-basses.md` (how-to, automation answer, phrase table), `docs/osmium-wobble-bass-levels.csv`, README, manual checklist 0.39 and screenshot `docs/screenshots/osmium/osmium-bass-phrase.png`.
+7. **Verification (in progress):** Release build of 0.39.0 passed, and 13 of 14 CTest suites passed, including smoke and the Osmium UI suite (71 checks). The focused `sessions_osmium_bank` run passed **1159 checks, 0 failures** before the final Engine automation check was added; that check passed in isolation (phase 0.641 → 0.499, audio identical before beat 4). The full combined run is finishing.
+
+**Next AI:** required work is complete. Listening on full-range monitors remains outstanding; automated measures and spectrograms don't replace it. Possible follow-ups, only if asked:
+- let mod routes move Curve/LFO Rate (needs phase continuity handling);
+- add triplet entries to the Rate list (append-only, keep existing indices);
+- a per-preset Rate macro.
+
+Do not change the bank's existing indices or the eight macro names. AGENTS.md push rules apply to main. This branch was pushed only as the cloud session's designated feature branch, not merged to main.
+
 ## Milestone 38 · Arrangement and live performance workflow · 0.38.0 · 2026-10-19
 
 Baseline verified against origin/main: **`891983d` / 0.37.0**, clean main checkout and clean retained sampler worktree. Stack remains native C++17 / Qt 6 Widgets, immutable audio snapshots, ALSA MIDI input and preallocated audio processing. The user authorized this update's version bump, commit, push and installer after validation.

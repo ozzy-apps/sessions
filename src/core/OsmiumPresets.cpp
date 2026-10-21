@@ -122,6 +122,63 @@ Patch wobble(const char* name, const char* description) {
     drive(p, 0.22, 1, 0.18); space(p, 0.06, 0.025, 0.35, 0.03, 1);
     return p;
 }
+// Wobble phrases (0.39): runs of wobbles drawn end to end into one curve, each run at its own
+// division, so the rate changes you would otherwise automate (quarters, eighths, triplets,
+// sixteenth and 1/32 rolls) play by themselves across the phrase. A run lasts `beats`; each
+// wobble in it starts at `from`, reaches `to` after `turn` of its cycle and heads back to the
+// next wobble's `from`. `out` / `back` bend the two halves (negative: fast start). Shape 1 is a
+// smooth S (sine-like rolls), shape 2 holds each value (square chops for stutters).
+constexpr double kHalf = 2, kQuarter = 1, kQuarterT = 2.0 / 3, kEighth = 0.5, kEighthDot = 0.75, kEighthT = 1.0 / 3,
+                 kSixteenth = 0.25, kSixteenthT = 1.0 / 6, kThirtySecond = 0.125;
+enum PhraseRate { FourBars = 0, TwoBars = 1, OneBar = 2 };   // Curve Rate choices
+struct Run { double beats, division, from = 0, to = 1, turn = 0.35, out = -0.2, back = -0.25; int shape = 0; };
+Run wob(double beats, double division, double depth = 1, double turn = 0.35) { return {beats, division, 0, depth, turn}; }
+Run roll(double beats, double division, double depth = 1) { return {beats, division, 0, depth, 0.5, 0, 0, 1}; }
+Run wheeze(double beats, double division, double depth = 1) { return {beats, division, 0, depth, 0.82, 0.45, -0.3}; }
+Run chop(double beats, double division, double depth = 1, double gate = 0.5) { return {beats, division, depth, 0, gate, 0, 0, 2}; }
+Run rest(double beats, double level = 0) { return {beats, beats, level, level}; }
+Points runs(double length, std::initializer_list<Run> list) {
+    Points points; double at = 0;
+    const std::vector<Run> all(list);
+    for (size_t i = 0; i < all.size(); ++i) {
+        const Run& r = all[i];
+        const int cycles = std::max(1, int(std::lround(r.beats / r.division)));
+        const double cycle = r.beats / cycles;
+        for (int k = 0; k < cycles; ++k) {
+            points.push_back({(at + k * cycle) / length, r.from, r.out, r.shape});
+            if (r.to != r.from) points.push_back({(at + (k + r.turn) * cycle) / length, r.to, r.back, r.shape});
+        }
+        at += r.beats;
+        // A wobble closes on its own `from` even when the next run starts elsewhere (a chop starts open).
+        const Run& next = all[(i + 1) % all.size()];
+        if (r.shape != 2 && r.to != r.from && next.from != r.from) points.push_back({at / length - 0.0005, r.from, 0, r.shape});
+    }
+    points.push_back({1, points.isEmpty() ? 0.0 : points.first().y});
+    return points;
+}
+// Fat wobble basses: mono with a short glide, a four-voice unison over a centred sine sub,
+// drive into the filters and an insert. Voiced around F1 (MIDI 41, the sub an octave under it);
+// the filters follow the keyboard, so keyFilter() gives each cutoff as heard at F1. Curve 1 is
+// the wobble phrase; Curve 2 drifts the timbre over four bars so each repeat of the phrase
+// differs. Velocity opens the filter a little.
+void keyFilter(Patch& p, int f, int type, double hzAtF1, double resonance) { filter(p, f, type, hzAtF1 * std::exp2((60 - 41) / 12.0), resonance); }
+Patch bass(const char* name, const char* category, double bpm, const char* description) {
+    auto p = base(name, category, description); p.bpm = bpm;
+    p.values[Volume] = linPos(5.5, -24, 6); p.values[VoiceMode] = 1; p.values[Glide] = expPos(0.03, 0.001, 2);
+    p.values[Unison] = choice(3, 4); p.values[Detune] = 0.22; p.values[Spread] = 0.55; p.values[VelAmp] = 0.25; p.values[KeyTrack] = 1;
+    osc(p, 0, 5, 0.45, 0.6, 0, -4, 0, 0.18); osc(p, 1, 0, 0.66, 0.42, 0, 5);
+    p.values[SubLevel] = 0.38;
+    keyFilter(p, 0, 1, 110, 0.3); keyFilter(p, 1, 0, 2400, 0.14); p.values[FMix] = 0;   // all through filter 1: the wobble closes everything
+    env(p, 0, 0.003, 0.4, 0.96, 0.07); env(p, 1, 0.001, 0.14, 0, 0.08);
+    drive(p, 0.34, 2, 0.24); space(p, 0.07, 0.02, 0.32, 0, 1);
+    phrase(p, 1, {{0, .15, 0, 1}, {.3, .7, 0, 1}, {.55, .3, 0, 1}, {.8, .9, 0, 1}, {1, .15}}, FourBars, false, .3);
+    route(p, SrcCurve2, oparam(0, Position), .14); route(p, SrcVelocity, fparam(0, FCutoff), .05);
+    return p;
+}
+void stepper(Patch& p, int s, int rate, std::initializer_list<double> steps, double glide) {
+    p.values[sparam(s, SRate)] = choice(rate, 8); p.values[sparam(s, SCount)] = double(steps.size() - 1) / 15; p.values[sparam(s, SGlide)] = glide;
+    int i = 0; for (double v : steps) p.values[step(s, i++)] = .5 + v * .5;
+}
 std::vector<Patch> buildBank() {
     std::vector<Patch> bank;
     auto add = [&](Patch p) { bank.push_back(std::move(p)); };
@@ -201,6 +258,119 @@ std::vector<Patch> buildBank() {
         p = wobble("Osmium Wobble - Seismic", "Slow heavy LFO wobble with a warm low layer. Quarter-note movement and a broad growl crest.");
         p.mods.removeIf([](const ModRoute& r) { return r.source == SrcCurve1; }); filter(p, 0, 1, 700, .28);
         lfo(p, 0, 4, 0, true); route(p, SrcLfo1, fparam(0, FCutoff), .30); route(p, SrcLfo1, oparam(0, Position), .21); osc(p, 0, 5, .42, .64, 0, -4, 0, .28); p.values[SubLevel] = .34; drive(p, .35, 1, .23); add(p);
+    }
+    // Dubstep (0.39): voiced at 140 BPM, half-time. Curve 1 changes its wobble rate across the
+    // phrase; locked to the song's bars, so hold a note through the phrase or start notes anywhere.
+    {
+        auto p = bass("Osmium Dubstep - Gravedigger", "Dubstep", 140, "Classic heavy wobble over a centred sub. Two bars: quarters, eighths, eighth triplets, sixteenths, then a 1/32 roll.");
+        phrase(p, 0, runs(8, {wob(2, kQuarter), wob(2, kEighth), wob(2, kEighthT, .9), wob(1, kSixteenth, .85), wob(1, kThirtySecond, .7, .5)}), TwoBars, false, .06);
+        route(p, SrcCurve1, fparam(0, FCutoff), .52); route(p, SrcCurve1, oparam(0, Position), .18); add(p);
+
+        p = bass("Osmium Dubstep - Yoi Machine", "Dubstep", 140, "Talking formant wobble: the vowel and filter move together. Dotted eighths, a long half-note yoi, triplets and sixteenths.");
+        osc(p, 0, 2, .1, .64, 0, -3, 1, .1); osc(p, 1, 5, .3, .4, 0, 4); keyFilter(p, 0, 1, 160, .28);
+        phrase(p, 0, runs(8, {wob(3, kEighthDot, 1, .3), wob(1, kQuarter, .8), wob(1, kEighthT, .9), wob(2, kHalf, 1, .55), wob(1, kSixteenth, .8)}), TwoBars, false, .08);
+        route(p, SrcCurve1, oparam(0, Position), .55); route(p, SrcCurve1, fparam(0, FCutoff), .40); add(p);
+
+        p = bass("Osmium Dubstep - Riddim Hammer", "Dubstep", 140, "Square riddim wobble with gaps: triplet bursts, rests and a 1/32 stutter. Hard clipped, centred low end.");
+        osc(p, 0, 3, .15, .62, 0, -2); osc(p, 1, 0, 1, .4, 0, 3); keyFilter(p, 0, 0, 90, .38); drive(p, .4, 3, .3);
+        phrase(p, 0, runs(8, {wob(1, kEighthT), rest(.5), wob(.5, kSixteenth), wob(2, kEighthT, .9), wob(1, kQuarter), wob(1, kSixteenthT, .8), rest(1), wob(1, kThirtySecond, .75)}), TwoBars, false, .05);
+        route(p, SrcCurve1, fparam(0, FCutoff), .5); add(p);
+
+        p = bass("Osmium Dubstep - Tearout", "Dubstep", 140, "Screaming sync saw through the Scream filter and a wavefolder. Rolling sixteenths with sixteenth-triplet and 1/32 bursts.");
+        osc(p, 0, 0, .66, .58, 0, -6, 2, .22); osc(p, 1, 5, .6, .42, 0, 6); keyFilter(p, 0, 6, 140, .45); drive(p, .42, 4, .12); p.values[Volume] = linPos(3.3, -24, 6);
+        phrase(p, 0, runs(8, {wob(1, kSixteenth), wob(1, kEighth), wob(1, kSixteenth, .9), wob(1, kThirtySecond, .8), wob(2, kSixteenthT, .9), wob(1, kEighthT), wob(1, kThirtySecond, 1, .5)}), TwoBars, false, .04);
+        route(p, SrcCurve1, fparam(0, FCutoff), .48); route(p, SrcCurve1, oparam(0, Intensity), .2); add(p);
+
+        p = bass("Osmium Dubstep - Robot Talk", "Dubstep", 140, "Metallic ring-modulated robot voice through a sweeping comb. Four bars of changing rates with a stepped vowel underneath.");
+        osc(p, 0, 6, .3, .58, 0, -3); osc(p, 1, 5, .4, .4, 0, 4); p.values[ModRing] = .18; p.values[ModPitch] = linPos(7, -36, 36);
+        keyFilter(p, 0, 1, 160, .3); keyFilter(p, 1, 5, 220, .55); p.values[FRouting] = 1; p.values[FMix] = .45;
+        phrase(p, 0, runs(16, {wob(1, kQuarter), wob(1, kEighthT), wob(2, kEighth), wob(2, kQuarterT), wob(2, kSixteenth, .85),
+                               wob(1, kEighthT), wob(1, kSixteenthT, .85), wob(2, kHalf, 1, .5), wob(2, kEighth), wob(1, kSixteenth), wob(1, kThirtySecond, .7)}), FourBars, false, .06);
+        stepper(p, 0, 6, {.8, -.4, .3, -.8, .6, -.1}, .3);
+        route(p, SrcCurve1, fparam(0, FCutoff), .45); route(p, SrcCurve1, fparam(1, FCutoff), .35); route(p, SrcStep1, oparam(0, Position), .2); add(p);
+
+        p = bass("Osmium Dubstep - Deep Wub", "Dubstep", 140, "Slow, deep half-time wub with a heavy sub. Four bars: half notes, quarters, then eighths and triplets for the turnaround.");
+        osc(p, 0, 5, .3, .58, 0, -3); osc(p, 1, 0, .66, .4, 0, 4); p.values[SubLevel] = .6; keyFilter(p, 0, 1, 80, .22);
+        phrase(p, 0, runs(16, {wob(4, kHalf, 1, .45), wob(4, kQuarter, .9), wob(2, kHalf), wob(2, kEighth, .85), wob(2, kEighthT, .9), wob(2, kQuarter)}), FourBars, false, .1);
+        route(p, SrcCurve1, fparam(0, FCutoff), .5); route(p, SrcCurve1, oparam(0, Position), .12); add(p);
+
+        p = bass("Osmium Dubstep - Triplet Grinder", "Dubstep", 140, "Phase-modulated growl that lives on triplets: quarter, eighth and sixteenth triplets with straight quarters between.");
+        osc(p, 0, 5, .55, .6, 0, -5, 0, .2); osc(p, 1, 3, .25, .4, 0, 5); p.values[ModPhase] = .08; keyFilter(p, 0, 1, 120, .32);
+        phrase(p, 0, runs(8, {wob(2, kQuarterT), wob(2, kEighthT), wob(1, kSixteenthT, .85), wob(1, kEighthT), wob(1, kQuarter), wob(1, kSixteenthT, .9)}), TwoBars, false, .06);
+        route(p, SrcCurve1, fparam(0, FCutoff), .5); route(p, SrcCurve1, ModPhase, .12); add(p);
+
+        p = bass("Osmium Dubstep - Stutter Gate", "Dubstep", 140, "Chopped wobble: square gates in eighths, sixteenths, triplets and 1/32 between open quarter wobbles. The sub keeps going.");
+        osc(p, 0, 5, .4, .6, 0, -4, 0, .2); osc(p, 1, 0, .66, .42, 0, 5); keyFilter(p, 0, 1, 45, .2);
+        phrase(p, 0, runs(8, {chop(1, kEighth, .9, .6), chop(1, kSixteenth, .9), wob(2, kQuarter), chop(1, kSixteenthT, .85), chop(1, kThirtySecond, .8), wob(1, kEighthT), chop(1, kSixteenth, 1, .7)}), TwoBars, false, .07);
+        route(p, SrcCurve1, fparam(0, FCutoff), .62); add(p);
+
+        p = bass("Osmium Dubstep - Laser", "Dubstep", 140, "Hard-sync laser wobble: the sync sweep follows the phrase. Eighths, triplets, a long quarter, then faster sixteenths.");
+        osc(p, 0, 0, .66, .58, 0, -4, 2, .1); osc(p, 1, 5, .5, .4, 0, 5); keyFilter(p, 0, 1, 200, .25); keyFilter(p, 1, 3, 1400, .4); p.values[FRouting] = 1; p.values[FMix] = .3;
+        phrase(p, 0, runs(8, {wob(1, kEighth, 1, .25), wob(1, kEighthT), wob(2, kQuarter, 1, .6), wob(1, kSixteenth), wob(1, kEighth), wob(1, kSixteenthT, .9), wob(1, kThirtySecond, .8)}), TwoBars, false, .05);
+        route(p, SrcCurve1, oparam(0, Intensity), .55); route(p, SrcCurve1, fparam(0, FCutoff), .42); route(p, SrcCurve1, fparam(1, FCutoff), .3); add(p);
+
+        p = bass("Osmium Dubstep - Halftime Growl", "Dubstep", 140, "Vocal growl: the Growl table and a drifting notch move with a four-bar phrase that ends in triplets and a 1/32 roll.");
+        osc(p, 0, 5, .2, .6, 0, -4, 1, .08); osc(p, 1, 2, .3, .4, 0, 4); keyFilter(p, 0, 1, 130, .3); keyFilter(p, 1, 4, 900, .35); p.values[FRouting] = 1; p.values[FMix] = .7;
+        phrase(p, 0, runs(16, {wob(2, kQuarter), wob(2, kEighth), wob(1, kEighthT), wob(1, kSixteenth), wob(2, kHalf, .9, .6), wob(4, kEighth, .9),
+                               wob(1, kQuarter), wob(1, kSixteenthT), wob(1, kEighthT), wob(1, kThirtySecond, .75)}), FourBars, false, .06);
+        route(p, SrcCurve1, oparam(0, Position), .45); route(p, SrcCurve1, fparam(0, FCutoff), .45); route(p, SrcCurve2, fparam(1, FCutoff), .3); add(p);
+    }
+    // DnB Bass (0.39): voiced at 174 BPM. Same idea at drum & bass speed; Jump Up Wheeze and
+    // Stab Rewind restart their one-bar phrase with every note.
+    {
+        auto p = bass("Osmium DnB Bass - Neuro Talker", "DnB Bass", 174, "Talking neuro bass: a sixteenth-note vowel sequence under a two-bar filter phrase of eighths, triplets and rolls.");
+        osc(p, 0, 2, .2, .6, 0, -3, 1, .12); osc(p, 1, 5, .5, .4, 0, 4); keyFilter(p, 0, 1, 200, .3);
+        stepper(p, 0, 6, {.9, -.3, .6, -.7, .2, .7}, .3);
+        phrase(p, 0, runs(8, {wob(1, kEighth), wob(1, kSixteenth, .8), wob(2, kQuarter, 1, .3), wob(1, kEighthT), wob(1, kEighth, .9), wob(1, kSixteenthT, .8), wob(1, kThirtySecond, .7)}), TwoBars, false, .05);
+        route(p, SrcCurve1, fparam(0, FCutoff), .48); route(p, SrcStep1, oparam(0, Position), .3); add(p);
+
+        p = bass("Osmium DnB Bass - Jump Up Wheeze", "DnB Bass", 174, "Rising jump-up wheeze on a resonant filter. Each note restarts one bar: a quarter, eighths, triplets, sixteenths.");
+        osc(p, 0, 3, .3, .6, 0, -4); osc(p, 1, 0, .66, .42, 0, 5); keyFilter(p, 0, 0, 150, .55);
+        phrase(p, 0, runs(4, {wheeze(1, kQuarter), wheeze(1, kEighth), wheeze(1, kEighthT, .9), wheeze(1, kSixteenth, .85)}), OneBar, true, .05);
+        route(p, SrcCurve1, fparam(0, FCutoff), .5); route(p, SrcCurve1, oparam(0, Position), .2); add(p);
+
+        p = bass("Osmium DnB Bass - Roller", "DnB Bass", 174, "Rolling detuned reese wobble with smooth sine-like movement: eighths with sixteenth and triplet fills.");
+        osc(p, 0, 0, .67, .54, 0, -11); osc(p, 1, 0, .69, .48, 0, 12); p.values[Detune] = .3; keyFilter(p, 0, 1, 140, .28);
+        phrase(p, 0, runs(8, {roll(2, kEighth, .9), roll(1, kSixteenth, .8), roll(1, kEighth), roll(2, kEighth, .9), roll(1, kEighthT, .85), roll(1, kSixteenth, .8)}), TwoBars, false, .1);
+        route(p, SrcCurve1, fparam(0, FCutoff), .45); add(p);
+
+        p = bass("Osmium DnB Bass - Liquid Wobble", "DnB Bass", 174, "Soft round wobble for liquid rollers: quarters easing into eighths and triplets, a little chorus and space.");
+        osc(p, 0, 0, .4, .6, 0, -5); osc(p, 1, 1, .4, .38, 0, 5); p.values[Unison] = choice(2, 4); p.values[Volume] = linPos(4, -24, 6); keyFilter(p, 0, 0, 120, .2);
+        drive(p, .18, 1, .1); space(p, .18, .06, .45, .06, 2);
+        phrase(p, 0, runs(8, {roll(2, kQuarter), roll(2, kEighth, .85), roll(1, kQuarter), roll(1, kEighthT, .8), roll(2, kHalf, .9)}), TwoBars, false, .12);
+        route(p, SrcCurve1, fparam(0, FCutoff), .42); add(p);
+
+        p = bass("Osmium DnB Bass - Foghorn", "DnB Bass", 174, "Huge pulse foghorn with a square sub. Four bars of slow swells that speed up into triplets and a 1/32 roll.");
+        osc(p, 0, 3, .05, .6, 0, -6); osc(p, 1, 3, .1, .48, 0, 7); p.values[SubWave] = choice(1, 3); p.values[Volume] = 1; keyFilter(p, 0, 1, 70, .25); drive(p, .5, 1, .32);
+        phrase(p, 0, runs(16, {wob(4, kHalf, 1, .6), wob(2, kQuarter), wob(2, kEighth, .85), wob(4, 4, 1, .7), wob(2, kEighthT), wob(1, kSixteenth, .8), wob(1, kThirtySecond, .7)}), FourBars, false, .1);
+        route(p, SrcCurve1, fparam(0, FCutoff), .5); add(p);
+
+        p = bass("Osmium DnB Bass - Halftime Crusher", "DnB Bass", 174, "Folded halftime bass built on triplets: quarter and eighth triplets against straight halves and quarters over four bars.");
+        osc(p, 0, 5, .65, .58, 0, -4, 0, .24); osc(p, 1, 7, .35, .4, 0, 5); keyFilter(p, 0, 1, 120, .34); drive(p, .4, 4, .26);
+        phrase(p, 0, runs(16, {wob(2, kQuarterT), wob(2, kQuarter), wob(2, kEighthT), wob(2, kHalf), wob(1, kSixteenthT), wob(1, kEighthT), wob(2, kEighth), wob(2, kQuarterT), wob(1, kSixteenth), wob(1, kThirtySecond, .7)}), FourBars, false, .06);
+        route(p, SrcCurve1, fparam(0, FCutoff), .48); route(p, SrcCurve1, oparam(0, Position), .15); add(p);
+
+        p = bass("Osmium DnB Bass - Growl Reese", "DnB Bass", 174, "Detuned reese with a formant growl in a band-pass layer. The vowel opens on quarters, eighths and triplets.");
+        osc(p, 0, 0, .67, .52, 0, -10); osc(p, 1, 2, .3, .46, 0, 11, 1, .1); keyFilter(p, 0, 1, 150, .25); keyFilter(p, 1, 3, 600, .45); p.values[FRouting] = 1; p.values[FMix] = .45;
+        phrase(p, 0, runs(8, {wob(1, kQuarter), wob(1, kEighth), wob(2, kEighthT, .9), wob(1, kSixteenth), wob(1, kEighth), wob(2, kQuarter, 1, .55)}), TwoBars, false, .06);
+        route(p, SrcCurve1, oparam(1, Position), .5); route(p, SrcCurve1, fparam(1, FCutoff), .35); route(p, SrcCurve1, fparam(0, FCutoff), .4); add(p);
+
+        p = bass("Osmium DnB Bass - Stab Rewind", "DnB Bass", 174, "Synced growl stab that ratchets up: every note restarts a bar of one quarter, two eighths, sixteenths and 1/32s.");
+        osc(p, 0, 5, .5, .6, 0, -4, 2, .16); osc(p, 1, 0, .66, .42, 0, 5);
+        phrase(p, 0, runs(4, {{1, kQuarter, 0, 1, .12, -.6, -.1}, wob(1, kEighth, .9), wob(1, kSixteenth, .8), wob(1, kThirtySecond, .7)}), OneBar, true, .04);
+        route(p, SrcCurve1, fparam(0, FCutoff), .5); route(p, SrcEnv2, fparam(0, FCutoff), .15); add(p);
+
+        p = bass("Osmium DnB Bass - Metal Hornet", "DnB Bass", 174, "Buzzing metallic bass through a sweeping comb. Sixteenth triplets, eighths and quarters swap places over two bars.");
+        osc(p, 0, 6, .5, .58, 0, -5, 2, .1); osc(p, 1, 5, .45, .42, 0, 5); p.values[ModRing] = .1; p.values[ModPitch] = linPos(12, -36, 36);
+        keyFilter(p, 0, 1, 150, .3); keyFilter(p, 1, 5, 300, .6); p.values[FRouting] = 1; p.values[FMix] = .4;
+        phrase(p, 0, runs(8, {wob(1, kSixteenthT), wob(1, kEighth), wob(1, kSixteenth, .85), wob(1, kQuarter), wob(2, kEighthT), wob(1, kSixteenthT, .9), wob(1, kThirtySecond, .75)}), TwoBars, false, .05);
+        route(p, SrcCurve1, fparam(0, FCutoff), .45); route(p, SrcCurve1, fparam(1, FCutoff), .4); add(p);
+
+        p = bass("Osmium DnB Bass - Mutant Step", "DnB Bass", 174, "Digital sync bass: an eight-step sixteenth timbre sequence against a filter phrase of eighths, triplets and quarters.");
+        osc(p, 0, 7, .4, .6, 0, -4, 2, .1); osc(p, 1, 5, .4, .42, 0, 5); keyFilter(p, 0, 1, 180, .32);
+        stepper(p, 0, 6, {1, .2, -.6, .8, -.2, .5, -.9, .4}, .15);
+        phrase(p, 0, runs(8, {wob(2, kEighth), wob(1, kSixteenthT, .85), wob(1, kQuarter), wob(1, kEighthT), wob(1, kSixteenth), wob(2, kQuarter, 1, .5)}), TwoBars, false, .05);
+        route(p, SrcCurve1, fparam(0, FCutoff), .48); route(p, SrcStep1, oparam(0, Position), .25); route(p, SrcStep1, oparam(0, Intensity), .15); add(p);
     }
     return bank;
 }
