@@ -622,7 +622,8 @@ void ArrangementView::drawTake(QPainter& p, const Transport::Take& take) {
         ArrangementClip ghost;
         ghost.start = take.start;
         ghost.length = len;
-        ghost.offset = std::max(0.0, take.source->positionAt(std::max(0.0, take.start - take.slotStart)));
+        ghost.offset = take.sourceOffset >= 0 ? take.sourceOffset
+            : std::max(0.0, take.source->positionAt(std::max(0.0, take.start - take.slotStart)));
         ghost.clip = take.source;
         drawClip(p, t, ghost, y, h, 1.0);
     } else {

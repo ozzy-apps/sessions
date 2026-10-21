@@ -89,9 +89,14 @@ public:
         bool    audio = false;  // the audio input
         ClipPtr source;         // the Session clip being recorded, or the clip notes go into
         double  slotStart = 0, start = 0, end = 0;
+        double  sourceOffset = -1;   // native audio's source beat when this recording began
     };
     const QVector<Take>& takes() const { return m_takes; }
     bool audioRecording() const { return !m_audioTakes.isEmpty(); }
+    bool recordingInProgress() const;
+    // Overlay current takes onto a value snapshot, without ending recording or editing
+    // the live project. Checkpoints open WAV headers on their existing owning/UI thread.
+    bool captureRecovery(EditState& state, QString* error = nullptr);
     // Where a new recording on this track goes (in Project::recordFolder, or ~/Music/Sessions/Recorded).
     QString recordingPath(const QString& trackName) const;
     QString recordFolder() const;   // that folder (edited samples go there too)
@@ -202,6 +207,7 @@ private:
         qint64  startFrame = 0, stopFrame = 0;     // in the capture stream (startFrame < 0: before the capture began)
         bool    framed = false, stopKnown = false; // startFrame / stopFrame worked out
         qint64  written = 0;
+        bool checkpointed = false; // a saved/recovery snapshot now references this file
         std::shared_ptr<LivePeaks> peaks;   // what's been written, for drawing while it records
     };
     QVector<AudioTake> m_audioTakes;

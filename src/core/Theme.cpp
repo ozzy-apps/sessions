@@ -387,11 +387,12 @@ QWidget#detailTabs QToolButton { min-width: 16px; max-width: 16px; min-height: 5
 QWidget#clipProps { background: {line}; border-right: 1px solid {line}; }
 QWidget#clipBox { background: {panel}; }
 QLabel#clipBoxTitle { background: {panel2}; color: {text}; font-weight: 600; font-size: 10px; padding-left: 4px; border-bottom: 1px solid {line}; }
-QWidget#clipProps QPushButton, QWidget#clipProps QToolButton, QWidget#clipProps QComboBox { min-height: 12px; max-height: 15px; padding: 0 3px; font-size: 10px; }
-QWidget#clipProps QCheckBox { font-size: 10px; spacing: 4px; }
-QWidget#clipProps QLineEdit#clipName { padding: 1px 3px; max-height: 15px; }
-QWidget#clipToggles { background: {panel}; border-right: 1px solid {line}; }
-QToolButton#clipBoxToggle { min-width: 12px; max-width: 12px; min-height: 12px; max-height: 12px; padding: 0; border-radius: 7px; font-size: 8px; font-weight: 600; }
+QWidget#clipProps QPushButton, QWidget#clipProps QToolButton, QWidget#clipProps QComboBox { min-height: 18px; max-height: 22px; padding: 0 3px; font-size: 11px; }
+QWidget#clipProps QCheckBox { font-size: 11px; spacing: 4px; min-height: 20px; }
+QWidget#clipProps QLineEdit#clipName { padding: 1px 3px; min-height: 18px; max-height: 22px; }
+QTabBar#clipInspectorTabs::tab { background: {panel2}; color: {textSoft}; border: 0; border-bottom: 2px solid {line}; padding: 3px 4px; font-size: 11px; }
+QTabBar#clipInspectorTabs::tab:selected { background: {panel}; color: {text}; border-bottom-color: {accent}; }
+QTabBar#clipInspectorTabs::tab:hover { background: {hover}; }
 QWidget#bottomPanel { border-top: 1px solid {line}; }
 QWidget#overviewBar { background: {panel}; border-top: 1px solid {line}; }
 QLabel#overviewStatus { color: {textFaint}; font-size: 10px; padding-left: 8px; }

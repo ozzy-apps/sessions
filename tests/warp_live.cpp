@@ -126,6 +126,70 @@ int main(int argc, char** argv) {
         CHECK(rms(out, 23900, 24100) > 0.02, "Warped drums retain an audible transient at the target beat");
     }
 
+    // An adaptive source map must reach the callback intact, including points
+    // beyond index 32. Its 40 unequal beat intervals have changing source slopes.
+    // Place pulses at their midpoints: those expected project positions are
+    // independent of the engine's interpolation and also exercise segment interiors.
+    {
+        constexpr int sourceRate = 44100;
+        constexpr double projectTempo = 240, loopBeats = 24;
+        QVector<WarpMarker> markers{{0, 0}};
+        for (int interval = 0; interval < 40; ++interval) {
+            const double beat = markers.last().beat + (interval % 2 ? 0.8 : 0.4);
+            markers.push_back({beat, 0.25 * beat + 0.005 * beat * beat});
+        }
+        auto source = std::make_shared<SampleData>();
+        source->rate = sourceRate;
+        source->left.resize(size_t(std::lround(markers.last().seconds * sourceRate)), 0);
+        std::vector<double> pulseBeats{0}, pulseSeconds{0};
+        for (int i = 1; i < markers.size(); ++i) {
+            pulseBeats.push_back((markers[i - 1].beat + markers[i].beat) / 2);
+            pulseSeconds.push_back((markers[i - 1].seconds + markers[i].seconds) / 2);
+        }
+        for (double seconds : pulseSeconds) {
+            const size_t begin = size_t(std::lround(seconds * sourceRate));
+            source->transients.push_back(double(begin) / sourceRate);
+            for (int i = 0; i < sourceRate / 500 && begin + size_t(i) < source->left.size(); ++i)
+                source->left[begin + size_t(i)] = 0.4f;
+        }
+        source->right = source->left;
+        for (float& value : source->right) value = -value;
+        for (WarpMode mode : {WarpMode::Beats, WarpMode::Repitch}) {
+            auto run = [&](int block) {
+                Project p;
+                p.tempo = projectTempo;
+                auto c = addAudio(p, source, 120, mode);
+                c->warpMarkers = markers;
+                c->length = loopBeats;
+                c->grain = 0;
+                audio::Engine e(&p);
+                launchAll(p, e);
+                return render(e, 12 * rate, block);
+            };
+            const auto out = run(511), otherBlock = run(997);
+            for (int pass = 0; pass < 2; ++pass) {
+                bool regionTiming[3] = {true, true, true};
+                for (double beat : pulseBeats) {
+                    const int target = int(std::lround((pass * loopBeats + beat) * 60 / projectTempo * rate));
+                    const int onset = firstAbove(out, target - 12, target + 20, 0.025f);
+                    const int tolerance = beat == 0 ? 5 : 3; // short launch/slice declick and fractional source-frame rounding
+                    regionTiming[std::min(2, int(beat / 8))] &= onset >= target - 2 && onset <= target + tolerance;
+                }
+                CHECK(regionTiming[0], "41-marker Session warping lands early pulses and loop downbeats on both passes");
+                CHECK(regionTiming[1], "41-marker Session warping lands interpolated middle pulses on both passes");
+                CHECK(regionTiming[2], "41-marker Session warping retains late map segments beyond marker 32 on both passes");
+            }
+            bool stereo = true;
+            double blockError = 0;
+            for (size_t i = 0; i < out.size(); i += 2) {
+                stereo &= std::isfinite(out[i]) && std::isfinite(out[i + 1]) && std::abs(out[i] + out[i + 1]) < 1e-7;
+                blockError = std::max({blockError, std::abs(double(out[i] - otherBlock[i])), std::abs(double(out[i + 1] - otherBlock[i + 1]))});
+            }
+            CHECK(stereo, "Variable Session warping preserves anti-phase 44.1 kHz stereo through the complete map");
+            CHECK(blockError < 1e-6, "Variable Session warp timing is independent of callback boundaries");
+        }
+    }
+
     // The last count-in fragment must not advance the first musical window.
     {
         Project p;

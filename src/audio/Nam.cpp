@@ -1111,6 +1111,22 @@ public:
             const float g = m_norm.next(dbToGain(normDb), coef);
             m_wetL[i] *= g; m_wetR[i] *= g;
         }
+        // Host tone controls after the capture, before the cabinet. Neutral values preserve old sets.
+        float gains[4]; bool changed = false;
+        for (int b = 0; b < 4; ++b) {
+            const float target = pv(T::Nam, p, namdev::Bass + b);
+            gains[b] = m_toneGain[b].next(target, std::exp(-float(n) / (.015f * m_sr)));
+            changed |= gains[b] != m_toneLast[b]; m_toneLast[b] = gains[b];
+        }
+        if (changed) for (int c = 0; c < 2; ++c) {
+            m_tone[c][0].lowShelf(std::min(120.f,m_sr*.4f),gains[0],m_sr);
+            m_tone[c][1].peak(std::min(750.f,m_sr*.4f),.7f,gains[1],m_sr);
+            m_tone[c][2].highShelf(std::min(2200.f,m_sr*.4f),gains[2],m_sr);
+            m_tone[c][3].highShelf(std::min(4800.f,m_sr*.4f),gains[3],m_sr);
+        }
+        for (int i = 0; i < n; ++i) for (int b = 0; b < 4; ++b) {
+            m_wetL[i] = m_tone[0][b].process(m_wetL[i]); m_wetR[i] = m_tone[1][b].process(m_wetR[i]);
+        }
         if (ir) {   // the cabinet, one block of latency (see Convolver)
             float* wet[2] = {m_wetL, m_wetR};
             for (int c = 0; c < 2; ++c) {
@@ -1130,10 +1146,12 @@ public:
         m_conv[0].reset(); m_conv[1].reset();
         m_dc[0] = DcBlock(); m_dc[1] = DcBlock(); m_dc[0].set(m_sr); m_dc[1].set(m_sr);
         m_env = 0; m_gate = 0; m_gateOpen = false;
+        for (auto& channel : m_tone) for (auto& band : channel) band.reset();
     }
 private:
     float m_sr;
     Smoothed m_in, m_out, m_norm;
+    Biquad m_tone[2][4]; Smoothed m_toneGain[4]; float m_toneLast[4] = {999,999,999,999};
     float m_env = 0, m_gate = 0;
     bool  m_gateOpen = false, m_resetPending = false;
     Convolver m_conv[2];

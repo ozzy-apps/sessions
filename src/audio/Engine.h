@@ -123,7 +123,8 @@ public:
     quint64 doneSeq() const   { return m_doneSeq.load(std::memory_order_acquire); }
     struct TrackStatus {
         int playingSlot, queuedSlot; double slotStart, queuedAt; bool overridden;
-        double clipBeat = -1; int clipPass = 0;
+        double clipBeat = -1; int clipPass = 0; // native Session / audio Arrangement feedback; -1 pass = ended Arrangement one-shot
+        int sourceClipId = 0; // identifies source feedback across placement changes and output latency
     };
     TrackStatus trackStatus(int trackIndex) const;
     float   takeTrackPeak(int trackIndex);     // peak since the last call
@@ -185,12 +186,19 @@ public:
     qint64  recordOverflows() const { return m_capOverflow.load(std::memory_order_relaxed); }
 
 private:
+    struct ArrangementClock {
+        int clipId = 0;
+        double origin = 0, offset = 0, start = 0;
+        double fromBeat = 0, fromSeconds = 0, nextBeat = -1, nextSeconds = 0;
+        bool warp = true;
+    };
     struct PlayState {
         int    trackId = -1;
         int    playingSlot = -1, playingClip = 0;   // slot index + clip id (the id survives scene moves)
         int    queuedSlot = -2, queuedClip = 0;     // -2 none, -1 stop, >=0 launch
         double slotStart = 0, queuedAt = 0;
         double audioStartSeconds = 0;              // unwarped Session clip: origin on the physical playback clock
+        ArrangementClock arrangementClock;        // native Arrangement source clock; survives snapshot/tempo/pitch edits
         bool   overridden = false;
         bool   pendingAllOff = false;
         bool   followDone = false;                  // this launch's follow action has fired
@@ -344,6 +352,7 @@ private:
         std::atomic<int> playingSlot{-1}, queuedSlot{-2};
         std::atomic<double> slotStart{0}, queuedAt{0}, clipBeat{-1};
         std::atomic<int> clipPass{0};
+        std::atomic<int> sourceClipId{0};
         std::atomic<bool> overridden{false};
     };
     std::array<AtomicStatus, kMaxTracks> m_status;

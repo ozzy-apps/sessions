@@ -1,7 +1,8 @@
 #pragma once
-// The Wavetable Synth's tables: four families of eight single-cycle frames each, built once
-// from their harmonics. Every frame is stored at ten band limits (mip levels) so high notes
-// don't alias: level L holds at most 512 >> L harmonics. The device panel draws level 0.
+// Single-cycle wavetable bank, built once from its harmonics on the UI thread. The first
+// eight tables keep their original indices and samples. Osmium also exposes forty newer
+// tables, grouped by family. Every table has eight morph frames at ten band limits:
+// level L holds at most 512 >> L harmonics. The device panel draws level 0.
 
 #include <vector>
 
@@ -14,11 +15,15 @@ constexpr int kWtLevels = 10;
 struct Wavetable {
     const char* name;
     std::vector<float> data;   // [level][frame][kWtSize + 1], the last sample repeats the first
+    const char* category = "Classic";
+    float slope[kWtLevels][kWtFrames] = {}; // maximum |dy/dphase| of each linearly read frame
     const float* frame(int level, int frame) const { return data.data() + (size_t(level) * kWtFrames + size_t(frame)) * (kWtSize + 1); }
 };
 
 int              wavetableCount();
 const Wavetable& wavetable(int index);   // built on first use: call once on the UI thread first
+const char*      wavetableCategory(int index);
+float            wavetableSlope(const Wavetable& table, int level, float position); // bound for the morph's phase derivative
 int              wavetableLevel(float freq, float sampleRate);   // the richest level that stays under Nyquist
 
 // A sample of `table` at `position` (0..1 across the frames) and `phase` (0..1), linear in both.
@@ -27,7 +32,7 @@ inline float wavetableRead(const Wavetable& t, int level, float position, float 
     const int f0 = int(fp), f1 = f0 + 1 < kWtFrames ? f0 + 1 : f0;
     const float ff = fp - float(f0);
     const float x = phase * float(kWtSize);
-    const int i = int(x);
+    const int i = int(x) < kWtSize ? int(x) : kWtSize - 1; // phase 1 uses the repeated seam sample
     const float fr = x - float(i);
     const float* a = t.frame(level, f0);
     const float* b = t.frame(level, f1);

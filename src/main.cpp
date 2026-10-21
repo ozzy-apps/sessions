@@ -103,6 +103,7 @@ int main(int argc, char** argv) {
     if (wh.size() == 2) w.resize(wh[0].toInt(), wh[1].toInt());
     else if (!cli.isSet(shotsOpt)) w.restoreWindowState();
     w.show();
+    if (!cli.isSet(shotsOpt)) w.enableRecovery();
 
     QLocalServer server;
     if (!cli.isSet(shotsOpt)) {
@@ -132,6 +133,8 @@ int main(int argc, char** argv) {
         QString error;
         if (!w.reopenSnapshot(cli.value(reopenOpt), cli.value(reopenPathOpt), cli.value(reopenNameOpt), cli.isSet(reopenModOpt), &error))
             QMessageBox::warning(&w, "Sessions", "Couldn't reopen the set after restarting.\n\n" + error);
+    } else if (!cli.isSet(shotsOpt) && w.offerRecovery(true)) {
+        // The recovered copy takes precedence only when the user chose Recover.
     } else if (!cli.positionalArguments().isEmpty()) {
         w.fileOpenPath(cli.positionalArguments().first());   // also a double-clicked .sessions file (Exec=sessions %f)
     } else if (!cli.isSet(shotsOpt)) {

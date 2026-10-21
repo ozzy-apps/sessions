@@ -539,7 +539,7 @@ void WavWriter::write(const float* in, qint64 frames) {
     d->frames += frames;
 }
 
-bool WavWriter::close(QString* error) {
+bool WavWriter::checkpoint(QString* error) {
     if (!d->file.isOpen()) return false;
     const quint16 bits = d->format == WavFormat::Int16 ? 16 : d->format == WavFormat::Int24 ? 24 : 32;
     const quint16 tag = d->format == WavFormat::Float32 ? 3 : 1;
@@ -552,10 +552,16 @@ bool WavWriter::close(QString* error) {
     qToLittleEndian<quint32>(quint32(d->rate) * block, p + 28); qToLittleEndian<quint16>(quint16(block), p + 32);
     qToLittleEndian<quint16>(bits, p + 34);
     std::memcpy(p + 36, "data", 4); qToLittleEndian<quint32>(dataBytes, p + 40);
-    d->file.seek(0);
-    d->file.write(h);
-    const bool ok = d->file.error() == QFileDevice::NoError;
+    const auto position = d->file.pos();
+    const bool headerOk = d->file.seek(0) && d->file.write(h) == h.size() && d->file.flush();
+    const bool positionOk = d->file.seek(position);
+    const bool ok = headerOk && positionOk && d->file.error() == QFileDevice::NoError;
     if (!ok && error) *error = d->file.errorString();
+    return ok;
+}
+
+bool WavWriter::close(QString* error) {
+    const bool ok = checkpoint(error);
     d->file.close();
     return ok;
 }

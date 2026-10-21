@@ -1,4 +1,5 @@
 #include "Engine.h"
+#include "DrumSamples.h"
 #include "Convolver.h"
 #include "Nam.h"
 #include "Resample.h"
@@ -45,7 +46,7 @@ struct ClipData {
     bool   repitch = false;
     int    stretch = 0;                // StretchMode: Tones / Texture / Complex / Complex Pro (0: Beats or Re-Pitch)
     double grainSec = 0.05, flux = 0.25, formants = 0;   // their settings
-    bool   warp = true;                // off: the file's own speed from the first marker
+    bool   warp = true;                // off: native playback, with pitch changing the playback rate
     double grain = 0;                  // Beats mode slices: 0 = transients, else a grid in beats
     int    beatsTail = 0;               // 0 gate, 1 forward sustain, 2 reflected sustain
     std::shared_ptr<const Stretcher> prepared; // initial spectral frames, prepared off the callback
@@ -77,6 +78,15 @@ struct ClipData {
     std::vector<double>    segEnd;
     std::vector<int>       segTake;
     bool comped() const { return !segTake.empty(); }
+    bool native() const { return !warp && (sample || comped()); }
+    double nativeEnd() const {
+        return sample && !comped() ? std::min(secondsAt(end()), sample->seconds()) : secondsAt(end());
+    }
+    double nativeSeconds(double elapsed) const { return secondsAt(start) + elapsed * ratio; }
+    double wrapNative(double seconds) const {
+        const double from = secondsAt(loopStart), to = nativeEnd();
+        return loop && to > from && seconds >= to ? from + std::fmod(seconds - from, to - from) : seconds;
+    }
 };
 using ClipRef = std::shared_ptr<const ClipData>;
 
@@ -126,6 +136,7 @@ struct Auto {
 
 struct DeviceSlot {
     std::shared_ptr<DeviceProcessor> proc;
+    std::shared_ptr<const drums::Content> drumContent;
     std::shared_ptr<const IrKernel> ir;   // Guitar Amp: its loaded impulse response
     std::shared_ptr<nam::Runtime> nam;    // NAM: its capture's network and state (shared with the cache; one state is live at a time)
     int        deviceId = 0;
@@ -545,6 +556,17 @@ void Engine::publish() {
             *slot = int(td.autos.size());
             td.autos.push_back({std::vector<AutoPoint>(e.points.begin(), e.points.end())});
         }
+        // Prepare recorded kits outside rendering. Automated/macro library switching preloads
+        // its possible banks; the callback only follows immutable pointers.
+        for(size_t di=0;di<td.devices.size();++di){auto& slot=td.devices[di];if(slot.type!=DeviceType::DrumStudio)continue;
+            auto isLibrary=[](int param){return param>=drumstudio::ContentLibrary&&param<drumstudio::recordedMic(0);};
+            bool automated=false;for(int i=drumstudio::ContentLibrary;i<drumstudio::recordedMic(0);++i)automated|=slot.paramAuto[i]>=0;
+            for(const auto& link:td.links)automated|=link.dst==int(di)&&isLibrary(link.param);
+            auto clipUsesLibrary=[&](const ClipRef& clip){if(!clip)return false;for(const auto& e:clip->envs)if(e.deviceId==slot.deviceId&&e.kind==3&&isLibrary(e.index))return true;return false;};
+            for(const auto& clip:td.slotClips)automated|=clipUsesLibrary(clip);for(const auto& place:td.arrangement)automated|=clipUsesLibrary(place.clip);
+            slot.drumContent=drums::prepareContent(slot.params,automated);
+        }
+
     };
 
     // Groups: each group track gets a bus; its tracks play into it. Soloing a group lets its
@@ -637,7 +659,7 @@ Engine::TrackStatus Engine::trackStatus(int i) const {
     return {s.playingSlot.load(std::memory_order_relaxed), s.queuedSlot.load(std::memory_order_relaxed),
             s.slotStart.load(std::memory_order_relaxed), s.queuedAt.load(std::memory_order_relaxed),
             s.overridden.load(std::memory_order_relaxed), s.clipBeat.load(std::memory_order_relaxed),
-            s.clipPass.load(std::memory_order_relaxed)};
+            s.clipPass.load(std::memory_order_relaxed), s.sourceClipId.load(std::memory_order_relaxed)};
 }
 
 float Engine::takeTrackPeak(int i)  { return i >= 0 && i < kMaxTracks ? m_trackPeak[size_t(i)].exchange(0) : 0.0f; }
@@ -891,12 +913,14 @@ void Engine::process(float* out, int frames, const float* in) {
         s.overridden.store(p.overridden, std::memory_order_relaxed);
         double clipBeat = -1;
         int clipPass = 0;
+        int sourceClipId = 0;
         const TrackData& td = m_state->tracks[size_t(i)];
         if (p.playingSlot >= 0 && p.playingSlot < int(td.slotClips.size())) {
             if (const ClipData* c = td.slotClips[size_t(p.playingSlot)].get()) {
-                if (!c->warp && c->sample && !c->comped()) {
-                    double seconds = c->secondsAt(c->start) + m_playSeconds - p.audioStartSeconds;
-                    const double from = c->secondsAt(c->loopStart), to = std::min(c->secondsAt(c->end()), c->sample->seconds());
+                sourceClipId = c->id;
+                if (c->native()) {
+                    double seconds = c->nativeSeconds(m_playSeconds - p.audioStartSeconds);
+                    const double from = c->secondsAt(c->loopStart), to = c->nativeEnd();
                     clipPass = 1;
                     if (c->loop && to > from && seconds >= to) {
                         clipPass = 2 + int(std::floor((seconds - to) / (to - from)));
@@ -905,9 +929,38 @@ void Engine::process(float* out, int frames, const float* in) {
                     clipBeat = c->beatAt(seconds);
                 } else clipBeat = clipPositionAt(c->start, c->loopStart, c->length, c->loop, m_beat - p.slotStart);
             }
+        } else if (!p.overridden) {
+            const auto& clock = p.arrangementClock;
+            for (const Placement& placement : td.arrangement) {
+                if (placement.start > m_beat) break;
+                if (!placement.clip || m_beat >= placement.start + placement.length) continue;
+                const ClipData& c = *placement.clip;
+                if (!td.audio || clock.clipId != c.id || clock.origin != placement.start
+                    || std::abs(clock.nextBeat - m_beat) > 1e-7) continue;
+                sourceClipId = c.id;
+                clipPass = 1;
+                if (c.native()) {
+                    double seconds = clock.nextSeconds;
+                    const double from = c.secondsAt(c.loopStart), to = c.nativeEnd();
+                    if (!c.loop && seconds >= to) { clipPass = -1; break; }
+                    if (c.loop && to > from && seconds >= to) {
+                        clipPass = 2 + int(std::floor((seconds - to) / (to - from)));
+                        seconds = from + std::fmod(seconds - from, to - from);
+                    }
+                    clipBeat = c.beatAt(seconds);
+                } else {
+                    const double raw = clock.start + m_beat - placement.start;
+                    clipBeat = clipPositionAt(clock.start, c.loopStart, c.length, c.loop, m_beat - placement.start);
+                    if (!c.loop && raw >= c.end()) { clipBeat = -1; clipPass = -1; }
+                    else if (c.loop && c.length > 0 && raw >= c.end())
+                        clipPass = 2 + int(std::floor((raw - c.end()) / c.length));
+                }
+                break;
+            }
         }
         s.clipBeat.store(clipBeat, std::memory_order_relaxed);
         s.clipPass.store(clipPass, std::memory_order_relaxed);
+        s.sourceClipId.store(sourceClipId, std::memory_order_relaxed);
     }
     m_fbBeat.store(m_beat, std::memory_order_relaxed);
     m_fbPlaying.store(m_playing || m_countIn > 0, std::memory_order_relaxed);
@@ -942,22 +995,24 @@ void Engine::adopt(RenderState* s) {
                 if (fresh.playingSlot < 0) fresh.pendingAllOff = true;   // its clip was deleted
                 else {
                     const ClipData& current = *td.slotClips[size_t(fresh.playingSlot)];
-                    if (previous && previous->warp != current.warp && current.sample && !current.comped() && !previous->comped()) {
+                    if (previous && previous->warp != current.warp && (current.sample || current.comped())) {
                         if (!current.warp) {
                             const double position = clipPositionAt(previous->start, previous->loopStart, previous->length,
                                 previous->loop, m_beat - fresh.slotStart);
                             const double sourceSeconds = previous->secondsAt(position);
-                            fresh.audioStartSeconds = m_playSeconds - (sourceSeconds - current.secondsAt(current.start));
+                            fresh.audioStartSeconds = m_playSeconds - (sourceSeconds - current.secondsAt(current.start)) / current.ratio;
                         } else {
-                            double seconds = previous->secondsAt(previous->start) + m_playSeconds - fresh.audioStartSeconds;
-                            const double from = previous->secondsAt(previous->loopStart);
-                            const double to = std::min(previous->secondsAt(previous->end()), previous->sample ? previous->sample->seconds() : seconds);
-                            if (previous->loop && to > from && seconds >= to) seconds = from + std::fmod(seconds - from, to - from);
+                            const double seconds = previous->wrapNative(previous->nativeSeconds(m_playSeconds - fresh.audioStartSeconds));
                             const double position = current.beatAt(seconds);
                             const double elapsed = current.loop && position < current.start
                                 ? current.end() - current.start + position - current.loopStart : position - current.start;
                             fresh.slotStart = m_beat - elapsed;
                         }
+                    } else if (previous && previous->native() && current.native() && previous->ratio != current.ratio) {
+                        // A pitch edit changes the future source rate, preserving the
+                        // position and complete loop count already reached.
+                        const double seconds = previous->nativeSeconds(m_playSeconds - fresh.audioStartSeconds);
+                        fresh.audioStartSeconds = m_playSeconds - (seconds - current.secondsAt(current.start)) / current.ratio;
                     }
                 }
             }
@@ -1004,10 +1059,14 @@ void Engine::apply(const Command& c) {
         m_playing = false;
         if (c.on) m_beat = 0;
         m_eventStart = -1;
-        for (PlayState& p : m_play) { p.playingSlot = -1; p.queuedSlot = -2; p.repeatSlot = -1; p.pendingAllOff = true; }
+        for (PlayState& p : m_play) {
+            p.playingSlot = -1; p.queuedSlot = -2; p.repeatSlot = -1; p.pendingAllOff = true;
+            if (c.on) p.arrangementClock = {}; // ordinary Stop/continue holds the reached native source phase
+        }
         break;
     case Command::Locate:
         m_beat = std::max(0.0, c.a);
+        for (PlayState& p : m_play) p.arrangementClock = {};
         m_eventStart = -1;
         // Stopped, a queued launch or stop is "as soon as the song plays": it moves with the playhead
         // (0.24: a launch queued where the song last stopped used to wait for that beat to come round).
@@ -1031,7 +1090,7 @@ void Engine::apply(const Command& c) {
         else if (ps->playingSlot == c.slot) {
             ps->slotStart = m_beat - c.a;
             const ClipData* clip = td && c.slot >= 0 && c.slot < int(td->slotClips.size()) ? td->slotClips[size_t(c.slot)].get() : nullptr;
-            if (clip) ps->audioStartSeconds = m_playSeconds - (clip->secondsAt(clip->start + c.a) - clip->secondsAt(clip->start));
+            if (clip) ps->audioStartSeconds = m_playSeconds - (clip->secondsAt(clip->start + c.a) - clip->secondsAt(clip->start)) / (clip->native() ? clip->ratio : 1.0);
         }
         break;
     case Command::StopTrack:
@@ -1133,8 +1192,8 @@ void Engine::scheduleTrack(const TrackData& td, PlayState& ps, double from, doub
         const ClipData* c = td.slotClips[size_t(ps.playingSlot)].get();
         if (c && c->followEnabled) {
             double at = ps.slotStart + (c->followTime > 0 ? c->followTime : c->firstPass());
-            if (td.audio && !c->warp && c->sample && !c->comped() && c->followTime <= 0) {
-                const double duration = std::min(c->secondsAt(c->end()), c->sample->seconds()) - c->secondsAt(c->start);
+            if (td.audio && c->native() && c->followTime <= 0) {
+                const double duration = (c->nativeEnd() - c->secondsAt(c->start)) / c->ratio;
                 at = b0 + (duration - (m_playSeconds - ps.audioStartSeconds)) * bps * m_sr;
             }
             if (at < b1) {
@@ -1164,13 +1223,9 @@ void Engine::scheduleTrack(const TrackData& td, PlayState& ps, double from, doub
     if (newClip && newClip->legato && oldClip && oldClip->length > 0) {
         // take over the old clip's position: the new one is at that clip beat now (before its own start marker is fine)
         double pos = clipPositionAt(oldClip->start, oldClip->loopStart, oldClip->length, oldClip->loop, switchAt - ps.slotStart);
-        if (!oldClip->warp && oldClip->sample && !oldClip->comped()) {
-            double seconds = oldClip->secondsAt(oldClip->start) + m_playSeconds
-                + (switchAt - b0) / (bps * m_sr) - ps.audioStartSeconds;
-            const double loopFrom = oldClip->secondsAt(oldClip->loopStart);
-            const double loopTo = std::min(oldClip->secondsAt(oldClip->end()), oldClip->sample->seconds());
-            if (oldClip->loop && loopTo > loopFrom && seconds >= loopTo)
-                seconds = loopFrom + std::fmod(seconds - loopFrom, loopTo - loopFrom);
+        if (oldClip->native()) {
+            const double seconds = oldClip->wrapNative(oldClip->nativeSeconds(m_playSeconds
+                + (switchAt - b0) / (bps * m_sr) - ps.audioStartSeconds));
             pos = oldClip->beatAt(seconds);
         }
         start = switchAt - (pos - newClip->start);
@@ -1183,9 +1238,9 @@ void Engine::scheduleTrack(const TrackData& td, PlayState& ps, double from, doub
         if (newClip->legato && oldClip) {
             const double clipBeat = newClip->start + switchAt - start;
             ps.audioStartSeconds = m_playSeconds + (switchAt - b0) * secPerBeat
-                - (newClip->secondsAt(clipBeat) - newClip->secondsAt(newClip->start));
+                - (newClip->secondsAt(clipBeat) - newClip->secondsAt(newClip->start)) / (newClip->native() ? newClip->ratio : 1.0);
         }
-        if (ps.hasSeek) ps.audioStartSeconds -= newClip->secondsAt(newClip->start + ps.seekBeat) - newClip->secondsAt(newClip->start);
+        if (ps.hasSeek) ps.audioStartSeconds -= (newClip->secondsAt(newClip->start + ps.seekBeat) - newClip->secondsAt(newClip->start)) / (newClip->native() ? newClip->ratio : 1.0);
     }
     ps.slotStart = start - (ps.hasSeek && newClip ? ps.seekBeat : 0.0);   // a seek that came with the launch: the clip starts part-way
     ps.hasSeek = false;
@@ -1197,6 +1252,7 @@ void Engine::scheduleTrack(const TrackData& td, PlayState& ps, double from, doub
 void Engine::emitSource(const TrackData& td, PlayState& ps, double from, double to, double b0, double bps, int n, EventList& ev) {
     if (to <= from) return;
     if (ps.playingSlot >= 0) {
+        ps.arrangementClock = {};
         const ClipData* c = ps.playingSlot < int(td.slotClips.size()) ? td.slotClips[size_t(ps.playingSlot)].get() : nullptr;
         if (!c) {   // the clip was deleted while playing
             ps.playingSlot = -1;
@@ -1204,13 +1260,13 @@ void Engine::emitSource(const TrackData& td, PlayState& ps, double from, double 
             return;
         }
         const double once = std::max(0.0, c->end() - c->start);   // Loop off: from the start marker to the end marker
-        const bool natural = td.audio && !c->warp && c->sample && !c->comped();
+        const bool natural = td.audio && c->native();
         const double secPerBeat = 1.0 / (bps * m_sr);
         double endAt = ps.slotStart + once;
         if (natural) {
-            const double sourceEnd = std::min(c->secondsAt(c->end()), c->sample->seconds());
+            const double sourceEnd = c->nativeEnd();
             const double elapsed = m_playSeconds - ps.audioStartSeconds;
-            endAt = b0 + (sourceEnd - c->secondsAt(c->start) - elapsed) / secPerBeat;
+            endAt = b0 + ((sourceEnd - c->secondsAt(c->start)) / c->ratio - elapsed) / secPerBeat;
         }
         if (td.audio) {   // ends at a queued switch or stop, which is known ahead of time (fade before it)
             const double hi = std::min(ps.queuedSlot != -2 ? ps.queuedAt : kNoLimit, c->loop ? kNoLimit : endAt);
@@ -1219,8 +1275,8 @@ void Engine::emitSource(const TrackData& td, PlayState& ps, double from, double 
             if (natural && m_segCount > segment) {
                 AudioSeg& g = m_segs[segment];
                 g.natural = true;
-                g.naturalAtFrom = c->secondsAt(c->start) + m_playSeconds
-                    + (g.from - b0) * secPerBeat - ps.audioStartSeconds;
+                g.naturalAtFrom = c->nativeSeconds(m_playSeconds
+                    + (g.from - b0) * secPerBeat - ps.audioStartSeconds);
             }
         } else {
             emitClip(*c, ps.slotStart, c->start, -kNoLimit, kNoLimit, from, to, b0, bps, n, ev, m_rng);
@@ -1230,8 +1286,37 @@ void Engine::emitSource(const TrackData& td, PlayState& ps, double from, double 
         for (const Placement& p : td.arrangement) {   // a placement's first pass starts at its offset
             if (p.start >= to) break;
             if (!p.clip || p.start + p.length <= from) continue;
-            if (td.audio) addSegment(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to, p.fadeIn, p.fadeOut, p.fadeInCurve, p.fadeOutCurve);
-            else emitClip(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to, b0, bps, n, ev, m_rng);
+            if (td.audio) {
+                const int segment = m_segCount;
+                addSegment(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to, p.fadeIn, p.fadeOut, p.fadeInCurve, p.fadeOutCurve);
+                if (m_segCount > segment) {
+                    AudioSeg& g = m_segs[segment];
+                    const ClipData& c = *p.clip;
+                    auto& clock = ps.arrangementClock;
+                    const bool continuous = clock.clipId == c.id && clock.origin == p.start && clock.offset == p.offset
+                        && std::abs(clock.nextBeat - g.from) < 1e-7;
+                    if (!continuous) clock.start = p.offset;
+                    if (c.native()) {
+                        g.natural = true;
+                        g.naturalAtFrom = continuous ? clock.nextSeconds
+                            : c.secondsAt(p.offset) + (g.from - p.start) / (bps * m_sr) * c.ratio;
+                    } else {
+                        if (continuous && !clock.warp)
+                            clock.start = c.beatAt(c.wrapNative(clock.nextSeconds)) - (g.from - p.start);
+                        g.start = clock.start;
+                    }
+                    clock.clipId = c.id;
+                    clock.origin = p.start;
+                    clock.offset = p.offset;
+                    clock.fromBeat = g.from;
+                    clock.fromSeconds = g.natural ? g.naturalAtFrom
+                        : c.secondsAt(clipPositionAt(g.start, c.loopStart, c.length, c.loop, g.from - p.start));
+                    clock.nextBeat = g.to;
+                    clock.nextSeconds = g.natural ? g.naturalAtFrom + (g.to - g.from) / (bps * m_sr) * c.ratio
+                        : c.secondsAt(clipPositionAt(g.start, c.loopStart, c.length, c.loop, g.to - p.start));
+                    clock.warp = c.warp;
+                }
+            } else emitClip(*p.clip, p.start, p.offset, p.start, p.start + p.length, from, to, b0, bps, n, ev, m_rng);
         }
     }
 }
@@ -1295,7 +1380,7 @@ void Engine::renderAudio(int trackId, double b0, double bps, double tempo, int n
         const SampleData& smp = c.sample ? *c.sample : *c.takeSamples.front();   // (a comped clip reads its takes instead)
         const double readStep = c.warp && c.repitch
             ? (c.secondsAt(1) - c.secondsAt(0)) * bps * smp.rate
-            : smp.rate / rate * (c.warp ? c.ratio : 1.0);
+            : smp.rate / rate * c.ratio;
         const auto readPlan = resample::plan(readStep);
         const double Lc = c.length, loopEnd = c.end(), firstPass = loopEnd - g.start;   // beats of the first pass: from the start marker to the end marker
         // the stretching modes: this placement's Stretcher, fed a sample at a time
@@ -1312,10 +1397,10 @@ void Engine::renderAudio(int trackId, double b0, double bps, double tempo, int n
             const double sinceLaunch = b - g.origin;
             if (Lc <= 0) continue;
             // the clip beat playing now: the first pass from the start marker, then round the brace (a seek may sit before the start marker)
-            const double naturalRaw = g.natural ? g.naturalAtFrom + (b - g.from) * secPerBeat : 0;
+            const double naturalRaw = g.natural ? g.naturalAtFrom + (b - g.from) * secPerBeat * c.ratio : 0;
             double naturalPosition = naturalRaw;
             const double naturalLoopStart = g.natural ? c.secondsAt(c.loopStart) : 0;
-            const double naturalLoopEnd = g.natural ? std::min(c.secondsAt(loopEnd), smp.seconds()) : 0;
+            const double naturalLoopEnd = g.natural ? c.nativeEnd() : 0;
             if (g.natural && c.loop && naturalPosition >= naturalLoopEnd) {
                 const double span = naturalLoopEnd - naturalLoopStart;
                 if (span <= 0) continue;
@@ -1329,8 +1414,8 @@ void Engine::renderAudio(int trackId, double b0, double bps, double tempo, int n
             double fade = std::min({1.0, sinceStart / edgeIn, (g.hi - b) / edge});
             if (c.loop) {
                 if (g.natural) {
-                    fade = std::min(fade, (naturalLoopEnd - naturalPosition) / kEdgeFade);
-                    if (naturalRaw >= naturalLoopEnd) fade = std::min(fade, (naturalPosition - naturalLoopStart + 1.0 / rate) / kEdgeIn);
+                    fade = std::min(fade, (naturalLoopEnd - naturalPosition) / (kEdgeFade * c.ratio));
+                    if (naturalRaw >= naturalLoopEnd) fade = std::min(fade, ((naturalPosition - naturalLoopStart) / c.ratio + 1.0 / rate) / kEdgeIn);
                 } else {
                     fade = std::min(fade, (loopEnd - local) / edge);
                     if (sinceLaunch >= firstPass) fade = std::min(fade, (local - c.loopStart + bps) / edgeIn);   // after a wrap, not while running into the brace
@@ -1361,9 +1446,9 @@ void Engine::renderAudio(int trackId, double b0, double bps, double tempo, int n
 
             double t, tailOther = 0, tailBlend = 0;   // seconds into the sample
             if (!c.warp) {
-                // Warp off: the file's own speed from the first marker, whatever the tempo
+                // Warp off: native source time; pitch changes its rate, independently of tempo.
                 t = g.natural ? naturalPosition
-                    : (c.markers.empty() ? 0.0 : c.markers.front().seconds) + local * secPerBeat;
+                    : (c.markers.empty() ? 0.0 : c.markers.front().seconds) + local * secPerBeat * c.ratio;
             } else if (c.repitch) {
                 t = c.secondsAt(local);
             } else {
@@ -1443,7 +1528,9 @@ void Engine::renderComp(const ClipData& c, double local, double fade, double sec
         const SampleData* ts = c.takeSamples[size_t(take)].get();
         if (!ts) return;
         const double start = c.takeStart[size_t(take)];
-        const double sec = c.warp ? c.secondsAt(local) - c.secondsAt(start) : (local - start) * secPerBeat;
+        // Native playback has already advanced `local` at the selected pitch's
+        // source rate. Its comp boundaries and take offsets share that map.
+        const double sec = c.secondsAt(local) - c.secondsAt(start);
         if (sec < 0) return;
         const double pos = sec * ts->rate;
         l = readCubic(ts->left, pos);
@@ -1482,16 +1569,23 @@ void Engine::clipOverrides(const TrackData& td, const PlayState& ps, double b0) 
     if (ps.playingSlot >= 0 && ps.playingSlot < int(td.slotClips.size())) {
         c = td.slotClips[size_t(ps.playingSlot)].get();
         if (c) local = clipPositionAt(c->start, c->loopStart, c->length, c->loop, b0 - ps.slotStart);
-        if (c && td.audio && !c->warp && c->sample && !c->comped()) {
-            double seconds = c->secondsAt(c->start) + m_playSeconds - ps.audioStartSeconds;
-            const double from = c->secondsAt(c->loopStart), to = std::min(c->secondsAt(c->end()), c->sample->seconds());
-            if (c->loop && to > from && seconds >= to) seconds = from + std::fmod(seconds - from, to - from);
-            local = c->beatAt(seconds);
+        if (c && td.audio && c->native()) {
+            local = c->beatAt(c->wrapNative(c->nativeSeconds(m_playSeconds - ps.audioStartSeconds)));
         }
     } else if (!ps.overridden) {
         for (const Placement& p : td.arrangement) {
             if (p.start > b0) break;
-            if (p.clip && b0 < p.start + p.length) { c = p.clip.get(); local = clipPositionAt(p.offset, c->loopStart, c->length, c->loop, b0 - p.start); }
+            if (p.clip && b0 < p.start + p.length) {
+                c = p.clip.get();
+                const auto& clock = ps.arrangementClock;
+                if (clock.clipId == c->id && clock.origin == p.start) {
+                    local = c->native() ? c->beatAt(c->wrapNative(clock.fromSeconds + (b0 - clock.fromBeat) * 60.0 / m_state->tempo * c->ratio))
+                        : clipPositionAt(clock.start, c->loopStart, c->length, c->loop, b0 - p.start);
+                } else {
+                    local = c->native() ? c->beatAt(c->wrapNative(c->secondsAt(p.offset) + (b0 - p.start) * 60.0 / m_state->tempo * c->ratio))
+                        : clipPositionAt(p.offset, c->loopStart, c->length, c->loop, b0 - p.start);
+                }
+            }
         }
     }
     if (!c || c->envs.empty() || local < 0 || (!c->loop && local >= c->end())) return;
@@ -1566,6 +1660,7 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             dctx.pads = d.pads;
             dctx.ir = d.ir.get();
             dctx.nam = d.nam.get();
+            dctx.drumContent = d.drumContent.get();
             dctx.mods = d.mods.data();
             dctx.modCount = int(d.mods.size());
             dctx.curves = d.curves;

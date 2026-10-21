@@ -30,6 +30,7 @@ enum class DeviceType {
     Arpeggiator, Chord, Scale, Velocity, MidiEffectRack,
     Osmium,
     DrumBuss, // appended: existing device enum values remain stable
+    StereoWidth,
 };
 
 // Drum Buss: fixed indices shared by the processor and compact panel.
@@ -145,12 +146,24 @@ QString     sectionName(int param);   // "Osc 1", "Filter 2", "Env 3", … for m
 // The modulation routes a Sound (preset) of the Monolith comes with.
 const std::vector<ModRoute>& presetMods(const QString& name);
 
-// Osmium shares Monolith's parameter/source indices and adds independent ADSR segment bends.
+// Osmium preserves the original Monolith indices and appends its own controls.
 namespace osmium {
 constexpr int kCurvePoints = 257; // 256 drawing intervals plus the final endpoint.
 constexpr int kEnvBendBase = monolith::kParams;
 constexpr int bend(int env, int segment) { return kEnvBendBase + env * 3 + segment; }
-constexpr int kParams = kEnvBendBase + monolith::kEnvs * 3;
+constexpr int kLegacyParams = kEnvBendBase + monolith::kEnvs * 3; // 182, through 0.38
+constexpr int kLegacyWavetableCount = 8, kWavetableCount = 48;
+constexpr int kTableExtensionBase = kLegacyParams;
+constexpr int tableExtension(int osc) { return kTableExtensionBase + osc; }
+constexpr int kWarpExtensionBase = kTableExtensionBase + monolith::kOscs;
+constexpr int warpExtension(int osc) { return kWarpExtensionBase + osc; }
+constexpr int kFoldBase = kWarpExtensionBase + monolith::kOscs;
+constexpr int fold(int osc) { return kFoldBase + osc; }
+constexpr int kParams = kFoldBase + monolith::kOscs; // 191: fits the existing audio parameter capacity
+// Extension zero retains the original normalized 8-table / 3-warp selectors,
+// including their automation and modulation. New choices never renumber old ones.
+int tableIndex(double legacyPosition, double extensionPosition);
+int warpMode(double legacyPosition, double extensionPosition); // Bend/Formant/Sync/Phase/Fold/Asym/Steps/Cross FM
 }
 
 // Sampler (reworked in 0.32, after the classic three-mode sampler): one sample, played in one of
@@ -249,8 +262,12 @@ constexpr int kHeads = 5, kCabs = 7, kLoadedIr = 6;
 // with a cabinet IR slot after it (Device::samplePath / sample, like the amp's Loaded IR).
 // Normalize brings the capture's loudness metadata to kNormalizeTargetDb, as the NAM plugin does.
 namespace namdev {
-enum Param { Input, Output, Mix, Gate, Normalize, Ir, IrMix, Quality, kParams };   // Quality: Full / Light, for captures that hold two sizes
+enum Param { Input, Output, Mix, Gate, Normalize, Ir, IrMix, Quality, Bass, Mid, Treble, Presence, kParams };
 constexpr double kNormalizeTargetDb = -18;
+}
+
+namespace stereowidth {
+enum Param { Width, MonoBass, BassCutoff, Spread, Delay, Output, Mix, Monitor, kParams };
 }
 
 // Cabinet (0.19): an impulse response on its own, for anything (a NAM without its speaker, a
@@ -280,7 +297,18 @@ constexpr int param(int drum, int knob) { return kGlobals + drum * kPerDrum + kn
 constexpr int kBaseParams = kGlobals + kDrums * kPerDrum; // original 50 indices preserved
 constexpr int mute(int drum) { return kBaseParams + drum; }
 constexpr int solo(int drum) { return kBaseParams + kDrums + drum; }
-constexpr int kParams = kBaseParams + kDrums * 2; // 66
+constexpr int kLegacyParams = kBaseParams + kDrums * 2; // original 66 indices preserved
+enum PieceControl { Present, Source, StageX, StageY, MicModel, MicDistance, MicAngle, kPerPiece };
+constexpr int piece(int drum, int control) { return kLegacyParams + drum * kPerPiece + control; }
+enum StudioControl { OhModel = kLegacyParams + kDrums * kPerPiece, OhHeight, RoomModel, RoomDistance, k040Params, ContentLibrary = k040Params };
+constexpr int contentSource(int drum) { return ContentLibrary + 1 + drum; }
+constexpr int recordedMic(int drum) { return ContentLibrary + 1 + kDrums + drum; }
+constexpr int kParams = ContentLibrary + 1 + kDrums * 2;
+constexpr int kContentPacks = 6;
+inline constexpr double stageX[kDrums] = {.50, .30, .12, .40, .60, .80, .85, .17};
+inline constexpr double stageY[kDrums] = {.70, .58, .47, .30, .29, .57, .23, .19};
+inline constexpr double stageRadius[kDrums] = {.17, .112, .10, .095, .105, .13, .135, .12};
+constexpr int kMicModels = 4; // Recording (bypass), Dynamic, Condenser, Ribbon; tonal models
 const char* drumName(int drum);     // "Kick", "Snare", "Hi-Hat", "Tom 1", "Tom 2", "Floor Tom", "Ride", "Crash"
 const char* kitName(int kit);       // "Studio Rock", "Vintage", "Tight Pop", "Metal", "Jazz", "Big Room"
 int  drumFor(int pitch);            // which Drum a note plays (-1: none)

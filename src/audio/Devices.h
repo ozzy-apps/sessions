@@ -17,11 +17,12 @@
 namespace sessions { struct SampleData; using SamplePtr = std::shared_ptr<const SampleData>; }
 namespace sessions::audio { struct IrKernel; }
 namespace sessions::nam { class Runtime; }
+namespace sessions::audio::drums { struct Content; }
 
 namespace sessions::audio {
 
 constexpr int kMaxBlock  = 128;   // the engine renders in chunks of at most this many frames
-constexpr int kMaxParams = 192;   // knobs per device the engine passes on (a Drum Rack has 82, Monolith 162)
+constexpr int kMaxParams = 192;   // knobs per device; Osmium uses 191, Monolith 170
 constexpr int kMaxEvents = 256;
 constexpr int kHeld      = 1 << 30;   // duration of a live note: until its noteOff
 
@@ -67,6 +68,7 @@ struct Context {
     unsigned padSample = ~0u, padPlay = ~0u;
     const IrKernel* ir = nullptr;         // Guitar Amp: its loaded impulse response, ready to convolve
     nam::Runtime*   nam = nullptr;        // NAM: its capture's network, prepared by the engine (null: no capture, plays dry)
+    const drums::Content* drumContent = nullptr;
     // Sidechain (Compressor, Gate, Auto Filter): another track's audio for this block, the
     // detector's key. nullptr: the device listens to its own input.
     const float* keyL = nullptr;
@@ -152,6 +154,8 @@ float pedalTransfer(DeviceType type, const float* params, float x);             
 float phaserResponseDb(float coef, float freq, float sampleRate);                            // the Phase Pedal's notches at an all-pass coefficient (its meter[2])
 int   scaleMap(const float* params, int pitch);                           // Scale: where a note goes
 float monolithWarpPhase(int mode, float phase, float intensity);           // Monolith: an oscillator's Bend / Formant / Sync warp
+float osmiumWarpPhase(int mode, float phase, float intensity);             // extended phase shapes; Cross FM applies its modulator in the processor
+float osmiumFold(float sample, float amount);                             // instantaneous wavefold curve for the visual editor
 float monolithFilterQ(int type, float reso);                               // Monolith: a filter's Q from its Reso knob
 
 } // namespace sessions::audio

@@ -1,6 +1,6 @@
 # Akai APC Key 25 (2014) and APC Key 25 mk2
 
-Sessions 0.40 has a built-in profile for both APC Key 25 models. The pads launch Session clips, the buttons work the way they're printed, and the pads light up to show the clips. The keys play the armed (or selected) track as before. Sessions finds the controller by its port name; there is nothing to install.
+Sessions 0.45 has a built-in profile for both APC Key 25 models. The pads launch Session clips, the buttons work the way they're printed, and the pads light up to show the clips. The keys play the armed (or selected) track as before. Sessions finds the controller by its port name; there is nothing to install.
 
 ## Setup
 

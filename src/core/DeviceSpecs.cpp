@@ -1,6 +1,7 @@
 #include "DeviceSpecs.h"
 #include "Scales.h"
 #include "OsmiumPresets.h"
+#include "audio/Wavetables.h"
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -97,6 +98,32 @@ std::vector<ParamSpec> drumStudioParams() {
         p.push_back(pct(name(4), 0.5));
     }
     for (const auto& name : switches) p.push_back(onOff(name.c_str(), false));
+    static std::vector<std::string> extra;
+    if (extra.empty()) {
+        extra.reserve(kDrums * kPerPiece);
+        for (int d = 0; d < kDrums; ++d)
+            for (const char* suffix : {" Present", " Source", " Position X", " Position Y", " Mic Model", " Mic Distance (cm)", " Mic Angle"})
+                extra.push_back(std::string(drumName(d)) + suffix);
+    }
+    for (int d = 0; d < kDrums; ++d) {
+        auto n = [&](int c) { return extra[size_t(d * kPerPiece + c)].c_str(); };
+        p.push_back(onOff(n(Present), true));
+        p.push_back(pick(n(Source), {"Kit recording", "Black Pearl", "Red Zeppelin", "Blonde Bop"}, 0));
+        p.push_back(pct(n(StageX), stageX[d])); p.push_back(pct(n(StageY), stageY[d]));
+        p.push_back(pick(n(MicModel), {"Recording", "Dynamic", "Condenser", "Ribbon"}, 0));
+        p.push_back(lin(n(MicDistance), 0, 100, .1, U::None));
+        p.push_back(lin(n(MicAngle), 0, 90, 0, U::Degrees));
+    }
+    p.push_back(pick("Overhead Model", {"Recording", "Dynamic", "Condenser", "Ribbon"}, 0));
+    p.push_back(lin("Overhead Height (m)", .5, 3, .4, U::None)); // 1.5 m
+    p.push_back(pick("Room Model", {"Recording", "Dynamic", "Condenser", "Ribbon"}, 0));
+    p.push_back(lin("Room Distance (m)", 1, 8, 2. / 7., U::None)); // 3 m
+    const std::vector<const char*> content = {"Kit recipe", "Big Rusty Drums", "Swirly Drums", "Frankensnare", "DRSKit", "Naked Drums", "MuldjordKit"};
+    p.push_back(pick("Library", content, 0));
+    static std::vector<std::string> contentNames, micNames;
+    if(contentNames.empty()) for(int d=0;d<kDrums;++d){contentNames.push_back(std::string(drumName(d))+" Library");micNames.push_back(std::string(drumName(d))+" Recorded Mic");}
+    for(int d=0;d<kDrums;++d)p.push_back(pick(contentNames[size_t(d)].c_str(),{"Follow library","Original source","Big Rusty Drums","Swirly Drums","Frankensnare","DRSKit","Naked Drums","MuldjordKit"},0));
+    for(int d=0;d<kDrums;++d)p.push_back(pick(micNames[size_t(d)].c_str(),{"Primary","Alternate"},0));
     return p;
 }
 
@@ -413,6 +440,15 @@ std::vector<DeviceSpec> build() {
                              "Env3 Attack Bend", "Env3 Decay Bend", "Env3 Release Bend",
                              "Env4 Attack Bend", "Env4 Decay Bend", "Env4 Release Bend"})
         osmiumParams.push_back(lin(name, -1, 1, 0.5, U::None));
+    std::vector<const char*> expandedTables = {"Legacy"};
+    for (int i = osmium::kLegacyWavetableCount; i < osmium::kWavetableCount; ++i)
+        expandedTables.push_back(audio::wavetable(i).name);
+    for (const char* name : {"Osc1 Table Bank", "Osc2 Table Bank", "Osc3 Table Bank"})
+        osmiumParams.push_back(pick(name, expandedTables, 0));
+    for (const char* name : {"Osc1 Warp Shape", "Osc2 Warp Shape", "Osc3 Warp Shape"})
+        osmiumParams.push_back(pick(name, {"Legacy", "Phase", "Fold", "Asym", "Steps", "Cross FM"}, 0));
+    for (const char* name : {"Osc1 Fold", "Osc2 Fold", "Osc3 Fold"})
+        osmiumParams.push_back(pct(name, 0));
     std::vector<DeviceSpec> s = {
         // ---------------------------------------------------------------- instruments
         {"Instrument Rack", T::InstrumentRack, K::Instrument, rackParams(),
@@ -492,9 +528,10 @@ std::vector<DeviceSpec> build() {
             expo("Glide", 0.001, 0.5, ne(0.06, 0.001, 0.5), U::Seconds), pct("Sub", 0.3), pct("Drive", 0.3), volume()},
          "A monophonic bass synth: notes that overlap slide into each other, hard-played notes get an accent. Ready-made: Acid Line and Square Bass in Browser → Sounds."},
         {"Osmium", T::Osmium, K::Instrument, osmiumParams,
-         "Three wavetable oscillators, dual filters and a visual modulation workspace. Open Editor for draggable green modulation ranges, "
+         "Three oscillators with 48 morphing wavetables, cross-oscillator FM, phase shaping and individual wavefolders, dual filters and a visual modulation workspace. "
+         "Open Editor for draggable accent modulation ranges, "
          "four envelopes with independent segment bends, four LFOs, two curved phrase editors, two step sequencers and eight macros. "
-         "Select a source and click a knob's + slot, or drag a source onto it. Drag its green ring to set the range."},
+         "Select a source and click a knob's + slot, or drag a source onto it. Drag its outer ring to set the range."},
         {"Monolith", T::Monolith, K::Instrument, monoParams,
          "The big synth, for meaty, growling basses and much more: three wavetable oscillators (Bend / Formant / Sync warping), a sub oscillator, a modulation oscillator, noise and "
          "feedback into two driven filters (Scream for growl), an insert drive, four envelopes, two LFOs (loop or one-shot), two step sequencers, four macros, "
@@ -624,9 +661,16 @@ std::vector<DeviceSpec> build() {
          "A wah: map Pedal to an expression pedal (MIDI Map), or set Mode to Auto and let your picking open it."},
         {"NAM", T::Nam, K::AudioEffect, {
             lin("Input", -24, 24, 0.5, U::Db), lin("Output", -24, 12, nl(0, -24, 12), U::Db), pct("Mix", 1), lin("Gate", -90, -30, 0, U::Db),
-            onOff("Normalize", false), onOff("IR", true), pct("IR Mix", 1), pick("Quality", {"Full", "Light"}, 0)},
+            onOff("Normalize", false), onOff("IR", true), pct("IR Mix", 1), pick("Quality", {"Full", "Light"}, 0),
+            lin("Bass", -12, 12, .5, U::Db), lin("Mid", -12, 12, .5, U::Db),
+            lin("Treble", -12, 12, .5, U::Db), lin("Presence", -12, 12, .5, U::Db)},
          "Neural Amp Modeler: plays a .nam capture of a real amp or pedal (from ToneHunt and the like) through its neural network. "
          "Drop a capture on it or press Load. Many captures are amp-only: load a cabinet IR in its IR slot."},
+        {"Stereo Width", T::StereoWidth, K::AudioEffect, {
+            lin("Width", 0, 2, .5, U::Percent), onOff("Mono Bass", false), expo("Bass Below", 40, 500, ne(140,40,500), U::Hz),
+            pct("Mono Spread", 0), lin("Spread Delay", 2, 25, nl(9,2,25), U::Ms), lin("Output", -18, 6, nl(0,-18,6), U::Db),
+            pct("Mix", 1), pick("Monitor", {"Stereo", "Mono", "Side"}, 0)},
+         "Mid/side stereo width with mono bass protection, optional mono-source spreading, correlation and mono monitoring. The stereo mid signal is preserved at unity output."},
         {"Cabinet", T::Cabinet, K::AudioEffect, {
             onOff("IR", true), pct("Mix", 1), lin("Gain", -24, 12, nl(0, -24, 12), U::Db),
             expo("Low Cut", 20, 1000, 0, U::Hz), expo("High Cut", 1000, 20000, 1, U::Hz)},
@@ -704,6 +748,9 @@ std::vector<DeviceSpec> build() {
         for (int i = 0; i < osmium::kParams; ++i) copy.params[size_t(i)].def = patch.values[size_t(i)];
         s.push_back(std::move(copy));
     }
+    const DeviceSpec drumBase=*std::find_if(s.begin(),s.end(),[](const DeviceSpec& spec){return spec.type==T::DrumStudio;});
+    const char* packNames[]={"Big Rusty Drums","Swirly Drums","Frankensnare","DRSKit","Naked Drums","MuldjordKit"};
+    for(int i=0;i<6;++i){DeviceSpec copy=drumBase;copy.name=packNames[i];copy.params[drumstudio::ContentLibrary].def=choicePosition(i+1,7);s.push_back(std::move(copy));}
     return s;
 }
 
@@ -731,6 +778,10 @@ const char* sourceName(int s) {
 }
 bool sourceBipolar(int s) { return (s >= SrcLfo1 && s <= SrcStep2) || s == SrcKey || s == SrcRandom || s == SrcBend || s == SrcLfo3 || s == SrcLfo4; }
 QString sectionName(int i) {
+    if (i >= osmium::kFoldBase && i < osmium::kParams) return QString("Osc %1").arg(i - osmium::kFoldBase + 1);
+    if (i >= osmium::kWarpExtensionBase && i < osmium::kFoldBase) return QString("Osc %1").arg(i - osmium::kWarpExtensionBase + 1);
+    if (i >= osmium::kTableExtensionBase && i < osmium::kWarpExtensionBase) return QString("Osc %1").arg(i - osmium::kTableExtensionBase + 1);
+    if (i >= osmium::kEnvBendBase && i < osmium::kLegacyParams) return QString("Env %1").arg((i - osmium::kEnvBendBase) / 3 + 1);
     if (i < kGlobals) return "Voice";
     if (i < ModPitch) return QString("Osc %1").arg((i - kOscBase) / kPerOsc + 1);
     if (i <= ModRing) return "Mod Osc";
@@ -759,6 +810,18 @@ QString sectionName(int i) {
     if (i < kEnvLoopBase) return QString("Env %1").arg(i - kEnvCurveBase + 1);
     if (i < kCurveBase) return QString("Env %1").arg(i - kEnvLoopBase + 1);
     return QString("Curve %1").arg((i - kCurveBase) / kPerCurve + 1);
+}
+}
+
+namespace osmium {
+int tableIndex(double legacyPosition, double extensionPosition) {
+    const int extension = int(std::lround(std::clamp(extensionPosition, 0.0, 1.0) * (kWavetableCount - kLegacyWavetableCount)));
+    return extension ? kLegacyWavetableCount - 1 + extension
+                     : int(std::lround(std::clamp(legacyPosition, 0.0, 1.0) * (kLegacyWavetableCount - 1)));
+}
+int warpMode(double legacyPosition, double extensionPosition) {
+    const int extension = int(std::lround(std::clamp(extensionPosition, 0.0, 1.0) * 5));
+    return extension ? 2 + extension : int(std::lround(std::clamp(legacyPosition, 0.0, 1.0) * 2));
 }
 }
 

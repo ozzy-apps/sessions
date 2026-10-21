@@ -1,2 +1,5 @@
 build/
 dist/
+
+# Downloaded drum audio ships as a separate content package; mappings/licenses stay tracked.
+content/drums/audio/

@@ -2,6 +2,7 @@
 #include "InfoView.h"
 #include "GridShade.h"
 #include "Preferences.h"
+#include "TempoActions.h"
 #include "core/Model.h"
 #include "core/Theme.h"
 #include "core/Transport.h"
@@ -318,7 +319,10 @@ void SampleEditor::paintEvent(QPaintEvent*) {
     // name and tempo, top right
     p.setFont(font());
     p.setPen(theme::textFaint);
-    const QString source = m_clip->detectedBpm > 0 ? QString("Source %1 BPM").arg(m_clip->sampleBpm(), 0, 'f', 2) : QString("Source BPM unknown");
+    const QString range = sourceTempoRange(*m_clip);
+    const QString source = m_clip->detectedBpm > 0
+        ? (range.isEmpty() ? QString("Source %1 BPM").arg(m_clip->sampleBpm(), 0, 'f', 2) : QString("Source %1 BPM").arg(range))
+        : QString("Source BPM unknown");
     const QString info = recording ? QString() : QString("%1   ·   %2   ·   %3")
         .arg(QFileInfo(m_clip->samplePath).fileName())
         .arg(source)
@@ -696,6 +700,7 @@ void SampleEditor::contextMenuEvent(QContextMenuEvent* e) {
     menu.addSeparator();
     menu.addAction("Reset Warp Markers (Sync to Set)", this, [this] { m_project->syncClipToTempo(m_clip); m_userZoomed = false; fit(); update(); })
         ->setEnabled(m_clip->sample && m_clip->takes.isEmpty());
+    addSourceTempoActions(menu, m_project, m_clip, [this] { m_userZoomed = false; fit(); update(); });
     menu.addAction(m_clip->reverse ? "Play Forwards" : "Reverse", this, [this] {
         EditScope edit(m_project, "Reverse");
         m_clip->reverse = !m_clip->reverse;

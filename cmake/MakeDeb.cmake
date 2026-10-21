@@ -14,7 +14,7 @@ set(stage "${BUILD_DIR}/deb-stage")
 # 1. Install into a staging root.
 file(REMOVE_RECURSE "${stage}")
 execute_process(
-    COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${stage} ${CMAKE_COMMAND} --install ${BUILD_DIR} --prefix /usr --strip
+    COMMAND ${CMAKE_COMMAND} -E env DESTDIR=${stage} ${CMAKE_COMMAND} --install ${BUILD_DIR} --prefix /usr --strip --component Runtime
     OUTPUT_QUIET RESULT_VARIABLE rv)
 if(NOT rv EQUAL 0)
     message(FATAL_ERROR "MakeDeb: install step failed")

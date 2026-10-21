@@ -1,5 +1,8 @@
 #include "Model.h"
 #include "Tempo.h"
+#include "BeatGrid.h"
+#include "Import.h"
+#include "WarpPreferences.h"
 #include <functional>
 #include "DeviceSpecs.h"
 #include "OsmiumPresets.h"
@@ -32,7 +35,9 @@ static bool operator==(const Clip& a, const Clip& b) {
         && a.samplePath == b.samplePath && a.warpMode == b.warpMode && a.warpMarkers == b.warpMarkers
         && a.gain == b.gain && a.transpose == b.transpose && a.detune == b.detune && a.reverse == b.reverse
         && a.grainMs == b.grainMs && a.flux == b.flux && a.formants == b.formants
-        && a.warp == b.warp && a.grain == b.grain && a.beatsTail == b.beatsTail && a.envelopes == b.envelopes && a.detectedBpm == b.detectedBpm;
+        && a.warp == b.warp && a.grain == b.grain && a.beatsTail == b.beatsTail && a.envelopes == b.envelopes && a.detectedBpm == b.detectedBpm
+        && a.sourceTempoOrigin == b.sourceTempoOrigin && a.sourceTempoConfidence == b.sourceTempoConfidence
+        && a.sourceTempoMapFingerprint == b.sourceTempoMapFingerprint;
 }
 static bool operator==(const DeviceParam& a, const DeviceParam& b) { return a.name == b.name && a.value == b.value; }
 static bool operator==(const DrumPad& a, const DrumPad& b) { return a.name == b.name && a.samplePath == b.samplePath; }
@@ -272,17 +277,29 @@ ClipPtr Project::newClip(const QString& name, double length) {
 
 // The file's source beat grid is independent of the project's playback tempo.
 // Warp then maps those source beats onto the project's clock.
-ClipPtr Project::newAudioClip(const QString& path, const SamplePtr& sample) {
+ClipPtr Project::newAudioClip(const QString& path, const SamplePtr& sample, bool trackTiming) {
     const double secs = sample && sample->seconds() > 0 ? sample->seconds() : 1.0;
     const tempo::Sync s = sample ? tempo::syncTo(*sample, tempo, 0, path) : tempo::Sync{secs * tempo / 60.0, false, 0};
     ClipPtr c = newClip(QFileInfo(path).completeBaseName(), s.beats);
     c->samplePath = QFileInfo(path).absoluteFilePath();
     c->sample = sample;
+    c->warpMode = clipsettings::defaultWarpMode();
     c->loop = s.loop;
     c->warp = s.detected > 0;
     c->detectedBpm = s.detected;
+    c->sourceTempoOrigin = s.fromMetadata ? SourceTempoOrigin::Metadata : s.detected > 0 ? SourceTempoOrigin::Detected : SourceTempoOrigin::Unknown;
+    c->sourceTempoConfidence = s.confidence;
     c->beatsTail = 1;   // preserve attacks while filling stretched drum tails; old sets retain Gate
     c->warpMarkers = {{0, 0}, {s.beats, secs}};
+    if (trackTiming && sample && secs >= 30 && s.detected > 0 && !s.fromMetadata) {
+        const auto grid = tempo::trackGrid(*sample, s.detected);
+        if (grid.variable && grid.points.size() >= 2) {
+            c->warpMarkers.clear();
+            for (const auto& point : grid.points) c->warpMarkers.push_back({point.beat, point.seconds});
+            c->length = c->warpMarkers.last().beat;
+        }
+    }
+    import::rememberAutomaticSourceMap(*c);
     return c;
 }
 
@@ -297,24 +314,138 @@ QVector<ClipPtr> Project::audioClips() const {
     return out;
 }
 
+QVector<ClipPtr> Project::matchingStemClips(const ClipPtr& clip) const {
+    if (!clip || !clip->isAudio()) return {};
+    QVector<ClipPtr> out{clip};
+    QSet<QString> roles{import::stemRole(clip->samplePath)};
+    for (const auto& c : audioClips()) if (c != clip && import::matchingStemSource(*clip, *c)) {
+        out.push_back(c); roles.insert(import::stemRole(c->samplePath));
+    }
+    // Copies of one recording are not evidence of a multitrack stem export.
+    roles.remove(QString());
+    return roles.size() > 1 ? out : QVector<ClipPtr>{clip};
+}
+
+bool Project::setClipSourceBpm(const ClipPtr& clip, double bpm, bool related) {
+    if (!clip || !clip->isAudio() || !std::isfinite(bpm) || bpm <= 0 || clip->warpMarkers.size() < 2) return false;
+    const double source = std::clamp(bpm, 20.0, 999.0);
+    const QVector<ClipPtr> clips = related ? matchingStemClips(clip) : QVector<ClipPtr>{clip};
+    EditScope edit(this, related ? "Stem Source Tempo" : "Original Tempo", related ? 0 : 5);
+    QVector<WarpMarker> shared = clip->warpMarkers;
+    const double referenceScale = source / clip->sampleBpm(), referenceBeat = shared.first().beat;
+    for (auto& marker : shared) marker.beat = referenceBeat + (marker.beat - referenceBeat) * referenceScale;
+    for (const auto& c : clips) {
+        if (!c || c->warpMarkers.size() < 2) continue;
+        const double old = c->sampleBpm();
+        if (!std::isfinite(old) || old <= 0) continue;
+        QVector<WarpMarker> markers = related ? shared : c->warpMarkers;
+        if (!related) {
+            const double k = source / old, b0 = markers.first().beat;
+            for (auto& marker : markers) marker.beat = b0 + (marker.beat - b0) * k;
+        }
+        setClipWarpMap(c, markers);
+        c->detectedBpm = source; c->warp = true;
+        c->sourceTempoOrigin = SourceTempoOrigin::Manual; c->sourceTempoConfidence = 1;
+        c->sourceTempoMapFingerprint = 0;
+    }
+    emit clipChanged(); emit structureChanged();
+    return true;
+}
+
+bool Project::setClipWarpMap(const ClipPtr& clip, const QVector<WarpMarker>& markers) {
+    if (!clip || clip->warpMarkers.size() < 2 || markers.size() < 2) return false;
+    for (int i = 0; i < markers.size(); ++i) if (!std::isfinite(markers[i].beat) || !std::isfinite(markers[i].seconds)
+        || (i > 0 && (markers[i].beat <= markers[i - 1].beat || markers[i].seconds <= markers[i - 1].seconds))) return false;
+    Clip before, mapped;
+    before.warpMarkers = clip->warpMarkers; mapped.warpMarkers = markers;
+    auto convert = [&before, &mapped](double beat) { return mapped.beatAt(before.secondsAt(beat)); };
+    const double oldStart = clip->loopStart, oldLength = clip->length;
+    const double newStart = convert(oldStart), newLength = convert(oldStart + oldLength) - newStart;
+    auto unfolded = [&](double beat) {
+        if (!clip->loop || oldLength <= 0 || beat < oldStart + oldLength) return convert(beat);
+        const double cycles = std::floor((beat - oldStart) / oldLength);
+        return cycles * newLength + convert(beat - cycles * oldLength);
+    };
+    for (auto& track : tracks) for (auto& a : track.arrangement) if (a.clip == clip) {
+        const double oldFrom = a.offset, oldTo = oldFrom + a.length;
+        const double from = unfolded(oldFrom), to = unfolded(oldTo);
+        a.fadeIn = unfolded(oldFrom + a.fadeIn) - from;
+        a.fadeOut = to - unfolded(oldTo - a.fadeOut);
+        a.length = to - from; a.offset = from;
+    }
+    clip->start = convert(clip->start);
+    for (auto& envelope : clip->envelopes) for (auto& point : envelope.points) point.beat = convert(point.beat);
+    for (auto& region : clip->comp) { region.start = convert(region.start); region.end = convert(region.end); }
+    for (auto& take : clip->takes) take.startBeat = convert(take.startBeat);
+    clip->loopStart = newStart; clip->length = newLength; clip->warpMarkers = markers;
+    return true;
+}
+
+bool Project::redetectClipTempo(const ClipPtr& clip, bool related) {
+    if (!clip || !clip->sample || !clip->isAudio() || !clip->takes.isEmpty()) return false;
+    const QVector<ClipPtr> clips = related ? matchingStemClips(clip) : QVector<ClipPtr>{clip};
+    QVector<ClipPtr> analyzed;
+    for (const auto& c : clips) {
+        if (!c->sample || !c->takes.isEmpty()) continue;
+        auto candidate = std::make_shared<Clip>(*c);
+        const auto found = tempo::syncTo(*c->sample, tempo, 0, c->samplePath);
+        candidate->detectedBpm = found.detected; candidate->sourceTempoConfidence = found.confidence;
+        candidate->sourceTempoOrigin = found.fromMetadata ? SourceTempoOrigin::Metadata : found.detected > 0 ? SourceTempoOrigin::Detected : SourceTempoOrigin::Unknown;
+        candidate->warpMarkers = {{0, 0}, {found.beats, c->sample->seconds()}};
+        candidate->length = found.beats; candidate->start = candidate->loopStart = 0;
+        candidate->reverse = false; candidate->warp = found.detected > 0; candidate->loop = found.loop;
+        import::rememberAutomaticSourceMap(*candidate);
+        analyzed.push_back(candidate);
+    }
+    if (analyzed.isEmpty()) return false;
+    ClipPtr guide = analyzed.first();
+    tempo::Estimate source{guide->detectedBpm, guide->sourceTempoConfidence, guide->sourceTempoOrigin == SourceTempoOrigin::Metadata};
+    if (related && analyzed.size() > 1) source = import::sharedSourceTempo(analyzed, &guide);
+    QVector<WarpMarker> map;
+    if (source.bpm > 0 && guide && guide->sample) {
+        if (!source.fromMetadata && guide->sample->seconds() >= 30) {
+            for (const auto& point : tempo::trackGrid(*guide->sample, source.bpm).points) map.push_back({point.beat, point.seconds});
+        } else map = {{0, 0}, {guide->length, guide->sample->seconds()}};
+    }
+    EditScope edit(this, related ? "Re-detect Stem Tempo" : "Re-detect Tempo");
+    for (const auto& c : clips) {
+        if (!c->sample || !c->takes.isEmpty()) continue;
+        const double seconds = c->sample->seconds();
+        const double beats = map.size() >= 2 ? map.last().beat : seconds * std::max(1.0, tempo) / 60.0;
+        setClipWarpMap(c, map.size() >= 2 ? map : QVector<WarpMarker>{{0, 0}, {beats, seconds}});
+        c->detectedBpm = source.bpm; c->warp = source.bpm > 0;
+        if (!related) c->loop = source.bpm > 0 && guide ? guide->loop : false;
+        c->sourceTempoOrigin = source.fromMetadata ? SourceTempoOrigin::Metadata : source.bpm > 0
+            ? (related ? SourceTempoOrigin::Shared : SourceTempoOrigin::Detected) : SourceTempoOrigin::Unknown;
+        c->sourceTempoConfidence = source.confidence;
+        import::rememberAutomaticSourceMap(*c);
+    }
+    emit clipChanged(); emit structureChanged();
+    return true;
+}
+
 bool Project::syncClipToTempo(const ClipPtr& clip) {
     if (!clip || !clip->isAudio() || !clip->sample || !clip->takes.isEmpty()) return false;
+    if (clip->detectedBpm > 0 && clip->warpMarkers.size() > 2) {
+        EditScope edit(this, "Sync to Tempo");
+        // Accepted variable timing is already mapped to the project clock. Flattening it
+        // here would reintroduce drift and separate a stem from its shared reference.
+        clip->warp = true;
+        emit clipChanged();
+        return true;
+    }
     const tempo::Sync s = tempo::syncTo(*clip->sample, tempo, clip->detectedBpm, clip->samplePath);
     EditScope edit(this, "Sync to Tempo");
     const double secs = clip->sample->seconds();
-    const double before = clip->length;
     clip->detectedBpm = s.detected;
+    if (clip->sourceTempoOrigin == SourceTempoOrigin::Unknown && s.detected > 0) {
+        clip->sourceTempoOrigin = s.fromMetadata ? SourceTempoOrigin::Metadata : SourceTempoOrigin::Detected;
+        clip->sourceTempoConfidence = s.confidence;
+    }
+    setClipWarpMap(clip, {{0, 0}, {s.beats, secs}});
     clip->loop = s.loop;
     clip->warp = s.detected > 0;
-    clip->warpMarkers = {{0, 0}, {s.beats, secs}};
-    clip->length = s.beats;
-    if (before > 0 && std::fabs(s.beats / before - 1) > 1e-9) {   // placements keep showing the same audio
-        const double f = s.beats / before;
-        clip->start *= f;
-        clip->loopStart *= f;
-        for (Envelope& e : clip->envelopes) for (AutoPoint& pt : e.points) pt.beat *= f;
-        for (Track& t : tracks) for (ArrangementClip& a : t.arrangement) if (a.clip == clip) { a.length *= f; a.offset *= f; }
-    }
+    if (clip->sourceTempoOrigin != SourceTempoOrigin::Legacy && clip->sourceTempoOrigin != SourceTempoOrigin::Manual) import::rememberAutomaticSourceMap(*clip);
     emit clipChanged();
     emit structureChanged();
     return true;
@@ -1233,6 +1364,7 @@ int Project::duplicateTrack(int index) {
     Track t = tracks[index];
     t.id = m_nextTrackId++;
     t.playingSlot = -1; t.playingClipBeat = -1; t.playingClipPass = 0;
+    t.playingSourceClipId = 0;
     t.queuedSlot = -2; t.overridden = false; t.meter = 0; t.solo = false; t.armed = false;
     t.overriddenTargets.clear();
     QHash<const Clip*, ClipPtr> copies;   // a clip shared by a slot and the timeline stays shared in the copy
@@ -1596,6 +1728,23 @@ void Project::setTargetValue(int index, const QString& tg, double v) {
     }
 }
 
+namespace {
+double arrangementSourcePosition(const ArrangementClip& placement, double beat, double tempo) {
+    const Clip& clip = *placement.clip;
+    if (!clip.isAudio() || clip.warp) return clip.positionFrom(placement.offset, beat - placement.start);
+    const double ratio = std::exp2((clip.transpose + clip.detune / 100.0) / 12.0);
+    double seconds = clip.secondsAt(placement.offset) + (beat - placement.start) * 60.0 / tempo * ratio;
+    const double from = clip.secondsAt(clip.loopStart);
+    const double mappedEnd = clip.secondsAt(clip.loopEnd());
+    const double end = clip.sample && clip.takes.isEmpty() ? std::min(mappedEnd, clip.sample->seconds()) : mappedEnd;
+    if (seconds >= end) {
+        if (!clip.loop || end <= from) return -1;
+        seconds = from + std::fmod(seconds - from, end - from);
+    }
+    return seconds >= 0 ? clip.beatAt(seconds) : -1;
+}
+}
+
 ClipPtr Project::playingClip(int index, double beat, double* local) const {
     const Track* t = trackAt(index);
     if (!t || isReturn(index)) return nullptr;
@@ -1606,7 +1755,11 @@ ClipPtr Project::playingClip(int index, double beat, double* local) const {
         if (c) at = !c->warp && t->playingClipBeat >= 0 ? t->playingClipBeat : c->positionAt(beat - t->slotStart);
     } else if (!t->overridden) {
         for (const ArrangementClip& a : t->arrangement)
-            if (a.clip && beat >= a.start && beat < a.start + a.length) { c = a.clip; at = c->positionFrom(a.offset, beat - a.start); }
+            if (a.clip && beat >= a.start && beat < a.start + a.length) {
+                c = a.clip;
+                at = c->isAudio() && t->playingClipPass != 0 && t->playingSourceClipId == c->id
+                    ? t->playingClipBeat : arrangementSourcePosition(a, beat, tempo);
+            }
     }
     if (!c || at < 0) return nullptr;
     if (local) *local = at;
@@ -1620,7 +1773,9 @@ double Project::clipPosition(const ClipPtr& clip, double beat) const {
         return !clip->warp && t->playingClipBeat >= 0 ? t->playingClipBeat : clip->positionAt(beat - t->slotStart);
     if (!t->overridden)
         for (const ArrangementClip& a : t->arrangement)
-            if (a.clip == clip && beat >= a.start && beat < a.start + a.length) return clip->positionFrom(a.offset, beat - a.start);
+            if (a.clip == clip && beat >= a.start && beat < a.start + a.length)
+                return clip->isAudio() && t->playingClipPass != 0 && t->playingSourceClipId == clip->id
+                    ? t->playingClipBeat : arrangementSourcePosition(a, beat, tempo);
     return -1;
 }
 

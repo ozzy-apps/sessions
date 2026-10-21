@@ -51,7 +51,8 @@ static Audio kitLoop(int groove,int recipe=0){const auto& g=grooves::all()[size_
 int main(int argc,char**argv){
     QApplication app(argc,argv);theme::apply(theme::Kind::Dark);const QString dir=argc>1?QString::fromLocal8Bit(argv[1]):QString();
     CHECK(deviceType("Drum Buss")==type&&specOf(type)->kind==DeviceKind::AudioEffect&&paramCount(type)==14,"Drum Buss is a registered native audio effect with 14 parameters");
-    CHECK(paramCount(DeviceType::Osmium)==182&&paramCount(DeviceType::DrumStudio)==66,"Existing device parameter layouts stay unchanged");
+    CHECK(paramCount(DeviceType::Osmium)==osmium::kParams&&osmium::kLegacyParams==182&&paramCount(DeviceType::Monolith)==170&&paramCount(DeviceType::DrumStudio)==drumstudio::kParams&&drumstudio::kLegacyParams==66,
+          "Registered device counts retain legacy indices and include appended Osmium and Drum Studio controls");
     auto zero=neutral();const auto sine=tone(997);const auto reference=process(sine,zero);auto dry=defaults();dry[db::Mix]=0;dry[db::Boom]=dry[db::Crunch]=dry[db::Comp]=1;
     CHECK(difference(reference,process(sine,dry))<1e-6,"Dry/Wet zero returns the aligned original input independently of processing controls");
     auto wet=defaults();wet[db::Drive]=.75;wet[db::Crunch]=.4;const auto fully=process(sine,wet);wet[db::Mix]=.5;auto half=process(sine,wet);double error=0;for(size_t i=0;i<half.size();++i)error=std::max(error,std::abs(double(half[i]-(fully[i]+reference[i])*.5f)));CHECK(error<2e-6,"The parallel blend is aligned and equals the dry/processed average");

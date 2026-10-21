@@ -20,6 +20,7 @@ class QLabel;
 class QToolButton;
 class QDialog;
 class QSplitter;
+class QTimer;
 
 namespace sessions {
 
@@ -38,6 +39,7 @@ class ThemeEditor;
 class OverviewBar;
 class ControlSurface;
 class ApcKey25;
+class RecoveryManager;
 struct ArrangementClip;
 
 class MainWindow : public QMainWindow {
@@ -80,6 +82,11 @@ public:
     QString setPath() const { return m_setPath; }   // empty until the set is saved
     QString setName() const { return m_setName; }
     bool    setModified() const;                    // unsaved changes (the title shows a *)
+    void    enableRecovery(const QString& root = {});
+    void    saveRecoveryNow();
+    bool    offerRecovery(bool startup = false);
+    bool    recoverSet(const QString& file, QString* error = nullptr);
+    RecoveryManager* recoveryManager() const { return m_recovery; }
     // File > Open Recent, a path on the command line, a double-clicked .sessions file:
     // asks about unsaved changes, then opens and reports failures.
     void    fileOpenPath(const QString& path);
@@ -126,7 +133,7 @@ private:
     void showShortcuts();
     bool loadSetFile(const QString& file, QString* error);   // replaces the set; nothing changes on failure
     void applyExtras(const setfile::Extras& x);
-    void setReplaced(const QString& path, const QString& name);
+    void setReplaced(const QString& path, const QString& name, bool keepRecovery = false);
     setfile::Extras currentExtras() const;
     void updateTitle();
     void addRecent(const QString& path);
@@ -231,6 +238,10 @@ private:
     setfile::Extras m_savedExtras;          // loop, quantization, cue... as last saved or opened
     bool            m_forcedModified = false;   // reopened after a restart with unsaved changes
     bool            m_closeConfirmed = false;   // quitting was confirmed (or needs no asking)
+    bool            m_saveInProgress = false;
+    RecoveryManager* m_recovery = nullptr;
+    QTimer*          m_recoveryTimer = nullptr;
+    QAction*         m_backupsAction = nullptr;
     QMenu*          m_recentMenu = nullptr;
     QMenu*          m_themeMenu = nullptr;
     ThemeEditor*    m_themeEditor = nullptr;
