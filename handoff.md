@@ -1,8 +1,8 @@
 # Sessions — handoff
 
-## Next milestone · APC Key 25, relative knobs, preview Stop, lit piano-roll keys · version set at integration · 2026-10-21
+## Milestone 40 · APC Key 25, relative knobs, preview Stop, lit piano-roll keys · 0.40.0 · 2026-10-21
 
-Cloud session (Claude) on branch `claude/tender-babbage-xm4lwn`. **The user expected main at 0.44.0; origin/main is `6026943` / 0.39.0** (CMake 0.39.0; the only other branches are `sampler`, `osmium-usability` and a `sessions-0.43` that points at 0.38.0). This work is built on 0.39.0 and the CMake version is left at 0.39.0 so whoever combines it with 0.40–0.44 assigns the release number; no code comment carries a version. Stack unchanged: native C++17 / Qt 6 Widgets, ALSA sequencer MIDI, immutable audio snapshots. Set files gain one optional field (a mapping's `"relative": true`); older sets load unchanged.
+Cloud session (Claude) on branch `claude/tender-babbage-xm4lwn`. **The user expected main at 0.44.0; origin/main is `6026943` / 0.39.0** (CMake 0.39.0; the only other branches are `sampler`, `osmium-usability` and a `sessions-0.43` that points at 0.38.0). This work is built on 0.39.0. The user then asked for it on main with an installer, so it is released as **0.40.0**, the next number after main's (no code comment carries a version). Stack unchanged: native C++17 / Qt 6 Widgets, ALSA sequencer MIDI, immutable audio snapshots. Set files gain one optional field (a mapping's `"relative": true`); older sets load unchanged.
 
 The user asked for four things:
 
@@ -70,10 +70,12 @@ Verification: baseline 0.39.0 passed all 14 suites before any change. After the 
 
 No existing assertion was changed. The build's only warnings are the two pre-existing `-Wnonnull` ones and smoke's deprecated `setButtonText`.
 
-Docs: `docs/apc-key-25.md` (setup, controls, lights, scope), README (preview Stop, played keys, APC, relative maps) and the manual checklist section "Next".
+Docs: `docs/apc-key-25.md` (setup, controls, lights, scope), README (preview Stop, played keys, APC, relative maps) and the manual checklist section 0.40.
+
+**Release:** the user asked for this update to be pushed to main and for the installer. origin/main was fetched again and had not moved from `6026943`, so main fast-forwards with no merge. The 0.40.0 release build passed **all 15 CTest suites again (283 s)**. Installer: **`dist/sessions_0.40.0+20261021223556_amd64.deb`** (~41 MB, ignored), built on Ubuntu 24.04 with Qt 6.4.2, with the same 24.04 `t64` Depends as 0.39.0. The extracted binary reports Sessions 0.40.0 and completed **42 main-view + 58 device captures** with isolated settings/data, offscreen and no audio driver. The only warnings were the container's missing `/dev/snd/seq` and offscreen-plugin notices. The installer was sent to the user from the cloud session.
 
 **Next AI:**
-- Combine this with the 0.40–0.44 work the user believes is on main. Fetch origin first: if main moved, merge it into this branch, keep both sides' docs, give this update the next release number, and set CMake to it.
+- The user expected 0.40–0.44 on main; none of it is on any remote branch. If that work turns up (Codex's checkout), it must be merged with this 0.40.0. Both lines would then claim 0.40, so give the combined release a number above both, keep both sides' docs, and fetch origin first.
 - Physical APC verification is outstanding for both models: port names, LED palette and brightness channels, and the 2014 keybed channel (assumed not channel 1, as Live's single-port script implies).
 - If the mk2's knob steps feel slow, scale them in `ApcKey25::knob` (currently 1/127 a step).
 - Clip-playback notes are not lit on the roll.
