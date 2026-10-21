@@ -1,6 +1,6 @@
 # Sessions — handoff
 
-## APC Key 25 lights fix · 0.45.1 · 2026-10-21 (on the feature branch, not yet on main)
+## APC Key 25 lights fix · 0.45.1 · 2026-10-21
 
 The user installed 0.45.0. On their APC Key 25 the pads and buttons work, but the clip matrix doesn't light.
 
@@ -12,7 +12,8 @@ The user installed 0.45.0. On their APC Key 25 the pads and buttons work, but th
 3. **Tests:** `sessions_apc_key25` is now **82 checks**: retry after a failed send, steady lights not resent, the settle resend and MIDI Out's error without a sequencer. The window check expects one try then a pause when no sequencer exists, and 55 lights when one does.
 4. **Verification:** all **28 CTest suites passed (819 s)**. The six optional drum libraries were skipped again, since the content isn't installed here. Installer **`dist/sessions_0.45.1+20261021231935_amd64.deb`**: the extracted binary reports Sessions 0.45.1 and completed **42 main-view + 59 device captures**. It was sent to the user; it upgrades 0.45.0.
 5. **Not done:** deleting the remote `sessions-0.43` / `sessions-0.44` branches. The session's git proxy answers HTTP 403 to ref deletion (pushes work), so the user deletes them locally with `git push origin --delete sessions-0.43 sessions-0.44`. Both are fully contained in main.
-6. **Next AI:** the user should install 0.45.1 and check that the pads light. `aconnect -l` should show Sessions' MIDI Out connected to the APC's second port. Pushing to main needs the user's request for this update. Then add an AGENTS.md integration record.
+6. **Hardware confirmed:** the user installed 0.45.1, and the APC Key 25's pads light. At the user's request, main fast-forwarded from `57afb82` / 0.45.0 to this release (origin/main had not moved; no merge).
+7. **Next AI:** further hardware checks are welcome: each knob mode, the Shift overlay, blink / pulse timing and the 2014 model. Fetch origin first and read the working CMake version, handoff, `git status` and installed version before numbering a release. The user still deletes `sessions-0.43` / `sessions-0.44` (see 5).
 
 ## Version reconciliation · 0.45.0 · 2026-10-21
 
