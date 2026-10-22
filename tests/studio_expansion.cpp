@@ -58,7 +58,7 @@ int main(int argc,char** argv){QApplication app(argc,argv);QTemporaryDir prefs;Q
         if(hit&&!hit->alternate.mono.empty()){knobs[ds::recordedMic(ds::Snare)]=1;check(difference(audio,drum(knobs,prepared.get()))>.01,"Alternate mic selection switches the recorded microphone audio");}
         const auto* next=audio::drums::recordedHit(*content,38,105,1);check(hit&&next&&hit!=next&&hit->close.mono!=next->close.mono,"Repeated snare hits have separately recorded round robins");
         if(bank!=2)for(int note:{36,42,48,49})check(audio::drums::recordedHit(*content,note,100,0)!=nullptr,"Complete kits have their own kick, hats, high tom and crash");
-        std::printf("Content %s: %d recordings, %.1f MB decoded\n",qPrintable(content->name),content->recordings,content->frames*4/1e6);std::fflush(stdout);
+        std::printf("Content %s: %d recordings (%d streamed), %.1f MB in memory, %.1f MB whole\n",qPrintable(content->name),content->recordings,content->streamed,content->frames*4/1e6,content->wholeFrames*4/1e6);std::fflush(stdout);
     }
     check(allocations==0,"New tone, stereo and recorded-content paths allocate nothing in audio callbacks");
     project.scenes={"1"};project.addTrack("Studio",theme::accent);project.tracks[0].devices={project.makeDevice("Drum Rack",DeviceKind::Instrument)};auto& rack=project.tracks[0].devices[0];std::vector<float> wave(44100);for(size_t i=0;i<wave.size();++i)wave[i]=.6f*std::sin(i*.1f)*std::exp(-double(i)/5000.);rack.pads[0].sample=samples::fromFrames(wave,{},44100);rack.pads[0].name="Test kick";

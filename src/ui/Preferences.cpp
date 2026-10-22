@@ -4,6 +4,7 @@
 #include "audio/Driver.h"
 #include "audio/MidiInput.h"
 #include "audio/DrumSamples.h"
+#include "audio/DrumStream.h"
 #include "core/WarpPreferences.h"
 #include "core/Recovery.h"
 #include <QComboBox>
@@ -222,7 +223,10 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     auto* drumUsed = new QLabel(drumBox); drumUsed->setObjectName("dimLabel"); drumUsed->setWordWrap(true);
     auto showUsed = [drumUsed] {
         const double gb = audio::drums::ContentLoader::instance()->memoryUsed() / double(1ll << 30);
-        drumUsed->setText(QString("In memory now: %1 GB").arg(gb, 0, 'f', gb < 10 ? 2 : 1));
+        const double whole = audio::drums::ContentLoader::instance()->memoryWhole() / double(1ll << 30);
+        QString text = QString("In memory now: %1 GB").arg(gb, 0, 'f', gb < 10 ? 2 : 1);
+        if (whole - gb >= .01) text += QString(" (%1 GB without streaming)").arg(whole, 0, 'f', whole < 10 ? 2 : 1);
+        drumUsed->setText(text);
     };
     showUsed();
     connect(audio::drums::ContentLoader::instance(), &audio::drums::ContentLoader::finished, drumUsed, showUsed);
@@ -231,9 +235,20 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
         audio::drums::ContentLoader::instance()->setBudget(audio::drums::ContentLoader::savedBudget());
         showUsed();
     });
-    dbl->addWidget(drumMemory); dbl->addWidget(drumUsed);
+    auto* drumStream = new QCheckBox("Stream long recordings from disk", drumBox);
+    drumStream->setObjectName("drumStream");
+    drumStream->setChecked(audio::drums::streamingEnabled());
+    drumStream->setToolTip("Keeps the first half second of each long recording in memory and plays the rest from disk.");
+    connect(drumStream, &QCheckBox::toggled, this, [showUsed](bool on) {
+        QSettings("Sessions", "Sessions").setValue("drums/stream", on);
+        audio::drums::ContentLoader::instance()->reload();   // the kits in use play as before until they're read again
+        showUsed();
+    });
+    dbl->addWidget(drumMemory); dbl->addWidget(drumStream); dbl->addWidget(drumUsed);
     outer->addWidget(row("Drum libraries", drumBox, "Recorded kits load in the background; the kit plays its previous sound until the new one is ready. "
-                                                    "Kits in use always stay loaded. Kits you've switched away from stay ready for switching back until this much memory is used.", audioTab));
+                                                    "Kits in use always stay loaded. Kits you've switched away from stay ready for switching back until this much memory is used. "
+                                                    "Streaming keeps the start of each long recording in memory and reads the rest from disk as it plays, "
+                                                    "so a large kit needs a fraction of the memory.", audioTab));
     outer->addStretch(1);
     connect(m_system, &QComboBox::activated, this, [this] { showSystem(); applyAudio(); });
     addPage(audioTab, "Audio");

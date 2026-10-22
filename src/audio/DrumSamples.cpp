@@ -1,4 +1,5 @@
 #include "DrumSamples.h"
+#include "DrumStream.h"
 #include "core/DeviceSpecs.h"
 #include <QFileInfo>
 #include <QLibrary>
@@ -87,30 +88,46 @@ QJsonArray contentEntries(){
     if(now==root)return banks;
     QFile f(now+"/library.json");banks=f.open(QIODevice::ReadOnly)?QJsonDocument::fromJson(f.readAll()).object()["banks"].toArray():QJsonArray();root=now;return banks;
 }
-struct SfInfo {int64_t frames;int samplerate,channels,format,sections,seekable;};
-Layer readLayer(const QString& relative,QString& error){
+// A recording from the library. Long ones (with `stream`) keep only their head in memory and
+// register their file with the streamer (DrumStream.h).
+Layer readLayer(const QString& relative,QString& error,bool stream,QString* absolutePath=nullptr){
     Layer layer;if(relative.isEmpty())return layer;
     const QDir root(contentRoot());const QString absolute=QDir::cleanPath(QFileInfo(root.filePath(relative)).absoluteFilePath());
     if(!absolute.startsWith(root.absolutePath()+'/')){error="Invalid content path";return layer;}
-    static QLibrary lib("libsndfile.so.1");
-    using Open=void*(*)(const char*,int,SfInfo*);using Read=int64_t(*)(void*,float*,int64_t);using Close=int(*)(void*);
-    static auto open=reinterpret_cast<Open>(lib.resolve("sf_open"));static auto read=reinterpret_cast<Read>(lib.resolve("sf_readf_float"));static auto close=reinterpret_cast<Close>(lib.resolve("sf_close"));
-    if(!open||!read||!close){error="Drum content needs libsndfile1";return layer;}
-    SfInfo info{};void* file=open(QFile::encodeName(absolute).constData(),0x10,&info);
+    const SndApi& sf=sndfile();
+    if(!sf.ok()){error="Drum content needs libsndfile1";return layer;}
+    SndInfo info{};void* file=sf.open(QFile::encodeName(absolute).constData(),0x10,&info);
     if(!file){error="Missing or invalid drum recording: "+relative;return layer;}
-    if(info.frames<2||info.frames>192000*60||info.channels<1||info.channels>2||info.samplerate<8000||info.samplerate>192000){close(file);error="Unsupported drum recording: "+relative;return layer;}
-    layer.rate=info.samplerate;layer.mono.resize(size_t(info.frames));if(info.channels==2)layer.right.resize(size_t(info.frames));
+    if(info.frames<2||info.frames>192000*60||info.channels<1||info.channels>2||info.samplerate<8000||info.samplerate>192000){sf.close(file);error="Unsupported drum recording: "+relative;return layer;}
+    const bool streamed=stream&&info.frames>int64_t(kStreamAbove*info.samplerate);
+    const int64_t want=streamed?int64_t(kHeadSeconds*info.samplerate):info.frames;
+    layer.rate=info.samplerate;layer.mono.resize(size_t(want));if(info.channels==2)layer.right.resize(size_t(want));
     float block[4096*2];int64_t at=0;
-    while(at<info.frames){const auto got=read(file,block,std::min<int64_t>(4096,info.frames-at));if(got<=0)break;
+    while(at<want){const auto got=sf.readf(file,block,std::min<int64_t>(4096,want-at));if(got<=0)break;
         for(int64_t i=0;i<got;++i){const float left=block[i*info.channels],right=info.channels==2?block[i*info.channels+1]:left;
             layer.mono[size_t(at+i)]=std::isfinite(left)?left:0;if(info.channels==2)layer.right[size_t(at+i)]=std::isfinite(right)?right:0;}at+=got;}
-    close(file);layer.mono.resize(size_t(at));if(info.channels==2)layer.right.resize(size_t(at));if(at<2)error="Empty drum recording: "+relative;return layer;
+    sf.close(file);layer.mono.resize(size_t(at));if(info.channels==2)layer.right.resize(size_t(at));if(at<2)error="Empty drum recording: "+relative;
+    if(streamed&&at==want){layer.frames=info.frames;layer.stream=registerStream(absolute,{},info.channels,at,info.frames,info.samplerate);}
+    if(absolutePath)*absolutePath=absolute;
+    return layer;
 }
-Layer readPair(const QJsonValue& value,QString& error){
-    if(value.isString())return readLayer(value.toString(),error);
+// A pair of mono files (left, right) is one stereo recording; streamed, both stream together.
+Layer readPair(const QJsonValue& value,QString& error,bool stream){
+    if(value.isString())return readLayer(value.toString(),error,stream);
     const auto pair=value.toArray();if(pair.isEmpty())return {};
-    Layer out=readLayer(pair[0].toString(),error);if(pair.size()>1){auto right=readLayer(pair[1].toString(),error);if(right.rate!=out.rate){error="Mismatched recorded mic rates";return {};}
-        out.right=std::move(right.mono);const size_t size=std::max(out.mono.size(),out.right.size());out.mono.resize(size);out.right.resize(size);}return out;
+    QString leftPath,rightPath;
+    Layer out=readLayer(pair[0].toString(),error,stream,&leftPath);if(pair.size()<2)return out;
+    Layer right=readLayer(pair[1].toString(),error,stream,&rightPath);
+    if(right.rate!=out.rate){error="Mismatched recorded mic rates";return {};}
+    if(out.stream>=0||right.stream>=0){
+        if(out.stream>=0&&right.stream>=0&&out.mono.size()==right.mono.size()&&out.right.empty()&&right.right.empty()){
+            out.right=std::move(right.mono);out.frames=std::max(out.frames,right.frames);
+            out.stream=registerStream(leftPath,rightPath,1,qint64(out.mono.size()),out.frames,out.rate);
+            return out;
+        }
+        out=readLayer(pair[0].toString(),error,false);right=readLayer(pair[1].toString(),error,false);   // one long, one short: both whole
+    }
+    out.right=std::move(right.mono);const size_t size=std::max(out.mono.size(),out.right.size());out.mono.resize(size);out.right.resize(size);return out;
 }
 }
 const char* contentName(int index){constexpr const char* names[]={"Big Rusty Drums","Swirly Drums","Frankensnare","DRSKit","Naked Drums","MuldjordKit"};return index>=0&&index<6?names[index]:"Kit recipe";}
@@ -133,6 +150,7 @@ std::shared_ptr<ContentBank> decodeBank(int index,const std::atomic<bool>* cance
     const auto banks=contentEntries();if(index<0||index>=banks.size())return {};
     auto bank=std::make_shared<ContentBank>();const auto meta=banks[index].toObject();bank->name=meta["name"].toString();
     const auto notes=meta["notes"].toObject();
+    const bool stream=streamingEnabled();
     int total=0,read=0;
     for(auto it=notes.begin();it!=notes.end();++it)for(const auto& v:it.value().toArray())total+=v.toObject()["hits"].toArray().size();
     for(auto it=notes.begin();it!=notes.end();++it){const int note=it.key().toInt();if(note<0||note>=128)continue;
@@ -141,8 +159,10 @@ std::shared_ptr<ContentBank> decodeBank(int index,const std::atomic<bool>* cance
                 if(cancel&&cancel->load(std::memory_order_relaxed))return {};
                 if(delayMs>0)QThread::msleep(ulong(delayMs));
                 const auto hit=value.toObject();RecordedHit recording;
-                recording.close=readPair(hit["close"],bank->error);recording.alternate=readPair(hit["alternate"],bank->error);recording.overhead=readPair(hit["overhead"],bank->error);recording.room=readPair(hit["room"],bank->error);recording.gain=float(hit["gain"].toDouble(1));
-                for(const auto* source:{&recording.close,&recording.alternate,&recording.overhead,&recording.room}){bank->frames+=source->mono.size()+source->right.size();if(!source->mono.empty())++bank->recordings;}
+                recording.close=readPair(hit["close"],bank->error,stream);recording.alternate=readPair(hit["alternate"],bank->error,stream);recording.overhead=readPair(hit["overhead"],bank->error,stream);recording.room=readPair(hit["room"],bank->error,stream);recording.gain=float(hit["gain"].toDouble(1));
+                for(const auto* source:{&recording.close,&recording.alternate,&recording.overhead,&recording.room}){
+                    bank->frames+=source->mono.size()+source->right.size();bank->wholeFrames+=source->length()*(source->right.empty()?1:2);
+                    if(!source->mono.empty())++bank->recordings;if(source->stream>=0)++bank->streamed;}
                 if(!recording.close.mono.empty())layer.hits.push_back(std::move(recording));
                 if(progress)progress(total?double(++read)/total:1.0);}
             if(!layer.hits.empty())bank->notes[size_t(note)].push_back(std::move(layer));}}
@@ -268,11 +288,30 @@ void ContentLoader::want(const std::array<bool,kContentBanks>& banks){
     if(changed)for(int i=0;i<kContentBanks;++i)emit progressed(i);
 }
 
+void ContentLoader::reload(){
+    {
+        QMutexLocker lock(&registryMutex());
+        for(int i=0;i<kContentBanks;++i){auto& e=entries()[size_t(i)];
+            if(e.state==State::Loading&&e.cancel){e.cancel->store(true);continue;}   // done() queues it again while it's wanted
+            if(m_wanted[size_t(i)]){if(alive(e)||e.state==State::Failed){e.state=State::Queued;e.progress=0;e.error.clear();}}   // the old copy plays meanwhile
+            else{e.strong.reset();e.weak.reset();if(e.state!=State::Queued)e.state=State::Idle;}
+        }
+    }
+    start();
+    for(int i=0;i<kContentBanks;++i)emit progressed(i);
+}
+
 void ContentLoader::setBudget(qint64 bytes){m_budget=std::max<qint64>(0,bytes);trim();}
 
 qint64 ContentLoader::memoryUsed() const{
     QMutexLocker lock(&registryMutex());qint64 total=0;
     for(const auto& e:entries())if(auto held=alive(e))total+=bankBytes(*held);
+    return total;
+}
+
+qint64 ContentLoader::memoryWhole() const{
+    QMutexLocker lock(&registryMutex());qint64 total=0;
+    for(const auto& e:entries())if(auto held=alive(e))total+=held->wholeFrames*qint64(sizeof(float));
     return total;
 }
 

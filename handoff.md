@@ -1,5 +1,55 @@
 # Sessions — handoff
 
+## Streaming long drum recordings from disk · 0.47.0 · 2026-10-22
+
+Cloud session (Claude) on `claude/tender-babbage-xm4lwn`, on top of 0.46.0 (`3e90aec`, pushed to this branch only; the user hasn't tested it yet). origin/main is still `f4e70ff` / 0.45.1 (fetched). Stack unchanged: native C++17 / Qt 6 Widgets, immutable audio snapshots, preallocated DSP. The user asked for the next milestone: bounded disk streaming, the remaining part of the drum-loading priority.
+
+1. **Decode** (`audio/DrumSamples`):
+   - With streaming on (`drums/stream`, on to begin with), `readLayer` keeps only the first 0.5 s (`kHeadSeconds`) of a recording longer than 0.75 s (`kStreamAbove`) and registers the file with the streamer. `Layer` gains `stream` (source id) and `frames` (whole length); `length()` replaces `mono.size()` wherever the whole length matters.
+   - A pair of mono files streams as one stereo source. A pair with one short file is read whole, both channels.
+   - `ContentBank` gains `streamed` and `wholeFrames`. `frames` counts what is in memory, so the memory budget now counts heads.
+   - `ContentLoader::reload()` re-reads the libraries in use; each keeps playing its old copy until the new one is ready, and unused ones are let go. `memoryWhole()` reports what they would take without streaming.
+2. **Streamer** (new `audio/DrumStream.{h,cpp}`):
+   - One shared pool of 512 slots (`kStreamSlots`), each a 16 384-frame stereo ring (`kStreamRing`). That's 64 MB in all, allocated with the first streamed recording, and never per Drum Studio.
+   - One streamer thread opens files with libsndfile (WAV and FLAC; the shipped libraries are mostly FLAC), seeks past the head and keeps each ring up to a full ring ahead of the voice. It sleeps 2 ms when idle.
+   - The slot protocol is lock-free. A claim sets `read`, `source` and bumps `gen`; the streamer acknowledges (`ackGen`) and publishes `written`; a failure sets `failedGen`. Claims use an atomic `used` flag.
+   - A pair of mono files of different lengths is zero-padded, as the whole decode does.
+   - `wholeRecording()` decodes a streamed layer whole for display.
+3. **Playback** (`audio/DrumStudio`):
+   - A voice claims a slot for each streamed recording it plays (close or alternate, overhead, room). It reads the head from memory, then the ring, and reports how far it has read after each block.
+   - A stolen voice, `panic()` and the processor's destructor give their slots back.
+   - If streamed frames haven't arrived, the voice holds the last value and fades in 3 ms. In real time that counts an underrun (`streamUnderruns()`); it never blocks or allocates.
+   - With no sound card running (exports, the null driver, tests), the engine sets `Context::waitForStreams`, and the voice waits for the disk (100 µs steps, 3 s at most, no wait once the stream has failed). `Engine::m_realtime` is set when a real driver starts and cleared on shutdown.
+   - A hit that finds no free slot plays its head and fades.
+4. **UI:**
+   - **Preferences → Audio → Drum libraries:** a **Stream long recordings from disk** check box (reloads the libraries in use). "In memory now" adds "(… GB without streaming)" while streaming saves memory.
+   - Drum Studio's recorded-source view draws the whole recording of a streamed hit, with its full length.
+5. **Tests:** new `tests/drum_stream.cpp` / `sessions_drum_stream`, **38 checks**, on a generated library: 16-bit WAVs and a 24-bit FLAC written with libsndfile, stereo, a mono pair of different lengths, mono, a short hit and a long + short pair. Checks:
+   - what is held and streamed, and the memory fraction;
+   - `wholeRecording` equal to the whole decode;
+   - streamed renders **bit-identical** to whole ones: offline, offline with a slow disk, and paced in real time with no underruns;
+   - an underrun: head as recorded, then a fade within milliseconds, no click, counted;
+   - a missing file failing at once offline;
+   - six kits filling the pool, and slots given back by `panic()` and destruction;
+   - the engine waiting for the disk without a sound card;
+   - the Preferences switch: saved, the kit playing on while it reloads, then whole and the same sound, then streaming again;
+   - the editor opening on a streamed kit;
+   - zero allocations while rendering.
+
+   Passed three runs in a row. Optional captures: `sessions_drum_stream <dir>` (`drum-stream-editor.png`, `drum-stream-preferences.png`, reviewed).
+
+   `studio_expansion` now prints each real library's streamed count and in-memory / whole sizes.
+6. **Stress run** (temporary, not in the suite), paced in real time on 4 cores:
+   - 3 kits at about 10 long hits a second each: 204 concurrent streams, 0 underruns.
+   - 3 kits at 20–30 hits a second: the 256-slot pool first tried ran out. With 512 slots, 384 concurrent streams (every voice of three kits) ran with 0 underruns, so the pool was raised to 512.
+7. **Docs:** `docs/studio-expansion.md` "Streaming from disk (0.47)", README, the manual checklist for 0.47.
+8. **Verification:** release build, then **all 30 CTest suites passed (941 s, 4 cores)**: the 29 from 0.46 plus `drum_stream`, which also passed under the parallel load. `studio_expansion` skipped the six real libraries again (not installed in the container); it passed again after its print change. Installer **`dist/sessions_0.47.0+20261022105112_amd64.deb`**: the extracted binary reports Sessions 0.47.0 and completed **42 main-view + 59 device captures** with isolated settings, offscreen and no audio driver. It upgrades 0.46.0 and 0.45.x. Not on main: pushing needs the user's request.
+
+**Next AI:**
+- The user tests 0.46 and 0.47 on their machine with the real libraries, following `docs/test-checklist.md` 0.47 and 0.46: memory with streaming on and off, no dropouts at small buffers, several kits, exports.
+- If underruns show up on their disk, the knobs are `kHeadSeconds` (more time to open a file) and `kStreamRing` (more read-ahead). `streamUnderruns()` counts them; nothing shows it in the UI yet.
+- Neither 0.46 nor 0.47 is on main; pushing needs the user's request.
+
 ## Background drum library loading · 0.46.0 · 2026-10-22
 
 Cloud session (Claude) on `claude/tender-babbage-xm4lwn`, based on origin/main `f4e70ff` / 0.45.1 (fetched; unchanged). Stack unchanged: native C++17 / Qt 6 Widgets, immutable audio snapshots, preallocated DSP. The user asked for the next build-plan item, the second recommendation of the 2026-10-20 priority review: recorded drum libraries prepared in the background, with visible loading / error state and a memory budget. Bounded disk streaming is not part of this release.

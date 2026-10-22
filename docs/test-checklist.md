@@ -1,5 +1,14 @@
 # Sessions — manual test checklist
 
+## 0.47 · Streaming long drum recordings from disk
+
+1. **Preferences → Audio → Drum libraries**: **Stream long recordings from disk** is on. Load **Naked Drums** or **MuldjordKit**: "In memory now" is well below the "without streaming" figure next to it.
+2. Play a busy groove with crashes and rides on a recorded kit, and let a crash ring out: no crackles, dropouts or tails cut short, at your usual buffer size and at 64 samples.
+3. Clear the box while the groove plays: the kit keeps playing, then "In memory now" rises to the whole size. Check it again: it falls back.
+4. Two or three Drum Studios with recorded kits playing at once: no dropouts.
+5. Export a set with long cymbal tails: the tails are complete in the file.
+6. In Drum Studio, select the Crash: the recorded-source view shows the whole recording and its full length.
+
 ## 0.46 · Background drum library loading
 
 1. Open a Drum Studio on Kit recipe, play a groove, then choose **Naked Drums** in the top Library selector: the window stays responsive, the groove plays on (built-in kit) and the top bar shows "Loading Naked Drums … %". When it's ready, the recorded kit takes over without a gap or a cut-off cymbal.

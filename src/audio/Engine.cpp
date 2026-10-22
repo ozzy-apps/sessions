@@ -343,6 +343,7 @@ void Engine::start() {
         m_outputName = silent ? QString("Silent (audio disabled)") : "No audio output: " + error;
         if (!silent) qWarning("Sessions: %s", qPrintable(m_outputName));
     }
+    m_realtime.store(m_hasAudio);   // a sound card can't wait for the disk; the null driver can
     if (m_duplex) m_driver->startDuplex([this](const float* in, float* out, int frames) { process(out, frames, in); });
     else m_driver->start([this](float* buf, int frames) { process(buf, frames); });
     if (m_inputWanted) { m_inputWanted = false; setInputWanted(true); }   // the input follows the driver
@@ -359,6 +360,7 @@ void Engine::setOutput(const DriverOptions& options) {
 void Engine::shutdown() {
     if (m_driver) m_driver->stop();
     m_driver.reset();
+    m_realtime.store(false);
 }
 
 double Engine::latencySeconds() const { return m_driver ? m_driver->latency() : 0.0; }
@@ -1951,7 +1953,8 @@ void Engine::renderBlock(float* out, int n, const float* in) {
     int clickAt = -1;
     bool accent = false;
     if (S) {
-        const Context ctx{m_sr, m_playing ? b0 : m_freeBeat, bps, tempo, m_playing};
+        Context ctx{m_sr, m_playing ? b0 : m_freeBeat, bps, tempo, m_playing};
+        ctx.waitForStreams = !m_realtime.load(std::memory_order_relaxed);   // exports and silent runs wait for the disk
         const int nt = std::min(int(S->tracks.size()), kMaxTracks);
         const int nr = std::min(int(S->returns.size()), kMaxReturns);
 

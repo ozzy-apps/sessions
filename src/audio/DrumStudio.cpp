@@ -3,7 +3,10 @@
 // Legacy banks and immutable expansion content are prepared outside the audio callback.
 #include "DeviceKit.h"
 #include "DrumSamples.h"
+#include "DrumStream.h"
 #include "DrumMicModel.h"
+#include <chrono>
+#include <thread>
 
 namespace sessions::audio {
 using namespace kit;
@@ -22,6 +25,9 @@ struct Voice {
     float gain = 1, panL = 1, panR = 1, ohL = 1, ohR = 1;
     float envelope = 1, decay = 1, choke = 1, high = 1;
     OnePole tone, toneR;
+    int sampleSlot = -1, ohSlot = -1, roomSlot = -1;   // stream slots of streamed recordings (DrumStream.h)
+    bool starved = false;                              // a stream fell behind: fading out on its last frames
+    float last[6] = {};                                // close L / R, overhead L / R, room L / R, as last read
 };
 class DrumStudio : public DeviceProcessor {
 public:
@@ -41,7 +47,7 @@ public:
         // dereference; one that just arrived (a background load) leaves ringing drums alone.
         bool changed=false;for(int i=0;i<6;++i){const auto* bank=ctx.drumContent?ctx.drumContent->banks[i].get():nullptr;changed|=m_seenBanks[i]&&bank!=m_seenBanks[i];m_seenBanks[i]=bank;}
         if(changed)panic();
-        m_content=ctx.drumContent;
+        m_content=ctx.drumContent;m_wait=ctx.waitForStreams;
         m_p = p; m_kit = std::clamp(pc(T::DrumStudio, p, ds::Kit), 0, ds::kKits - 1);
         std::fill_n(m_cl, frames, 0.f); std::fill_n(m_cr, frames, 0.f);
         std::fill_n(m_ohl, frames, 0.f); std::fill_n(m_ohr, frames, 0.f); std::fill_n(m_room, frames, 0.f);
@@ -63,8 +69,9 @@ public:
             scope[8 + d].store(std::max(m_peaks[d], scope[8 + d].load(std::memory_order_relaxed) * .985f), std::memory_order_relaxed);
         }
     }
+    ~DrumStudio() override { for (auto& v : m_voices) stop(v); }   // the audio thread is done with it: free its streams
     void panic() override {
-        for (auto& v : m_voices) v.sample = nullptr;
+        for (auto& v : m_voices) stop(v);   // gives back their streams
         for (int c = 0; c < 2; ++c) {
             m_ohDelay[c].clear(); m_pre[c].clear();
             m_recordedOhDelay[c].clear();m_recordedRoomDelay[c].clear();
@@ -97,9 +104,13 @@ private:
         Voice* voice = nullptr;
         for (auto& v : m_voices) if (!v.sample) { voice = &v; break; }
         if (!voice) { voice = &m_voices[0]; for (auto& v : m_voices) if (v.age < voice->age) voice = &v; }
+        stop(*voice);   // a stolen voice gives back its streams
         auto& v = *voice; v = Voice{}; v.sample = &sample; v.drum = drum; v.pitch = e.pitch; v.age = ++m_age;
         if(recording){v.overhead=&recording->overhead;v.room=&recording->room;}
-        v.end=sample.mono.size();for(const auto* channel:{v.overhead,v.room})if(channel&&!channel->mono.empty())v.end=std::max(v.end,channel->mono.size()/channel->rate*sample.rate);
+        v.sampleSlot=drums::streams::claim(sample.stream);
+        if(v.overhead&&!v.overhead->mono.empty())v.ohSlot=drums::streams::claim(v.overhead->stream);
+        if(v.room&&!v.room->mono.empty())v.roomSlot=drums::streams::claim(v.room->stream);
+        v.end=double(sample.length());for(const auto* channel:{v.overhead,v.room})if(channel&&!channel->mono.empty())v.end=std::max(v.end,channel->length()/channel->rate*sample.rate);
         const float tune = knob(drum, ds::Tune) + (recording?0:drums::sampleTune(e.pitch)) + (m_kit == 1 ? -1.f : m_kit == 2 ? .6f : 0.f);
         v.step = sample.rate / m_sr * std::exp2(tune / 12.f);
         const float decay = knob(drum, ds::Decay) * (m_kit == 2 ? .65f : m_kit == 3 ? .8f : 1.f);
@@ -122,34 +133,81 @@ private:
         meter[0].store(float(drum), std::memory_order_relaxed);
         meter[1].store(meter[1].load(std::memory_order_relaxed) + 1.f, std::memory_order_relaxed);
     }
+    // A recording as a voice reads it this block: the head in memory, then its stream slot.
+    struct Tap { const drums::Layer* layer = nullptr; int slot = -1; qint64 head = 0, length = 0, avail = 0; double ratio = 1; };
+    Tap tap(const drums::Layer* layer, int slot, double sampleRate) const {
+        Tap t; if (!layer || layer->mono.empty()) return t;
+        t.layer = layer; t.head = qint64(layer->mono.size()); t.length = layer->length(); t.ratio = layer->rate / sampleRate;
+        t.slot = layer->stream >= 0 ? slot : -1;
+        if (t.slot >= 0) t.avail = drums::streams::slot(t.slot).available();
+        return t;
+    }
+    // Frame `i` of a channel; false when it's streamed and hasn't arrived (or has no slot).
+    bool frame(const Tap& t, qint64 i, bool right, float& out) const {
+        if (i < t.head) { const auto& h = right && !t.layer->right.empty() ? t.layer->right : t.layer->mono; out = h[size_t(i)]; return true; }
+        if (t.layer->stream < 0 || t.slot < 0 || i - t.head >= t.avail) { out = 0; return false; }
+        out = drums::streams::slot(t.slot).ring[right && !t.layer->right.empty() ? 1 : 0][size_t((i - t.head) % drums::kStreamRing)];
+        return true;
+    }
+    // Rendering faster than real time: wait (bounded) until the block's streamed frames are there.
+    void waitFor(Tap& t, double lastPosition) {
+        if (!t.layer || t.layer->stream < 0 || t.slot < 0) return;
+        const qint64 need = std::min<qint64>(t.length, qint64(lastPosition * t.ratio) + 3) - t.head;
+        const drums::StreamSlot& s = drums::streams::slot(t.slot);
+        for (int waited = 0; need > 0 && t.avail < need && !s.failed() && waited < 30000; ++waited) {   // 3 s at most (a stuck disk)
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            t.avail = s.available();
+        }
+    }
+    void consumed(const Tap& t, double position) { if (t.slot >= 0) drums::streams::consumed(t.slot, qint64(position * t.ratio) - t.head - 4); }
+    void stop(Voice& v) {
+        v.sample = nullptr;
+        drums::streams::release(v.sampleSlot); drums::streams::release(v.ohSlot); drums::streams::release(v.roomSlot);
+        v.sampleSlot = v.ohSlot = v.roomSlot = -1;
+    }
     void renderVoice(Voice& v, int at, int count) {
-        if (m_p[ds::piece(v.drum, ds::Present)] < .5f) { v.sample = nullptr; return; }
-        const auto& data = v.sample->mono;
+        if (m_p[ds::piece(v.drum, ds::Present)] < .5f) { stop(v); return; }
+        Tap main = tap(v.sample, v.sampleSlot, v.sample->rate), oh = tap(v.overhead, v.ohSlot, v.sample->rate), room = tap(v.room, v.roomSlot, v.sample->rate);
+        if (m_wait && !v.starved) { const double last = v.position + count * v.step; waitFor(main, last); waitFor(oh, last); waitFor(room, last); }
         bool solo = false; for (int d = 0; d < ds::kDrums; ++d) solo |= m_p[ds::piece(d, ds::Present)] >= .5f && m_p[ds::solo(d)] >= .5f;
         const bool audible = m_p[ds::piece(v.drum, ds::Present)] >= .5f && m_p[ds::mute(v.drum)] < .5f && (!solo || m_p[ds::solo(v.drum)] >= .5f);
+        auto starve = [&] {   // a stream fell behind: hold the last frames and fade out within milliseconds
+            if (v.starved) return;
+            v.starved = true; v.choke = std::min(v.choke, onePoleCoef(.003f, m_sr));
+            if (!m_wait) drums::noteUnderrun();
+        };
+        // Two neighbouring frames of a channel, interpolated; held at the last value when it's missing.
+        auto read = [&](const Tap& t, double position, bool right, float& last) {
+            const qint64 index = qint64(position);
+            if (index + 1 >= t.length) return 0.f;
+            float a, b;
+            if (v.starved || !frame(t, index, right, a) || !frame(t, index + 1, right, b)) { starve(); return last; }
+            const float x = a + (b - a) * float(position - double(index));
+            last = x;
+            return x;
+        };
         for (int i = at; i < at + count; ++i) {
             const int index = int(v.position);
-            if (v.position + 1 >= v.end || v.envelope < .00001f) { v.sample = nullptr; break; }
-            const float frac = float(v.position - index);
-            float s = index+1<int(data.size())?data[index] + (data[index + 1] - data[index]) * frac:0;
-            float right=v.sample->right.empty()?s:index+1<int(v.sample->right.size())?v.sample->right[index]+(v.sample->right[index+1]-v.sample->right[index])*frac:0;
+            if (v.position + 1 >= v.end || v.envelope < .00001f) { stop(v); break; }
+            float s = read(main, v.position, false, v.last[0]);
+            float right = v.sample->right.empty() ? s : read(main, v.position, true, v.last[1]);
             const float low = v.tone.lp(s); s = low + (s - low) * v.high;
             const float lowR=v.toneR.lp(right);right=lowR+(right-lowR)*v.high;
             const float amplitude=v.gain*v.envelope*(audible?1.f:0.f);
             s *= amplitude;right*=amplitude;
             // Fade the last 2ms if the original recording ends above zero.
-            const float endFade=std::clamp(float(double(data.size()) - index - 1) / float(std::max(1., v.sample->rate * .002)),0.f,1.f);s*=endFade;right*=endFade;
+            const float endFade=std::clamp(float(double(main.length) - index - 1) / float(std::max(1., v.sample->rate * .002)),0.f,1.f);s*=endFade;right*=endFade;
             m_peaks[v.drum] = std::max(m_peaks[v.drum], std::abs(s));
             m_cl[i] += s * v.panL; m_cr[i] += right * v.panR;
             m_close[v.drum][0][i] += s * v.panL; m_close[v.drum][1][i] += right * v.panR;
-            auto channelAt=[&](const drums::Layer* source,bool rightChannel){if(!source||source->mono.empty())return 0.f;const auto& samples=rightChannel&&!source->right.empty()?source->right:source->mono;
-                const double position=v.position/v.sample->rate*source->rate;const size_t at=size_t(position);if(at+1>=samples.size())return 0.f;const float f=float(position-at);return (samples[at]+(samples[at+1]-samples[at])*f)*amplitude;};
-            if(v.overhead&&!v.overhead->mono.empty()){m_recordedOh[0][i]+=channelAt(v.overhead,false);m_recordedOh[1][i]+=channelAt(v.overhead,true);}
+            auto channelAt=[&](const Tap& t,bool rightChannel,float& last){if(!t.layer)return 0.f;return read(t,v.position*t.ratio,rightChannel,last)*amplitude;};
+            if(oh.layer){m_recordedOh[0][i]+=channelAt(oh,false,v.last[2]);m_recordedOh[1][i]+=channelAt(oh,true,v.last[3]);}
             else{m_ohl[i] += s * v.ohL; m_ohr[i] += right * v.ohR;}
-            if(v.room&&!v.room->mono.empty()){m_recordedRoom[0][i]+=channelAt(v.room,false);m_recordedRoom[1][i]+=channelAt(v.room,true);}
+            if(room.layer){m_recordedRoom[0][i]+=channelAt(room,false,v.last[4]);m_recordedRoom[1][i]+=channelAt(room,true,v.last[5]);}
             else m_room[i] += (s+right)*.5f;
             v.position += v.step; v.envelope = std::min(2.f, v.envelope * v.decay * v.choke);
         }
+        if (v.sample) { consumed(main, v.position); consumed(oh, v.position); consumed(room, v.position); }
     }
     void colorCloseMics(int n) {
         const float coef = onePoleCoef(.01f, m_sr);
@@ -247,6 +305,7 @@ private:
     int m_kit = 0;
     uint64_t m_age = 0;
     Voice m_voices[kVoices];
+    bool m_wait = false;
     const drums::Content* m_content=nullptr;const drums::ContentBank* m_seenBanks[6]{};unsigned m_roundRobin[128]{};
     float m_recordedRoom[2][kMaxBlock]{};
     float m_recordedOh[2][kMaxBlock]{};DelayLine m_recordedOhDelay[2],m_recordedRoomDelay[2];

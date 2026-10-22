@@ -7,7 +7,14 @@
 #include <tuple>
 
 namespace sessions::audio::drums {
-struct Layer { std::vector<float> mono, right; double rate = 44100; };
+// A recording. Long recorded-library hits are streamed (DrumStream.h): `mono` / `right` then hold
+// only the head, `stream` names the file the rest comes from and `frames` is the whole length.
+struct Layer {
+    std::vector<float> mono, right; double rate = 44100;
+    int    stream = -1;
+    qint64 frames = 0;
+    qint64 length() const { return frames > 0 ? frames : qint64(mono.size()); }
+};
 struct Bank { std::array<std::array<Layer, 5>, 128> notes; };
 // Immutable, shared by all processors. Prepared on the UI thread when a processor is created.
 const std::array<Bank, 3>& library();
@@ -26,8 +33,10 @@ struct VelocityGroup { int low = 1, high = 127; std::vector<RecordedHit> hits; }
 struct ContentBank {
     QString name, error;
     std::array<std::vector<VelocityGroup>,128> notes;
-    size_t frames = 0;
+    size_t frames = 0;      // samples held in memory (heads, for streamed recordings)
     int recordings = 0;
+    int streamed = 0;       // recordings whose tails stream from disk
+    qint64 wholeFrames = 0; // samples if every recording were held whole
 };
 constexpr int kContentBanks = 6, kContentDrums = 8;   // the six libraries; Drum Studio's eight drums
 struct Content {
@@ -64,9 +73,11 @@ public:
     void   want(const std::array<bool,kContentBanks>& banks);   // the live engine's banks
     bool   wanted(int bank) const;
     qint64 memoryUsed() const;                                    // decoded banks held, in bytes
+    qint64 memoryWhole() const;                                   // what they would hold without streaming
     qint64 budget() const { return m_budget; }
     void   setBudget(qint64 bytes);                               // 0: no limit
     static qint64 savedBudget();                                  // Preferences ("drums/memoryBudgetGB"; 4 GB to begin with)
+    void   reload();   // read the libraries again (Preferences: streaming changed); each plays as before until it's ready
     void   setReadDelayForTests(int ms) { m_testDelay = ms; }     // slows each recording's read
     bool   waitIdle(int ms);                                      // tests: until nothing loads (false on timeout)
 signals:

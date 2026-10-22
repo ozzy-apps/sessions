@@ -34,6 +34,17 @@ Recorded libraries load in the background: choosing one never freezes the window
 
 Exports (and the regression suites' own engines) still decode a library before rendering, so an export always uses the recorded kit.
 
+### Streaming from disk (0.47)
+
+Long recordings (cymbals, toms, ringing snares) no longer have to sit in memory whole:
+- **What stays in memory:** the first half second of every recording longer than 0.75 s. The rest is read from disk while the hit plays. Shorter recordings stay whole. A pair of mono files (left / right) streams together.
+- **Sound:** identical to the whole recording, sample for sample.
+- **Memory:** **Preferences → Audio → Drum libraries** shows "In memory now", and what the same libraries would take without streaming. Up to 512 recordings can stream at once across all Drum Studios (64 MB of buffers, made when the first streamed library loads). That covers about two and a half kits playing all 64 of their voices.
+- **A slow disk:** if the disk falls far behind, the hit fades out within milliseconds instead of clicking or stalling the audio. A hit that finds every stream busy plays its first half second and fades.
+- **Exports** and renders without a sound card wait for the disk instead, so an export always has the whole recording.
+- **Turning it off:** clear **Stream long recordings from disk** in the same row. The libraries in use are read again, whole, and keep playing as before until they're ready. Streaming is on to begin with.
+- The recorded-source view in Drum Studio reads the whole file, so it draws the complete waveform.
+
 ## Recorded microphones
 
 On **Microphones**, **Recorded source → Primary / Alternate** switches the close recording where supplied, such as snare top/bottom or kick in/sub. Without an alternate, Primary remains active. Overhead and room buses use aligned recordings where provided; other sources retain modeled ambience. Recorded ambience continues after a shorter close recording ends.

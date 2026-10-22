@@ -357,6 +357,7 @@ private:
     std::atomic<quint64> m_fbPreviewSerial{0};   // the preview serial the audio thread plays (or finished)
     std::atomic<bool>    m_fbPreviewOn{false};   // and whether it's still sounding
     std::atomic<float>   m_cpu{0};
+    std::atomic<bool>    m_realtime{false};   // a sound card drives process(): streamed drums never wait
     struct AtomicStatus {
         std::atomic<int> playingSlot{-1}, queuedSlot{-2};
         std::atomic<double> slotStart{0}, queuedAt{0}, clipBeat{-1};

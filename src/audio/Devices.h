@@ -69,6 +69,7 @@ struct Context {
     const IrKernel* ir = nullptr;         // Guitar Amp: its loaded impulse response, ready to convolve
     nam::Runtime*   nam = nullptr;        // NAM: its capture's network, prepared by the engine (null: no capture, plays dry)
     const drums::Content* drumContent = nullptr;
+    bool waitForStreams = false;   // no driver runs (exports, tests): streamed recordings are waited for, not skipped
     // Sidechain (Compressor, Gate, Auto Filter): another track's audio for this block, the
     // detector's key. nullptr: the device listens to its own input.
     const float* keyL = nullptr;

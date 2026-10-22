@@ -10,6 +10,7 @@
 #include "Bodies.h"
 #include "audio/Devices.h"
 #include "audio/DrumSamples.h"
+#include "audio/DrumStream.h"
 #include "audio/DrumMicModel.h"
 #include "audio/Engine.h"
 #include "core/Grooves.h"
@@ -548,11 +549,14 @@ public:
         const auto plot=r.adjusted(10,28,-10,-26);const int width=std::max(1,int(plot.width()));
         if(m_sample!=&s||m_width!=width){
             m_sample=&s;m_width=width;m_peaks.assign(size_t(width),{});
-            for(int x=0;x<width;++x){const size_t a=size_t(x)*s.mono.size()/width,b=size_t(x+1)*s.mono.size()/width;float lo=0,hi=0;
-                for(size_t i=a;i<b;++i){lo=std::min(lo,s.mono[i]);hi=std::max(hi,s.mono[i]);}m_peaks[size_t(x)]={lo,hi};}
+            std::shared_ptr<const audio::drums::Layer> whole;const auto* shown=&s;
+            if(s.stream>=0){whole=audio::drums::wholeRecording(s);shown=whole.get();}   // most of a streamed recording is on disk
+            const auto& w=shown->mono;
+            for(int x=0;x<width;++x){const size_t a=size_t(x)*w.size()/width,b=size_t(x+1)*w.size()/width;float lo=0,hi=0;
+                for(size_t i=a;i<b;++i){lo=std::min(lo,w[i]);hi=std::max(hi,w[i]);}m_peaks[size_t(x)]={lo,hi};}
         }
         p.setRenderHint(QPainter::Antialiasing);p.setPen(col::grid);p.drawLine(plot.topLeft()+QPointF(0,plot.height()*.5),plot.topRight()+QPointF(0,plot.height()*.5));
-        const double seconds=s.mono.size()/s.rate; p.setFont(QFont(p.font().family(),8));
+        const double seconds=double(s.length())/s.rate; p.setFont(QFont(p.font().family(),8));
         for(int i=0;i<5;++i){double x=plot.left()+plot.width()*i/4.;p.setPen(col::grid);p.drawLine(QPointF(x,plot.top()),QPointF(x,plot.bottom()));p.setPen(col::gridText);p.drawText(QRectF(x-18,plot.bottom()+6,40,15),Qt::AlignCenter,QString::number(seconds*i/4.,'f',2));}
         p.setPen(QPen(col::curve,1));for(int x=0;x<width;++x){auto pair=m_peaks[size_t(x)];p.drawLine(QPointF(plot.left()+x,plot.center().y()-pair.second*plot.height()*.46),QPointF(plot.left()+x,plot.center().y()-pair.first*plot.height()*.46));}
         double decay=m_body->real(ds::param(drum,ds::Decay));const int recipe=m_body->pick(ds::Kit);decay*=recipe==2?.65:recipe==3?.8:1;
