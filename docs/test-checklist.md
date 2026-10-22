@@ -1,5 +1,15 @@
 # Sessions — manual test checklist
 
+## 0.46 · Background drum library loading
+
+1. Open a Drum Studio on Kit recipe, play a groove, then choose **Naked Drums** in the top Library selector: the window stays responsive, the groove plays on (built-in kit) and the top bar shows "Loading Naked Drums … %". When it's ready, the recorded kit takes over without a gap or a cut-off cymbal.
+2. Switch to **Big Rusty Drums** while it plays: Naked Drums plays on until Big Rusty is ready. Switch back: instant (kept in memory).
+3. Pick a library, then immediately another: the first is abandoned (the status follows the second).
+4. **Preferences → Audio → Drum libraries**: "In memory now" grows as libraries load. Set **Up to 2 GB** and switch through several: libraries you left go, the one in use stays. **No limit** keeps them all.
+5. Draw automation on the Library between two libraries: only those two (and any between) load, not all six.
+6. Export a set that uses a recorded library right after opening it: the export uses the recorded kit.
+7. Quit while a library loads: Sessions closes promptly.
+
 ## 0.45 · APC Key 25, relative knobs, preview Stop, lit piano-roll keys
 
 First published as 0.40.0 on top of 0.39.0; combined with the local 0.44.0 as 0.45.0. Also check that 0.41–0.44's features (tempo / warp, recovery, Drum Studio expansion, Osmium banks) are all present.

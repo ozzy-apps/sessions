@@ -153,6 +153,12 @@ public:
     // A rack chain's output peak since the last call (the rack panel's chain meters).
     float takeChainPeak(int rackId, int chain);
 
+    // Recorded drum libraries: Blocking (offline renders, tests) decodes a kit when a publish needs
+    // it; Background (the window's engine) asks drums::ContentLoader for it and republishes when it
+    // has loaded, each drum playing its previous kit (or the built-in one) meanwhile.
+    void setBackgroundContent(bool on);
+    bool backgroundContent() const { return m_backgroundContent; }
+
     // Browser preview: plays a sample once on the main output at the cue level (nullptr stops it).
     void previewSample(const SamplePtr& sample);
     void stopPreview() { if (m_preview) previewSample(nullptr); }
@@ -255,6 +261,9 @@ private:
     QString  m_outputName = "Not started";
     bool     m_republishQueued = false;
     quint64  m_generation = 0;
+    bool      m_backgroundContent = false;
+    QHash<int, std::shared_ptr<const drums::Content>> m_drumContent;   // what each Drum Studio last published (its fallback)
+    std::array<bool, 6> m_wantedBanks{};                               // publish: the banks this snapshot asked for
     SamplePtr m_preview;            // UI side of previewSample()
     quint64   m_previewSerial = 0;
     bool      m_exporting = false;  // renderOffline: sidechain Listen switches are forced off

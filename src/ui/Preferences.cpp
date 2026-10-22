@@ -3,6 +3,7 @@
 #include "audio/Engine.h"
 #include "audio/Driver.h"
 #include "audio/MidiInput.h"
+#include "audio/DrumSamples.h"
 #include "core/WarpPreferences.h"
 #include "core/Recovery.h"
 #include <QComboBox>
@@ -211,6 +212,28 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     m_inputStatus->setObjectName("dimLabel");
     stl->addWidget(m_inputStatus);
     outer->addWidget(row("Status", status, {}, audioTab));
+    // Recorded drum libraries: how much of them stays in memory.
+    auto* drumBox = new QWidget(audioTab); auto* dbl = new QVBoxLayout(drumBox); dbl->setContentsMargins(0, 0, 0, 0); dbl->setSpacing(4);
+    auto* drumMemory = new QComboBox(drumBox);
+    drumMemory->setObjectName("drumMemoryBudget");
+    for (int gb : {2, 4, 8, 16}) drumMemory->addItem(QString("Up to %1 GB").arg(gb), gb);
+    drumMemory->addItem("No limit", 0);
+    drumMemory->setCurrentIndex(std::max(0, drumMemory->findData(QSettings("Sessions", "Sessions").value("drums/memoryBudgetGB", 4).toInt())));
+    auto* drumUsed = new QLabel(drumBox); drumUsed->setObjectName("dimLabel"); drumUsed->setWordWrap(true);
+    auto showUsed = [drumUsed] {
+        const double gb = audio::drums::ContentLoader::instance()->memoryUsed() / double(1ll << 30);
+        drumUsed->setText(QString("In memory now: %1 GB").arg(gb, 0, 'f', gb < 10 ? 2 : 1));
+    };
+    showUsed();
+    connect(audio::drums::ContentLoader::instance(), &audio::drums::ContentLoader::finished, drumUsed, showUsed);
+    connect(drumMemory, &QComboBox::activated, this, [drumMemory, showUsed] {
+        QSettings("Sessions", "Sessions").setValue("drums/memoryBudgetGB", drumMemory->currentData().toInt());
+        audio::drums::ContentLoader::instance()->setBudget(audio::drums::ContentLoader::savedBudget());
+        showUsed();
+    });
+    dbl->addWidget(drumMemory); dbl->addWidget(drumUsed);
+    outer->addWidget(row("Drum libraries", drumBox, "Recorded kits load in the background; the kit plays its previous sound until the new one is ready. "
+                                                    "Kits in use always stay loaded. Kits you've switched away from stay ready for switching back until this much memory is used.", audioTab));
     outer->addStretch(1);
     connect(m_system, &QComboBox::activated, this, [this] { showSystem(); applyAudio(); });
     addPage(audioTab, "Audio");

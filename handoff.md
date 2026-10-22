@@ -1,5 +1,47 @@
 # Sessions — handoff
 
+## Background drum library loading · 0.46.0 · 2026-10-22
+
+Cloud session (Claude) on `claude/tender-babbage-xm4lwn`, based on origin/main `f4e70ff` / 0.45.1 (fetched; unchanged). Stack unchanged: native C++17 / Qt 6 Widgets, immutable audio snapshots, preallocated DSP. The user asked for the next build-plan item, the second recommendation of the 2026-10-20 priority review: recorded drum libraries prepared in the background, with visible loading / error state and a memory budget. Bounded disk streaming is not part of this release.
+
+1. **Before:** `Engine::publish` ran on the UI thread on every edit. It called `drums::prepareContent`, which decoded a whole library synchronously (up to ~2.1 GB, about 5.5 GB when automation preloaded all six). Drum Studio's waveform view did the same while painting. `contentInstalled` re-parsed the 19 000-line `library.json` on every panel refresh.
+2. **Loader** (`audio/DrumSamples`, `drums::ContentLoader`):
+   - One worker thread (`QThreadPool`, one thread) decodes one bank at a time. Per-bank state: Missing / Idle / Queued / Loading (progress) / Ready (bytes) / Failed (reason).
+   - Results are stored by the worker under a mutex, so a blocking caller waiting on the same bank never deadlocks.
+   - `want()` is called by the live engine each publish. A wanted bank that isn't loaded is queued; one no longer wanted is cancelled mid-load (checked between recordings).
+   - **Budget:** banks in use stay held. Others are kept, most recently wanted first, while all decoded banks stay under the limit (`drums/memoryBudgetGB`: 2 / 4 by default / 8 / 16 / 0 = no limit).
+   - `loadContentBank` stays the blocking path (offline renders, tests) and shares or waits for the worker's result instead of decoding twice. The manifest is parsed once per content folder.
+   - `SESSIONS_DRUM_CONTENT_ROOT` selects another content folder (the tests' generated library). `setReadDelayForTests` slows reads for tests. On quit, a running load is cancelled and waited for (3 s at most).
+3. **Engine:**
+   - `setBackgroundContent(true)` (MainWindow only) makes publish ask the loader without waiting, then republish on `finished`. The default stays Blocking, so exports and every existing suite decode as before.
+   - Each Drum Studio preloads only `drums::reachableBanks`: its library and drum sources as set, plus every choice that automation points, clip envelopes and macro ranges pass through (choices interpolate linearly). This replaces "all six when automated".
+   - `Content` carries per-drum `fallback` / `effective`: a drum whose library is still loading (or about to be) plays the bank it played before, kept in the new content, or the built-in kit if there was none.
+   - The Drum Studio processor follows the fallback. It now panics only when a bank it saw goes away or is replaced, so a bank arriving leaves ringing drums alone.
+4. **UI:**
+   - `contentStatus()` gives Drum Studio's status: the editor's top line ("8 pieces · Loading Big Rusty Drums 13 %"), a pill on the kit stage (compact and expanded), and a pill on the recorded-source waveform. The waveform now takes the loader's bank and never decodes.
+   - Failed: "… couldn't load: reason". Missing: "… isn't installed". The bodies refresh on `progressed`.
+   - **Preferences → Audio → Drum libraries:** the budget, plus "In memory now".
+5. **Tests:** new `tests/drum_loading.cpp` / `sessions_drum_loading`, **35 checks**, on a generated library: real 16-bit WAVs and `library.json` in the shipped format. Bank A is a 300 Hz tone, B is 1200 Hz, C is installed but unreadable, D is not installed. A Goertzel measure tells which bank a hit came from. Checks:
+   - reachable banks;
+   - publish returning in under 100 ms while loading;
+   - the built-in kit meanwhile, progress, Ready with bytes, republish and recorded playback;
+   - switching keeping the previous kit until the new one is ready;
+   - kept within budget (instant switch back), released beyond it, cancelled mid-load;
+   - Failed with reason, Missing;
+   - automation preloading only reached banks;
+   - no cut when a bank arrives, a cut when one is replaced;
+   - panel loading / failed / missing text;
+   - the blocking engine unchanged;
+   - zero callback allocations on the audio thread.
+
+   Passed three runs in a row. Optional captures: `sessions_drum_loading <dir>` (`drum-loading-editor.png`, `drum-loading-missing.png`, reviewed).
+6. **Docs:** `docs/studio-expansion.md` "Loading and memory (0.46)", README, the manual checklist for 0.46.
+7. **Verification:** release build, then **all 29 CTest suites passed (785 s, 4 cores)**: the 28 from 0.45.1 plus `drum_loading`. As before, `studio_expansion` skipped the six real libraries, which aren't installed in the container; with them installed it exercises the blocking path, which keeps its semantics. Installer **`dist/sessions_0.46.0+20261022051023_amd64.deb`**: the extracted binary reports Sessions 0.46.0 and completed **42 main-view + 59 device captures**. It was sent to the user, who tests on their machine, where the real libraries are installed. Not on main yet: pushing needs the user's request.
+
+**Next AI:**
+- Hardware checks on the user's machine follow `docs/test-checklist.md` 0.46: load time and responsiveness with the real libraries, the budget, exports and quit while loading.
+- Bounded disk streaming for very large kits is the remaining part of this priority. It would replace whole-bank decoding with a resident head per recording and a streamed tail; not started.
+
 ## APC Key 25 lights fix · 0.45.1 · 2026-10-21
 
 The user installed 0.45.0. On their APC Key 25 the pads and buttons work, but the clip matrix doesn't light.

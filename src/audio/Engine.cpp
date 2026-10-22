@@ -375,9 +375,20 @@ void Engine::scheduleRepublish() {
     QTimer::singleShot(0, this, &Engine::publish);   // coalesce bursts (drags) into one snapshot
 }
 
+void Engine::setBackgroundContent(bool on) {
+    if (on == m_backgroundContent) return;
+    m_backgroundContent = on;
+    auto* loader = drums::ContentLoader::instance();
+    if (on) connect(loader, &drums::ContentLoader::finished, this, &Engine::scheduleRepublish);   // a kit arrived: use it
+    else { disconnect(loader, &drums::ContentLoader::finished, this, &Engine::scheduleRepublish); loader->want({}); }
+    scheduleRepublish();
+}
+
 void Engine::publish() {
     m_republishQueued = false;
     if (m_clipsDirty) { m_clipCache.clear(); m_clipsDirty = false; }
+    m_wantedBanks = {};
+    QHash<int, std::shared_ptr<const drums::Content>> drumContent;   // becomes m_drumContent
 
     auto* s = new RenderState;
     s->generation = ++m_generation;
@@ -556,15 +567,44 @@ void Engine::publish() {
             *slot = int(td.autos.size());
             td.autos.push_back({std::vector<AutoPoint>(e.points.begin(), e.points.end())});
         }
-        // Prepare recorded kits outside rendering. Automated/macro library switching preloads
-        // its possible banks; the callback only follows immutable pointers.
+        // Recorded kits are prepared outside rendering: the banks this Drum Studio's library and
+        // drum sources can reach (as set, and wherever automation, clip envelopes and macros move
+        // them). Blocking: decoded here. Background: the loader's decoded banks; one still loading
+        // leaves each drum on the kit it played before (kept in this content) or the built-in one.
+        // The callback only follows immutable pointers.
         for(size_t di=0;di<td.devices.size();++di){auto& slot=td.devices[di];if(slot.type!=DeviceType::DrumStudio)continue;
             auto isLibrary=[](int param){return param>=drumstudio::ContentLibrary&&param<drumstudio::recordedMic(0);};
-            bool automated=false;for(int i=drumstudio::ContentLibrary;i<drumstudio::recordedMic(0);++i)automated|=slot.paramAuto[i]>=0;
-            for(const auto& link:td.links)automated|=link.dst==int(di)&&isLibrary(link.param);
-            auto clipUsesLibrary=[&](const ClipRef& clip){if(!clip)return false;for(const auto& e:clip->envs)if(e.deviceId==slot.deviceId&&e.kind==3&&isLibrary(e.index))return true;return false;};
-            for(const auto& clip:td.slotClips)automated|=clipUsesLibrary(clip);for(const auto& place:td.arrangement)automated|=clipUsesLibrary(place.clip);
-            slot.drumContent=drums::prepareContent(slot.params,automated);
+            std::vector<std::tuple<int,float,float>> ranges;
+            auto addPoints=[&](int param,const std::vector<AutoPoint>& pts){
+                for(size_t k=0;k<pts.size();++k)ranges.emplace_back(param,float(pts[k].value),float(pts[k+1<pts.size()?k+1:k].value));};
+            for(int i=drumstudio::ContentLibrary;i<drumstudio::recordedMic(0);++i)if(slot.paramAuto[i]>=0)addPoints(i,td.autos[size_t(slot.paramAuto[i])].pts);
+            for(const auto& link:td.links)if(link.dst==int(di)&&isLibrary(link.param))ranges.emplace_back(link.param,link.lo,link.hi);
+            auto clipRanges=[&](const ClipRef& clip){if(!clip)return;for(const auto& e:clip->envs)if(e.deviceId==slot.deviceId&&e.kind==3&&isLibrary(e.index))addPoints(e.index,e.pts);};
+            for(const auto& clip:td.slotClips)clipRanges(clip);for(const auto& place:td.arrangement)clipRanges(place.clip);
+            const auto reach=drums::reachableBanks(slot.params,ranges);
+            auto content=std::make_shared<drums::Content>();
+            auto* loader=drums::ContentLoader::instance();
+            for(int b=0;b<drums::kContentBanks;++b)if(reach[size_t(b)]){
+                m_wantedBanks[size_t(b)]=true;
+                content->banks[size_t(b)]=m_backgroundContent?loader->ready(b):drums::loadContentBank(b);
+            }
+            const auto before=m_drumContent.value(slot.deviceId);
+            for(int d=0;d<drums::kContentDrums;++d){
+                const int wanted=drums::contentIndex(slot.params,d);
+                int plays=wanted>=0&&content->banks[size_t(wanted)]?wanted:-1;
+                if(wanted>=0&&plays<0&&before&&m_backgroundContent){   // still loading: the kit it played until now
+                    const auto state=loader->status(wanted).state;
+                    const int previous=before->effective[size_t(d)];
+                    const bool coming=state!=drums::ContentLoader::State::Failed&&state!=drums::ContentLoader::State::Missing;   // idle: want() below queues it
+                    if(coming&&previous>=0&&before->banks[size_t(previous)]){
+                        if(!content->banks[size_t(previous)])content->banks[size_t(previous)]=before->banks[size_t(previous)];
+                        content->fallback[size_t(d)]=previous;plays=previous;
+                    }
+                }
+                content->effective[size_t(d)]=plays;
+            }
+            slot.drumContent=content;
+            drumContent.insert(slot.deviceId,content);
         }
 
     };
@@ -644,6 +684,8 @@ void Engine::publish() {
     for (auto it = m_namCache.begin(); it != m_namCache.end();)
         it = seen.contains(it.key()) ? std::next(it) : m_namCache.erase(it);
 
+    m_drumContent = std::move(drumContent);
+    if (m_backgroundContent) drums::ContentLoader::instance()->want(m_wantedBanks);   // load what's missing, let go of the rest
     delete m_pending.exchange(s, std::memory_order_acq_rel);   // an unclaimed older snapshot is ours to free
     collectGarbage();
 }

@@ -37,8 +37,10 @@ public:
         }
     }
     void render(const EventList& ev, float* L, float* R, int frames, const float* p, const Context& ctx) override {
-        bool changed=false;for(int i=0;i<6;++i){const auto* bank=ctx.drumContent?ctx.drumContent->banks[i].get():nullptr;changed|=bank!=m_seenBanks[i];m_seenBanks[i]=bank;}
-        if(changed)panic(); // changing content invalidates old hit pointers before any dereference
+        // A bank that went away or was replaced invalidates the voices' hit pointers before any
+        // dereference; one that just arrived (a background load) leaves ringing drums alone.
+        bool changed=false;for(int i=0;i<6;++i){const auto* bank=ctx.drumContent?ctx.drumContent->banks[i].get():nullptr;changed|=m_seenBanks[i]&&bank!=m_seenBanks[i];m_seenBanks[i]=bank;}
+        if(changed)panic();
         m_content=ctx.drumContent;
         m_p = p; m_kit = std::clamp(pc(T::DrumStudio, p, ds::Kit), 0, ds::kKits - 1);
         std::fill_n(m_cl, frames, 0.f); std::fill_n(m_cr, frames, 0.f);
@@ -84,7 +86,8 @@ private:
         const int midiVelocity = std::clamp(int(std::lround(e.velocity * 127.f)), 1, 127);
         const int layer = midiVelocity <= 26 ? 0 : midiVelocity <= 52 ? 1 : midiVelocity <= 77 ? 2 : midiVelocity <= 102 ? 3 : 4;
         const int source = pc(T::DrumStudio, m_p, ds::piece(drum, ds::Source));
-        const drums::RecordedHit* recording=nullptr;const int content=drums::contentIndex(m_p,drum);
+        const drums::RecordedHit* recording=nullptr;int content=drums::contentIndex(m_p,drum);
+        if(content>=0&&m_content&&!m_content->banks[content])content=m_content->fallback[size_t(drum)];   // still loading: the kit it played before
         if(content>=0&&m_content&&m_content->banks[content])recording=drums::recordedHit(*m_content->banks[content],e.pitch==35?36:e.pitch,midiVelocity,m_roundRobin[e.pitch&127]++);
         const bool alternate=m_p[ds::recordedMic(drum)]>=.5f;
         const auto& sample=recording?(alternate&&!recording->alternate.mono.empty()?recording->alternate:recording->close):m_library[source ? source - 1 : drums::bankFor(m_kit)].notes[drums::sampleNote(e.pitch)][layer];

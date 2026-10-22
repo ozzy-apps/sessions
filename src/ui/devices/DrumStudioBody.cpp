@@ -53,6 +53,25 @@ namespace ds = drumstudio;
 QHash<int, int>& studioPages() { static QHash<int, int> p; return p; }   // device id -> the page shown
 QHash<int, int>& studioDrums() { static QHash<int, int> d; return d; }   // device id -> the drum selected
 
+// What the recorded libraries this Drum Studio plays are doing, for its status line: empty when
+// they're ready (or none is used), else "Loading Naked Drums 43 %", "Naked Drums couldn't load:
+// …" or "Naked Drums isn't installed". `busy`: one is still loading.
+QString contentStatus(const DeviceBody* body,bool* busy=nullptr){
+    using Loader=audio::drums::ContentLoader;
+    if(busy)*busy=false;
+    const auto positions=body->positions();const auto used=audio::drums::reachableBanks(positions.data(),{});
+    QString loading,failed,missing;
+    for(int b=0;b<audio::drums::kContentBanks;++b){if(!used[size_t(b)])continue;
+        const auto s=Loader::instance()->status(b);const QString name=audio::drums::contentName(b);
+        if(s.state==Loader::State::Loading&&loading.isEmpty())loading=QString("Loading %1 %2 %").arg(name).arg(int(s.progress*100));
+        else if(s.state==Loader::State::Queued&&loading.isEmpty())loading=QString("Loading %1").arg(name);
+        else if(s.state==Loader::State::Failed&&failed.isEmpty())failed=QString("%1 couldn't load: %2").arg(name,s.error);
+        else if(s.state==Loader::State::Missing&&missing.isEmpty())missing=QString("%1 isn't installed").arg(name);
+    }
+    if(busy)*busy=!loading.isEmpty();
+    return !loading.isEmpty()?loading:!failed.isEmpty()?failed:missing;
+}
+
 // Native, resolution-independent kit stage. The same geometry drives drawing and hit testing.
 class KitView : public Display {
 public:
@@ -66,6 +85,16 @@ public:
     void setMicMode(std::function<void(int)> fn) { m_mics=true; m_micSelected=std::move(fn); }
     void selectMic(int d) { m_mic=d; update(); }
     void tick() override { for(int d=0;d<ds::kDrums;++d)m_glow[d]=std::max(double(m_body->scope(d)),m_glow[d]-.07); update(); }
+    // A library loading (or failing) shows along the stage's foot; the built-in kit plays meanwhile.
+    void paintEvent(QPaintEvent* e) override {
+        Display::paintEvent(e);
+        bool busy=false;const QString status=contentStatus(m_body,&busy);if(status.isEmpty())return;
+        QPainter p(this);p.setRenderHint(QPainter::Antialiasing);QFont f=font();f.setPixelSize(10);p.setFont(f);
+        const QString text=QFontMetrics(f).elidedText(status,Qt::ElideRight,width()-20);
+        const QRectF pill(6,height()-22,QFontMetrics(f).horizontalAdvance(text)+16,16);
+        p.setPen(Qt::NoPen);p.setBrush(theme::withAlpha(col::display,230));p.drawRoundedRect(pill,8,8);
+        p.setPen(busy?col::curve:col::label);p.drawText(pill,Qt::AlignCenter,text);
+    }
     QRectF stage() const {
         if(height()<=230)return inner().adjusted(8,8,-8,-20);
         const QRectF r=inner().adjusted(20,24,-20,-30);
@@ -291,6 +320,7 @@ private:
 class DrumStudioBody : public DeviceBody {
 public:
     DrumStudioBody(const DeviceContext& c, QWidget* parent) : DeviceBody(c, parent) {
+        connect(audio::drums::ContentLoader::instance(),&audio::drums::ContentLoader::progressed,this,[this]{refresh();});   // the stage shows a loading library
         auto* root = rootRow(this);
         auto* pageCol = vbox(2);
         m_pages = new QStackedWidget(this);
@@ -512,7 +542,7 @@ public:
         const int v=std::clamp(int(std::lround(m_velocity()*127)),1,127);const int layer=v<=26?0:v<=52?1:v<=77?2:v<=102?3:4;
         int layers=5,shownLayer=layer+1;const auto* sample=&audio::drums::library()[bank].notes[audio::drums::sampleNote(gm)][layer];
         const auto positions=m_body->positions();const int content=audio::drums::contentIndex(positions.data(),drum);
-        if(content>=0){if(content!=m_contentIndex||!m_contentBank){m_contentBank=audio::drums::loadContentBank(content);m_contentIndex=content;}
+        if(content>=0){if(content!=m_contentIndex||!m_contentBank){m_contentBank=audio::drums::ContentLoader::instance()->ready(content);m_contentIndex=m_contentBank?content:-2;}   // decoded by the loader, never here
             if(m_contentBank)if(const auto* hit=audio::drums::recordedHit(*m_contentBank,gm,v,0,&layers)){sample=m_body->on(ds::recordedMic(drum))&&!hit->alternate.mono.empty()?&hit->alternate:&hit->close;shownLayer=1;for(const auto& group:m_contentBank->notes[size_t(gm)]){if(v<=group.high)break;++shownLayer;}}}
         else m_contentBank.reset();const auto& s=*sample;
         const auto plot=r.adjusted(10,28,-10,-26);const int width=std::max(1,int(plot.width()));
@@ -528,6 +558,11 @@ public:
         double decay=m_body->real(ds::param(drum,ds::Decay));const int recipe=m_body->pick(ds::Kit);decay*=recipe==2?.65:recipe==3?.8:1;
         if(decay<.999){const double tau=(drum>=ds::Ride?1.5:.35)*decay/(1-decay);QPainterPath path;for(int x=0;x<=width;++x){double y=plot.center().y()-std::exp(-(seconds*x/width)/tau)*plot.height()*.46;if(!x)path.moveTo(plot.left()+x,y);else path.lineTo(plot.left()+x,y);}p.setPen(QPen(col::cyan,1,Qt::DashLine));p.drawPath(path);}
         p.setPen(col::label);p.drawText(r.adjusted(10,7,-10,-7),Qt::AlignTop|Qt::AlignLeft,"RECORDED SOURCE");
+        if(content>=0&&!m_contentBank){bool busy=false;const QString status=contentStatus(m_body,&busy);   // until the library arrives: the built-in hit, and why
+            if(!status.isEmpty()){QFont f=p.font();f.setPixelSize(10);p.setFont(f);const QString text=QFontMetrics(f).elidedText(status,Qt::ElideRight,int(plot.width())-16);
+                const QRectF pill(plot.left()+4,plot.top()+4,QFontMetrics(f).horizontalAdvance(text)+16,16);
+                p.setPen(Qt::NoPen);p.setBrush(theme::withAlpha(col::display,230));p.drawRoundedRect(pill,8,8);
+                p.setPen(busy?col::curve:col::label);p.drawText(pill,Qt::AlignCenter,text);}}
         p.setPen(col::curve);p.drawText(r.adjusted(10,7,-10,-7),Qt::AlignTop|Qt::AlignRight,QString("%1 / %2 · RR 1 · %3 s").arg(shownLayer).arg(layers).arg(seconds,0,'f',2));
     }
 private:
@@ -616,7 +651,8 @@ public:
         auto* root=new QVBoxLayout(this);root->setContentsMargins(10,8,10,8);root->setSpacing(8);
         auto* bar=hbox(10);auto* title=new QLabel("DRUM STUDIO",this);title->setObjectName("studioHeading");bar->addWidget(title);
         auto* library=chooser(ds::ContentLibrary,160);library->setObjectName("studioContentLibrary");bar->addWidget(library);bar->addWidget(chooser(ds::Kit,112));auto* source=new QLabel(this);source->setObjectName("studioSourceInfo");source->setMinimumWidth(0);bar->addWidget(source,1);bar->addWidget(new QLabel("Output",this));bar->addWidget(field(ds::Volume,66));
-        m_refreshers.push_back([this,source]{int pieces=0;for(int d=0;d<ds::kDrums;++d)pieces+=on(ds::piece(d,ds::Present));source->setText(QString("%1 pieces%2").arg(pieces).arg(pick(ds::ContentLibrary)>0&&!audio::drums::contentInstalled(pick(ds::ContentLibrary)-1)?" · Content missing":""));});
+        m_refreshers.push_back([this,source]{int pieces=0;for(int d=0;d<ds::kDrums;++d)pieces+=on(ds::piece(d,ds::Present));const QString status=contentStatus(this);source->setText(QString("%1 pieces%2").arg(pieces).arg(status.isEmpty()?QString():" · "+status));});
+        connect(audio::drums::ContentLoader::instance(),&audio::drums::ContentLoader::progressed,this,[this]{refresh();});   // the status follows the loader
         root->addLayout(bar);auto* nav=hbox(4);m_pages=new QStackedWidget(this);
         for(int i=0;i<4;++i){auto* b=new QPushButton(QStringList{"Kit","Mixer","Grooves","Microphones"}[i],this);b->setObjectName(QString("studioTab%1").arg(i));b->setCheckable(true);b->setMinimumHeight(30);b->setIconSize(QSize(20,20));m_tabs.push_back(b);connect(b,&QPushButton::clicked,this,[this,i]{setPage(i);});nav->addWidget(b);}
         nav->addStretch();root->addLayout(nav);root->addWidget(m_pages,1);

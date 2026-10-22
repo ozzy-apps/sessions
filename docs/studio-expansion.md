@@ -23,6 +23,17 @@ Frankensnare expands three snare articulations. Other notes and unmapped articul
 
 ![Recorded kit in the embedded studio](screenshots/studio-expansion/recorded-kit-dark.png)
 
+## Loading and memory (0.46)
+
+Recorded libraries load in the background: choosing one never freezes the window.
+- **While it loads:** each drum keeps playing the library it played before, or the built-in kit if it had none, so there's no gap. The new one takes over as soon as it's ready, and drums that are still ringing aren't cut off.
+- **Status:** the Drum Studio top bar, the kit stage and the recorded-source view show "Loading Naked Drums 43 %". If a library can't be read they say why ("… couldn't load: …"), and they say when one isn't installed.
+- **Changing your mind:** a library you switch away from while it loads is abandoned.
+- **Automation:** library automation, clip envelopes and macros preload only the libraries they actually move through, not all six.
+- **Memory** (**Preferences → Audio → Drum libraries**): libraries in use always stay loaded. Ones you switched away from stay ready for an instant switch back while all loaded libraries together stay under the limit: 2, 4 (to begin with), 8 or 16 GB, or no limit. The same row shows how much is in memory now.
+
+Exports (and the regression suites' own engines) still decode a library before rendering, so an export always uses the recorded kit.
+
 ## Recorded microphones
 
 On **Microphones**, **Recorded source → Primary / Alternate** switches the close recording where supplied, such as snare top/bottom or kick in/sub. Without an alternate, Primary remains active. Overhead and room buses use aligned recordings where provided; other sources retain modeled ambience. Recorded ambience continues after a shorter close recording ends.

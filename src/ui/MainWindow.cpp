@@ -378,6 +378,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_engine->setOutput(PreferencesDialog::savedAudio());   // before the first start
     m_engine->setInputDevice(PreferencesDialog::inputDevice());
     m_transport->setCountInBars(PreferencesDialog::countInBars());
+    m_engine->setBackgroundContent(true);   // recorded drum kits load without stalling the window
     m_engine->start();
     updateApc();
 
