@@ -146,6 +146,7 @@ struct DeviceSlot {
     CurvePoint curves[monolith::kCurves * osmium::kCurvePoints] = {};   // Monolith/Osmium: preallocated drawn curves
     int        curveCount[monolith::kCurves] = {};
     SamplePtr  sample;   // Sampler
+    std::vector<SampleZone> sampleZones;
     double     slices[sampler::kMaxSlices] = {};   // Sampler: its manual slices (seconds)
     int        sliceCount = 0;
     double     sampleBpm = 0;                      // Sampler: the sample's own tempo
@@ -505,6 +506,7 @@ void Engine::publish() {
             slot.chains = std::min(int(d.chains.size()), racks::kChains);
             slot.enabled = d.enabled;
             slot.sample = d.sample;
+            slot.sampleZones.assign(d.sampleZones.begin(),d.sampleZones.end());
             slot.sampleBpm = d.sampleBpm;
             slot.sliceCount = std::min(int(d.slices.size()), sampler::kMaxSlices);
             for (int k = 0; k < slot.sliceCount; ++k) slot.slices[k] = d.slices[k];
@@ -512,7 +514,7 @@ void Engine::publish() {
             for (const ModRoute& r : d.mods) if (int(slot.mods.size()) < monolith::kMaxRoutes) slot.mods.push_back(r);
             for (int c = 0; c < monolith::kCurves && c < d.curves.size(); ++c) {
                 const QVector<CurvePoint>& pts = d.curves[c];
-                slot.curveCount[c] = std::min(int(pts.size()), deviceType(d.name) == DeviceType::Osmium ? osmium::kCurvePoints : monolith::kCurvePoints);
+                slot.curveCount[c] = std::min(int(pts.size()), deviceType(d.name) == DeviceType::Osmium || deviceType(d.name) == DeviceType::Shaper ? osmium::kCurvePoints : monolith::kCurvePoints);
                 for (int k = 0; k < slot.curveCount[c]; ++k) slot.curves[c * osmium::kCurvePoints + k] = pts[k];
             }
             for (int i = 0; i < d.params.size() && i < kMaxParams; ++i) slot.params[i] = float(d.params[i].value);
@@ -523,9 +525,15 @@ void Engine::publish() {
             for (int c = 0; c < slot.chains && c < d.zones.size(); ++c) slot.zones[c] = d.zones[c];
             if (m_exporting && sidechain::supports(type)) slot.params[sidechain::param(type, sidechain::Listen)] = 0;   // never export the key
             if (holdsIr(type) && d.sample) {   // prepare the IR here, never on the audio thread
+                if (type == DeviceType::HybridReverb) {
+                    auto k = m_longIrCache.value(d.sample.get());
+                    if (!k) { k = makeIrKernel(d.sample, m_sr, int(std::ceil(8 * m_sr / kIrBlock))); m_longIrCache.insert(d.sample.get(), k); }
+                    slot.ir = k;
+                } else {
                 auto k = m_irCache.value(d.sample.get());
                 if (!k) { k = makeIrKernel(d.sample, m_sr); m_irCache.insert(d.sample.get(), k); }
                 slot.ir = k;
+                }
             }
             if (type == DeviceType::Nam) {   // the capture's network, built and prewarmed here; the audio thread only runs it
                 nam::ModelPtr chosen = d.model;   // Quality Light: the lightest size a container holds
@@ -553,8 +561,8 @@ void Engine::publish() {
         // Macros knobs and what they turn (only parameters of devices on this track)
         for (const Device& d : t.devices)
             for (const MacroMap& m : d.maps)
-                if (deviceIndex.contains(m.deviceId) && m.param >= 0 && m.param < kMaxParams && m.macro >= 0 && m.macro < macros::kKnobs)
-                    td.links.push_back({deviceIndex.value(d.id), m.macro, deviceIndex.value(m.deviceId), m.param, float(m.lo), float(m.hi)});
+                if ((deviceIndex.contains(m.deviceId) || (modulator::supports(deviceType(d.name)) && m.deviceId == 0 && m.param < 2 + kMaxReturns)) && m.param >= 0 && m.param < kMaxParams && m.macro >= 0 && m.macro < macros::kKnobs)
+                    td.links.push_back({deviceIndex.value(d.id), m.macro, m.deviceId ? deviceIndex.value(m.deviceId) : -1, m.param, float(m.lo), float(m.hi)});
         // Automation you've overridden by hand stays off until Re-Enable Automation.
         for (const Envelope& e : t.automation) {
             if (e.points.isEmpty() || t.overriddenTargets.contains(e.target)) continue;
@@ -683,6 +691,8 @@ void Engine::publish() {
     // reference until it retires the state that still uses them.
     for (auto it = m_procs.begin(); it != m_procs.end();)
         it = seen.contains(it.key()) ? std::next(it) : m_procs.erase(it);
+    for (auto it=m_longIrCache.begin();it!=m_longIrCache.end();)
+        it=it.value().use_count()==1?m_longIrCache.erase(it):std::next(it);
     for (auto it = m_namCache.begin(); it != m_namCache.end();)
         it = seen.contains(it.key()) ? std::next(it) : m_namCache.erase(it);
 
@@ -798,6 +808,15 @@ float Engine::deviceScope(int deviceId, int which) const {
     const auto it = m_procs.constFind(deviceId);
     if (it == m_procs.constEnd() || !it->proc || which < 0 || which > 15) return 0.0f;
     return it->proc->scope[which].load(std::memory_order_relaxed);
+}
+
+float Engine::deviceSpectrum(int deviceId, int bin, bool output) const {
+    const auto it = m_procs.constFind(deviceId);
+    return it != m_procs.constEnd() && it->proc ? it->proc->spectrum(bin, output) : -120;
+}
+std::shared_ptr<DeviceProcessor> Engine::deviceProcessor(int deviceId) const {
+    const auto it = m_procs.constFind(deviceId);
+    return it != m_procs.constEnd() ? it->proc : nullptr;
 }
 
 void Engine::previewSample(const SamplePtr& sample) {
@@ -1688,7 +1707,13 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             for (int p = 0; p < kMaxParams; ++p) if (d.paramAuto[p] >= 0) params[p] = td.autos[size_t(d.paramAuto[p])].valueAt(b0);
             if (clipEnvs) for (int o = 0; o < m_ovCount; ++o) if (m_ovParams[o].deviceId == d.deviceId) params[m_ovParams[o].param] = m_ovParams[o].value;
             for (const TrackData::Link& l : td.links)
-                if (l.dst == di) params[l.param] = std::clamp(l.lo + (l.hi - l.lo) * valueOf(td.devices[size_t(l.src)], l.macro), 0.0f, 1.0f);
+                if (l.dst == di) {
+                    const DeviceSlot& src = td.devices[size_t(l.src)];
+                    const bool mod = modulator::supports(src.type);
+                    if (mod && !src.enabled) continue;
+                    const float value = mod && src.proc ? src.proc->modulationValue() : valueOf(src, l.macro);
+                    params[l.param] = std::clamp(l.lo + (l.hi - l.lo) * value, 0.0f, 1.0f);
+                }
         };
         // One device on `L / R`, its notes in `ev` (MIDI effects swap in what they make).
         auto runDevice = [&](int di, EventList*& evs, EventList*& spareEvs, float* bL, float* bR) {
@@ -1698,6 +1723,8 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             paramsOf(di, params);
             Context dctx = ctx;
             dctx.sample = d.sample.get();
+            dctx.sampleZones = d.sampleZones.data();
+            dctx.sampleZoneCount = int(d.sampleZones.size());
             dctx.slices = d.slices;
             dctx.sliceCount = d.sliceCount;
             dctx.sampleBpm = d.sampleBpm;
@@ -1950,6 +1977,14 @@ void Engine::renderBlock(float* out, int n, const float* in) {
         if (!preTapped) preTap();
     };
 
+    auto mappedMixer = [](const TrackData& td, int param, float base) {
+        for (const TrackData::Link& link : td.links) if (link.dst == -1 && link.param == param) {
+            const auto& src = td.devices[size_t(link.src)];
+            if (src.enabled && src.proc && modulator::supports(src.type))
+                base = std::clamp(link.lo + (link.hi - link.lo) * src.proc->modulationValue(), 0.f, 1.f);
+        }
+        return base;
+    };
     int clickAt = -1;
     bool accent = false;
     if (S) {
@@ -1960,14 +1995,14 @@ void Engine::renderBlock(float* out, int n, const float* in) {
 
         // Fader, pan (balance) and sends of a track's buffer into `outL / outR` (Main or a group bus) and the returns.
         auto mixTrack = [&](const TrackData& td, PlayState& ps, float* outL, float* outR, int index) {
-            const float vol = m_ovVolume >= 0 ? m_ovVolume : td.volAuto >= 0 ? td.autos[size_t(td.volAuto)].valueAt(b0) : td.volume;
-            const float pan = m_ovPan >= 0 ? m_ovPan * 2 - 1 : td.panAuto >= 0 ? td.autos[size_t(td.panAuto)].valueAt(b0) * 2 - 1 : td.pan;
+            const float vol = mappedMixer(td, 0, m_ovVolume >= 0 ? m_ovVolume : td.volAuto >= 0 ? td.autos[size_t(td.volAuto)].valueAt(b0) : td.volume);
+            const float pan = mappedMixer(td, 1, m_ovPan >= 0 ? m_ovPan : td.panAuto >= 0 ? td.autos[size_t(td.panAuto)].valueAt(b0) : (td.pan + 1) * .5f) * 2 - 1;
             const bool audible = td.active && (!S->anySolo || td.soloed);
             const float g = audible ? faderGain(vol) : 0.0f;
             const float targetL = g * std::min(1.0f, 1.0f - pan), targetR = g * std::min(1.0f, 1.0f + pan);
             float sendFrom[kMaxReturns], sendTo[kMaxReturns];
             for (int k = 0; k < nr; ++k) {
-                const float amount = m_ovSend[k] >= 0 ? m_ovSend[k] : td.sendAuto[k] >= 0 ? td.autos[size_t(td.sendAuto[k])].valueAt(b0) : td.sends[k];
+                const float amount = mappedMixer(td, k + 2, m_ovSend[k] >= 0 ? m_ovSend[k] : td.sendAuto[k] >= 0 ? td.autos[size_t(td.sendAuto[k])].valueAt(b0) : td.sends[k]);
                 sendFrom[k] = ps.send[k];
                 sendTo[k] = audible ? amount : 0.0f;
                 ps.send[k] = sendTo[k];
@@ -2090,8 +2125,8 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             EventList* ev = &m_evA;
             EventList* spare = &m_evB;
             runChain(rd, ev, spare, m_retL[k], m_retR[k], ctx, false, false);
-            const float vol = rd.volAuto >= 0 ? rd.autos[size_t(rd.volAuto)].valueAt(b0) : rd.volume;
-            const float pan = rd.panAuto >= 0 ? rd.autos[size_t(rd.panAuto)].valueAt(b0) * 2 - 1 : rd.pan;
+            const float vol = mappedMixer(rd, 0, rd.volAuto >= 0 ? rd.autos[size_t(rd.volAuto)].valueAt(b0) : rd.volume);
+            const float pan = mappedMixer(rd, 1, rd.panAuto >= 0 ? rd.autos[size_t(rd.panAuto)].valueAt(b0) : (rd.pan+1)*.5f) * 2 - 1;
             const float g = rd.active ? faderGain(vol) : 0.0f;
             const float targetL = g * std::min(1.0f, 1.0f - pan), targetR = g * std::min(1.0f, 1.0f + pan);
             float peak = 0;
@@ -2126,7 +2161,7 @@ void Engine::renderBlock(float* out, int n, const float* in) {
     }
 
     // ---- main: fader, metronome and browser preview on top (like a cue output), soft clip, meter
-    const float mg = S ? faderGain(S->mainVolume) : 0.0f;
+    const float mg = S ? faderGain(mappedMixer(S->master, 0, S->mainVolume)) : 0.0f;
     const float clickGain = S ? 0.35f * faderGain(S->cueVolume) : 0.0f;
     const SampleData* preview = S ? S->preview.get() : nullptr;
     if (S && S->previewSerial != m_previewPlaying) { m_previewPlaying = S->previewSerial; m_previewPos = preview ? 0 : -1; }

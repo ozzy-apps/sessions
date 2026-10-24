@@ -2743,6 +2743,7 @@ private:
 } // namespace
 
 DeviceBody* createInstrumentBody(const DeviceContext& ctx, QWidget* parent) {
+    if (ctx.type == DeviceType::Multisampler) return createProductionBody(ctx, parent);
     switch (ctx.type) {
     case T::DrumRack:       return new DrumRackBody(ctx, parent);
     case T::DrumStudio:     return createDrumStudioBody(ctx, parent);

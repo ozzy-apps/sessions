@@ -365,6 +365,10 @@ float DeviceBody::scope(int k) const {
 }
 
 QString DeviceBody::target(int i) const { return QString("device:%1:%2:%3").arg(m_ctx.trackId).arg(m_ctx.deviceId).arg(i); }
+float DeviceBody::spectrum(int bin, bool output) const {
+    audio::Engine* e = m_ctx.transport ? m_ctx.transport->engine() : nullptr;
+    return e ? e->deviceSpectrum(m_ctx.deviceId, bin, output) : -120;
+}
 
 void DeviceBody::edit(int i, double v) {
     const Device* cur = device();

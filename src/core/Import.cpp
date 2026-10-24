@@ -425,6 +425,7 @@ void switchIrIn(Device& d) {
     if (type == DeviceType::GuitarAmp && d.params.size() > guitaramp::Cab) d.params[guitaramp::Cab].value = choicePosition(guitaramp::kLoadedIr, guitaramp::kCabs);
     if (type == DeviceType::Nam && d.params.size() > namdev::Ir) d.params[namdev::Ir].value = 1;
     if (type == DeviceType::Cabinet && d.params.size() > cabinet::Ir) d.params[cabinet::Ir].value = 1;
+    if (type == DeviceType::HybridReverb && d.params.size() > hybrid::Routing) d.params[hybrid::Routing].value = choicePosition(2, 4);
 }
 }
 

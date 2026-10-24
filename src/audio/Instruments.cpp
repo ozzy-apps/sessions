@@ -2,6 +2,7 @@
 // the drum kits. Parameter indices follow core/DeviceSpecs.cpp.
 
 #include "DeviceKit.h"
+#include "ProductionEffects.h"
 #include "Wavetables.h"
 #include "Stretch.h"
 #include "Resample.h"
@@ -1140,6 +1141,7 @@ private:
 };
 
 std::shared_ptr<DeviceProcessor> createInstrument(DeviceType type, float sr) {
+    if (type == DeviceType::Multisampler) return createMultisampler(sr);
     switch (type) {
     case T::DrumRack:       return std::make_shared<DrumRack>(sr);
     case T::DrumKit:        return std::make_shared<DrumKit>(sr, 0);

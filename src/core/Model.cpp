@@ -44,9 +44,15 @@ static bool operator==(const DrumPad& a, const DrumPad& b) { return a.name == b.
 static bool operator==(const MacroMap& a, const MacroMap& b) {
     return a.macro == b.macro && a.deviceId == b.deviceId && a.param == b.param && a.lo == b.lo && a.hi == b.hi;
 }
+static bool sameDeviceParams(const Device& a,const Device& b) {
+    if(deviceType(a.name)!=DeviceType::Looper)return a.params==b.params;
+    if(a.params.size()!=b.params.size())return false;
+    for(int i=0;i<a.params.size();++i)if(!looper::transient(i)&&!(a.params[i]==b.params[i]))return false;
+    return true;
+}
 static bool operator==(const Device& a, const Device& b) {
-    return a.id == b.id && a.name == b.name && a.kind == b.kind && a.enabled == b.enabled && a.params == b.params
-        && a.samplePath == b.samplePath && a.modelPath == b.modelPath && a.pads == b.pads && a.maps == b.maps && a.mods == b.mods
+    return a.id == b.id && a.name == b.name && a.kind == b.kind && a.enabled == b.enabled && sameDeviceParams(a,b)
+        && a.samplePath == b.samplePath && a.modelPath == b.modelPath && a.pads == b.pads && a.sampleZones == b.sampleZones && a.maps == b.maps && a.mods == b.mods
         && a.chains == b.chains && a.zones == b.zones && a.rack == b.rack && a.chain == b.chain && a.folded == b.folded
         && a.sidechainTrack == b.sidechainTrack && a.curves == b.curves && a.sampleBpm == b.sampleBpm && a.slices == b.slices;
 }
@@ -183,10 +189,10 @@ public:
         : QUndoCommand(label), m_p(p), m_key(key), m_before(std::move(before)), m_after(std::move(after)),
           m_time(QDateTime::currentMSecsSinceEpoch()) {}
 
-    void undo() override { m_p->restoreEditState(m_before); }
+    void undo() override { m_p->restoreEditState(m_before,true); }
     void redo() override {
         if (m_first) { m_first = false; return; }   // the edit itself already happened
-        m_p->restoreEditState(m_after);
+        m_p->restoreEditState(m_after,true);
     }
     int id() const override { return m_key ? 0x5e55 : -1; }
     bool mergeWith(const QUndoCommand* other) override {
@@ -984,6 +990,7 @@ void pruneMacroMaps(QVector<Device>& devs) {
         const bool rack = isRack(c);
         const int id = c.id;
         auto gone = [&](const MacroMap& m) {
+            if (m.deviceId == 0 && modulator::supports(deviceType(c.name))) return false;
             if (!rackOf.contains(m.deviceId)) return true;
             return rack && m.deviceId != id && rackOf.value(m.deviceId) != id;
         };
@@ -1808,6 +1815,8 @@ double Project::drivenValue(int index, const QString& tg, double beat, bool play
     if (parts.size() == 3 && parts[0] == "device") {
         int macrosId = 0;
         if (const MacroMap* m = macroFor(index, parts[1].toInt(), parts[2].toInt(), &macrosId)) {
+            for (const Device& source : t->devices)
+                if (source.id == macrosId && modulator::supports(deviceType(source.name))) return enveloped(tg);
             const QString knob = target::device(macrosId, m->macro);
             double v = enveloped(knob);
             if (v < 0) v = targetValue(index, knob);
@@ -1889,7 +1898,11 @@ EditState Project::captureEditState() const {
     return s;
 }
 
-void Project::restoreEditState(const EditState& s) {
+void Project::restoreEditState(const EditState& s, bool preserveLooperTransport) {
+    QHash<int,QVector<DeviceParam>> looperCommands;
+    if(preserveLooperTransport)for(int i=0;i<=trackCount();++i)
+        if(const Track* t=trackAt(i))for(const Device& d:t->devices)
+            if(deviceType(d.name)==DeviceType::Looper)looperCommands.insert(d.id,d.params);
     // Reuse live Clip objects by id so editors holding a ClipPtr keep pointing at the right clip.
     QHash<int, ClipPtr> live;
     for (auto it = s.clips.begin(); it != s.clips.end(); ++it) {
@@ -1927,6 +1940,11 @@ void Project::restoreEditState(const EditState& s) {
     rebuild(returns, s.returns);
     master.devices = s.master.devices;
     master.automation = s.master.automation;
+    if(preserveLooperTransport)for(int i=0;i<=trackCount();++i)
+        if(Track* t=trackAt(i))for(Device& d:t->devices)if(deviceType(d.name)==DeviceType::Looper) {
+            const auto previous=looperCommands.value(d.id);
+            for(int p=0;p<d.params.size();++p)if(looper::transient(p))d.params[p].value=p<previous.size()?previous[p].value:0;
+        }
 
     scenes = s.scenes;
     locators = s.locators;

@@ -62,6 +62,8 @@ struct Context {
     int           sliceCount = 0;
     double        sampleBpm = 0;
     const SamplePtr* pads = nullptr;      // Drum Rack: its 16 pads' samples (null entries are empty pads)
+    const SampleZone* sampleZones = nullptr;
+    int sampleZoneCount = 0;
     // Drum Rack, when pads hold chains (bit k = pad k): hits on padSample pads start sample voices
     // (the others' instruments play them); voices of padPlay pads are rendered in this call (the
     // others wait for the call that renders their pad into its chain).
@@ -85,6 +87,12 @@ struct Context {
 
 class ChainMixer;
 
+struct DeviceCapture {
+    std::vector<float> stereo; // UI allocates capacity before requesting; callback fills in bounded chunks
+    int frames = 0, rate = 48000;
+    std::atomic<int> state{0}; // 0 pending, 1 complete, -1 cancelled
+};
+
 class DeviceProcessor {
 public:
     virtual ~DeviceProcessor() = default;
@@ -93,6 +101,11 @@ public:
     virtual void process(float* /*L*/, float* /*R*/, int /*frames*/, const float* /*params*/, const Context&) {}
     virtual void panic() {}     // silence voices and tails immediately
     virtual ChainMixer* chainMixer() { return nullptr; }   // racks and the Drum Rack: how their chains are mixed
+    virtual float spectrum(int /*bin*/, bool /*output*/) const { return -120; } // 256 logarithmic bins, 20 Hz to 20 kHz
+    virtual float modulationValue() const { return 0; } // audio-thread value; only standalone modulators use this
+    virtual bool requestCapture(DeviceCapture*) { return false; }
+    virtual void cancelCapture(DeviceCapture*) {}
+    void retainCapture(const std::shared_ptr<DeviceCapture>& capture) { m_captureOwner = capture; } // UI thread only
 
     // What the device panel shows live (gain reduction, a moving cutoff, …): written on the
     // audio thread, read on the UI thread. Meaning per device; see its processor. meter[2] is
@@ -105,6 +118,8 @@ public:
     // The engine's on / off crossfade (audio thread only): 1 fully on, 0 off. Switching a
     // device on or off fades over ~12 ms instead of jumping, so it never pops.
     float onMix = -1;   // < 0: not run yet (starts where it should be, no fade)
+private:
+    std::shared_ptr<DeviceCapture> m_captureOwner; // released with the processor on the UI thread
 };
 
 std::shared_ptr<DeviceProcessor> createProcessor(DeviceType type, float sampleRate);

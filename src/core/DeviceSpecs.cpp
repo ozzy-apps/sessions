@@ -701,6 +701,8 @@ std::vector<DeviceSpec> build() {
          "and the chains' notes all go on to the instrument. Split a keyboard, layer an octave, arpeggiate only the low notes."},
     };
 
+    appendProductionSpecs(s);
+
     // Presets: a device with other defaults (the browser's Sounds).
     std::vector<Preset> presets = {
         {"Sub Bass", "Analog Synth", {{0, 0.12}, {1, 0.0}, {2, 0.1}, {3, 0.0}}},
@@ -835,12 +837,13 @@ const std::vector<ModRoute>& presetMods(const QString& name) {
 bool isRackType(DeviceType type) { return type == DeviceType::InstrumentRack || type == DeviceType::AudioEffectRack || type == DeviceType::MidiEffectRack; }
 
 namespace sidechain {
-bool supports(DeviceType type) { return type == DeviceType::Compressor || type == DeviceType::Gate || type == DeviceType::AutoFilter; }
+bool supports(DeviceType type) { return type == DeviceType::Compressor || type == DeviceType::Gate || type == DeviceType::AutoFilter || type == DeviceType::EnvelopeFollower; }
 int base(DeviceType type) {
     switch (type) {
     case DeviceType::Compressor: return 8;
     case DeviceType::AutoFilter: return 8;
     case DeviceType::Gate:       return 6;
+    case DeviceType::EnvelopeFollower: return modulator::kFollowerParams;
     default: return -1;
     }
 }
@@ -853,7 +856,7 @@ double drumbuss::tunedFrequency(double hz, bool forceNote) {
 }
 
 bool isGuitarType(DeviceType type) { return type >= DeviceType::Tuner && type <= DeviceType::Cabinet; }
-bool holdsIr(DeviceType type) { return type == DeviceType::GuitarAmp || type == DeviceType::Nam || type == DeviceType::Cabinet; }
+bool holdsIr(DeviceType type) { return type == DeviceType::GuitarAmp || type == DeviceType::Nam || type == DeviceType::Cabinet || type == DeviceType::HybridReverb; }
 
 namespace drumstudio {
 const char* drumName(int drum) {

@@ -31,7 +31,46 @@ enum class DeviceType {
     Osmium,
     DrumBuss, // appended: existing device enum values remain stable
     StereoWidth,
+    ParametricEQ, Spectrum, MultibandDynamics, Lfo, EnvelopeFollower, Shaper,
+    Shifter, PitchCorrector, HybridReverb, Looper, Multisampler,
 };
+
+namespace parametric {
+constexpr int kBands = 8, kPerBand = 7;
+enum Band { Enabled, Type, Frequency, Gain, Q, Channel, Slope };
+constexpr int param(int band, Band field) { return band * kPerBand + field; }
+enum Global { Output = kBands * kPerBand, Analyze, Audition, kParams };
+}
+namespace multiband {
+enum Global { LowCross, HighCross, Amount, Mix, Output, kBase };
+enum Band { AboveThreshold, AboveRatio, BelowThreshold, BelowRatio, Attack, Release, Gain, Solo, Enabled, kPerBand };
+constexpr int param(int band, Band field) { return kBase + band * kPerBand + field; }
+constexpr int kParams = kBase + 3 * kPerBand;
+}
+namespace modulator {
+enum Param { Rate, Hz, Shape, Depth, Offset, Phase, Rise, Fall, Gain, kParams };
+constexpr int kFollowerParams=5;
+inline int param(DeviceType type,Param field) {
+    if(type!=DeviceType::EnvelopeFollower)return int(field);
+    switch(field){case Depth:return 0;case Offset:return 1;case Rise:return 2;case Fall:return 3;case Gain:return 4;default:return -1;}
+}
+inline bool supports(DeviceType t) { return t == DeviceType::Lfo || t == DeviceType::EnvelopeFollower || t == DeviceType::Shaper; }
+}
+namespace pitchfx {
+enum Param { Mode, Pitch, Fine, Formant, Preserve, Frequency, Mix, Output, Root, Scale, Strength, Retune, kParams };
+}
+namespace hybrid {
+enum Param { Routing, Blend, Decay, Size, PreDelay, Damping, LowCut, HighCut, Width, Freeze, Mix, Output, kParams };
+}
+namespace looper {
+enum Param { State, Bars, Feedback, Mix, Output, Reverse, HalfSpeed, Undo, Clear, RecordTrigger, PlayTrigger, StopTrigger, OverdubTrigger, kParams };
+inline bool transient(int p) { return p==State||p==Undo||p==Clear||(p>=RecordTrigger&&p<=OverdubTrigger); }
+}
+namespace multisampler {
+enum Param { Attack, Decay, Sustain, Release, Volume, Tune, Cutoff, Resonance, Loop, kParams };
+constexpr int kMaxZones=128, kVoices=32;
+}
+void appendProductionSpecs(std::vector<struct DeviceSpec>& specs);
 
 // Drum Buss: fixed indices shared by the processor and compact panel.
 namespace drumbuss {

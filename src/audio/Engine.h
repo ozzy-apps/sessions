@@ -150,6 +150,8 @@ public:
     // A device's live meter (see DeviceProcessor::meter), for its panel.
     float deviceMeter(int deviceId, int which) const;
     float deviceScope(int deviceId, int which) const;   // DeviceProcessor::scope (0 .. 15)
+    float deviceSpectrum(int deviceId, int bin, bool output) const;
+    std::shared_ptr<DeviceProcessor> deviceProcessor(int deviceId) const; // UI-owned lifetime for asynchronous capture requests
     // A rack chain's output peak since the last call (the rack panel's chain meters).
     float takeChainPeak(int rackId, int chain);
 
@@ -274,6 +276,7 @@ private:
     struct Proc { DeviceType type; std::shared_ptr<DeviceProcessor> proc; };
     QHash<int, Proc> m_procs;   // by device id
     QHash<const SampleData*, std::shared_ptr<const struct IrKernel>> m_irCache;   // Guitar Amp IRs, by sample (each keeps its sample alive)
+    QHash<const SampleData*, std::shared_ptr<const struct IrKernel>> m_longIrCache;
     QHash<int, std::shared_ptr<nam::Runtime>> m_namCache;   // NAM devices' prepared networks, by device id (reused while the capture and rate stay)
     quint64 m_nextSeq = 0;
 

@@ -10,6 +10,9 @@ namespace sessions::devui {
 
 DeviceBody* createInstrumentBody(const DeviceContext& ctx, QWidget* parent);   // nullptr: none of its own
 DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent);
+DeviceBody* createProductionBody(const DeviceContext& ctx, QWidget* parent);
+DeviceBody* createStudioBody(const DeviceContext& ctx, QWidget* parent);
+QHBoxLayout* createSidechainSection(DeviceBody* body, DeviceType type);
 DeviceBody* createMidiBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createRackBody(const DeviceContext& ctx, QWidget* parent);   // Instrument / Audio Effect Rack
 DeviceBody* createGuitarBody(const DeviceContext& ctx, QWidget* parent);  // Tuner, Guitar Amp, pedals

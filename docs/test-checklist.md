@@ -1,5 +1,16 @@
 # Sessions — manual test checklist
 
+## 0.48 · Production devices
+
+1. Load Parametric EQ, drag all eight bands, change filters/channels/slopes, audition a band, automate a gain and compare bypass. Check spectra against a known tone and test Spectrum Hold.
+2. Multiband Dynamics: verify neutral reconstruction, compression above threshold, raising quiet material below threshold, band solo and inverted mapping ranges.
+3. Map LFO/Shaper/Envelope Follower to effects, volume, pan and sends. Try a source both before and after its target, bypass it, and save/reopen the set. Key the follower from a different track and check Listen.
+4. Shifter: check octaves, formants, frequency shifts, ring modulation and Dry/Wet. Pitch Corrector: sing a monophonic line into the selected scale; assess latency, tracking and artifacts on real vocals.
+5. Hybrid Reverb: load a multi-second stereo room IR, try every routing, predelay and Freeze; check small-buffer CPU load and tails. Compare Cabinet/NAM against existing sets.
+6. Looper: map the four separate transport buttons, record fixed/free loops, overdub while hearing live input, undo, reverse and half-speed playback. Save Loop, save the set and reopen. Unsaved recordings require Save Loop before ordinary set saving. Check export while playing, cancellation while changing the loop, and Clear.
+7. Multisampler: import named WAVs and a basic SFZ with velocity layers and round robins. Expand, edit zones, undo/redo, move the set with collected samples and reopen. Check missing samples and unsupported SFZ errors.
+8. Recheck APC Key 25 mappings and recorded Drum Studio streaming/loading from 0.46/0.47. Run all CTest suites and the app's screenshot capture pass before publication.
+
 ## 0.47 · Streaming long drum recordings from disk
 
 1. **Preferences → Audio → Drum libraries**: **Stream long recordings from disk** is on. Load **Naked Drums** or **MuldjordKit**: "In memory now" is well below the "without streaming" figure next to it.

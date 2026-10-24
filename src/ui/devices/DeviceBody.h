@@ -121,6 +121,7 @@ public:
     double  posFor(int i, double real) const;   // the knob position that gives `real`
     float   meter(int k) const;    // the processor's live meter (see DeviceProcessor::meter)
     float   scope(int k) const;    // the processor's scope values (see DeviceProcessor::scope)
+    float   spectrum(int bin, bool output = true) const;
     QString target(int i) const;   // the MIDI-map target of parameter i
 
     // A knob turn: one undo step per knob while it moves.

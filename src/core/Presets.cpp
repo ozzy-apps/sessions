@@ -1,4 +1,5 @@
 #include "Presets.h"
+#include "DeviceSpecs.h"
 #include "SetFile.h"
 #include <QDir>
 #include <QFile>
@@ -85,7 +86,7 @@ bool read(const QString& path, Project::DeviceBlocks& blocks, QString* name, QSt
         for (const Device& d : devs) ids.insert(d.id);
     }
     for (Device& d : devs) {   // a mapping to a device the preset doesn't hold would turn some other device
-        d.maps.erase(std::remove_if(d.maps.begin(), d.maps.end(), [&](const MacroMap& m) { return !ids.contains(m.deviceId); }), d.maps.end());
+        d.maps.erase(std::remove_if(d.maps.begin(), d.maps.end(), [&](const MacroMap& m) { return !(m.deviceId == 0 && modulator::supports(deviceType(d.name))) && !ids.contains(m.deviceId); }), d.maps.end());
         d.sidechainTrack = 0;   // its key source was a track of another set: pick one again
     }
     normalizeRacks(devs);

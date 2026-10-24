@@ -2,6 +2,7 @@
 // something live on their panel write it to meter[0] / meter[1] once per block.
 
 #include "DeviceKit.h"
+#include "ProductionEffects.h"
 
 namespace sessions::audio {
 
@@ -659,6 +660,7 @@ float eqResponseDb(const float* params, float freq, float sampleRate) {
 }
 
 std::shared_ptr<DeviceProcessor> createEffect(DeviceType type, float sr) {
+    if (auto effect = createProductionEffect(type, sr)) return effect;
     switch (type) {
     case T::DrumBuss:   return createDrumBuss(sr);
     case T::StereoWidth:return std::make_shared<StereoWidth>(sr);

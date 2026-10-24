@@ -217,12 +217,14 @@ static std::vector<float> defaultsOf(DeviceType t) {
 // effects get a noise + sine signal for the first half, MIDI effects their events counted in peak.
 static DevRun runDevice(audio::DeviceProcessor& proc, DeviceKind kind, const std::vector<float>& params, double seconds,
                         const std::vector<int>& notes = {60, 64, 67}, double hold = 0.5, float level = 0.5f,
-                        const SampleData* sample = nullptr, double inputFraction = 0.5, const SamplePtr* pads = nullptr) {
+                        const SampleData* sample = nullptr, double inputFraction = 0.5, const SamplePtr* pads = nullptr,
+                        const SampleZone* sampleZones = nullptr) {
     const float sr = 48000;
     DevRun out;
     audio::EventList ev, midiOut;
     audio::Context ctx;
     ctx.sampleRate = sr; ctx.tempo = 120; ctx.beatsPerSample = 2.0 / sr; ctx.playing = true; ctx.sample = sample; ctx.pads = pads;
+    ctx.sampleZones=sampleZones;ctx.sampleZoneCount=sampleZones?1:0;
     dsp::Noise rng;
     const int total = int(seconds * sr);
     float l[audio::kMaxBlock], r[audio::kMaxBlock];
@@ -1621,6 +1623,8 @@ int main(int argc, char** argv) {
         QList<QPair<double, QString>> timings;
         dsp::Noise rng;
         SamplePtr rackPads[drumrack::kPads];   // the Drum Rack plays the built-in kit
+        std::vector<float> zoneTone(48000);for(int i=0;i<48000;++i)zoneTone[i]=.5f*std::sin(dsp::kTwoPi*440*i/48000.f);
+        SampleZone zone;zone.sample=samples::fromFrames(zoneTone,{},48000);
         { const QVector<DrumPad> pads = audio::defaultDrumPads(); for (int k = 0; k < drumrack::kPads; ++k) rackPads[k] = pads.value(k).sample; }
         for (const DeviceSpec& spec : deviceSpecs()) {
             if (specOf(spec.type) != &spec) continue;   // presets share their device's processor
@@ -1629,9 +1633,10 @@ int main(int argc, char** argv) {
             const bool drums = spec.type == DeviceType::DrumKit || spec.type == DeviceType::Drum808 || spec.type == DeviceType::DrumAcoustic
                             || spec.type == DeviceType::DrumRack;
             const SamplePtr* pads = spec.type == DeviceType::DrumRack ? rackPads : nullptr;
+            const SampleZone* zones=spec.type==DeviceType::Multisampler?&zone:nullptr;
             QElapsedTimer timer; timer.start();
             DevRun d = runDevice(*proc, spec.kind, defaultsOf(spec.type), 1.0, drums ? std::vector<int>{36, 38, 42} : std::vector<int>{48, 60, 64, 67},
-                                 0.5, 0.5f, nullptr, 0.5, pads);
+                                 0.5, 0.5f, nullptr, 0.5, pads,zones);
             const double ms = double(timer.nsecsElapsed()) / 1e6;
             timings << qMakePair(ms, QString(spec.name));
             if (ms > 250) slow << QString("%1 %2 ms").arg(spec.name).arg(ms, 0, 'f', 0);
@@ -1641,7 +1646,7 @@ int main(int argc, char** argv) {
                 std::vector<float> p(audio::kMaxParams, 0.0f);
                 for (float& x : p) x = rng.uniform();
                 auto fresh = audio::createProcessor(spec.type, 48000);
-                DevRun f = runDevice(*fresh, spec.kind, p, 0.25, {36, 39, 42, 46, 60}, 0.1, 1.0f, nullptr, 0.5, pads);
+                DevRun f = runDevice(*fresh, spec.kind, p, 0.25, {36, 39, 42, 46, 60}, 0.1, 1.0f, nullptr, 0.5, pads,zones);
                 if (!f.finite || f.peak > 80) { ++badFuzz; std::printf("      %s fuzz %d: finite %d peak %.2f\n", spec.name, round, f.finite, f.peak); break; }
             }
         }
@@ -1649,7 +1654,7 @@ int main(int argc, char** argv) {
         QStringList top;
         for (int i = 0; i < std::min<qsizetype>(4, timings.size()); ++i) top << QString("%1 %2 ms").arg(timings[i].second).arg(timings[i].first, 0, 'f', 1);
         std::printf("      heaviest devices (1 s of audio): %s\n", qPrintable(top.join(", ")));
-        CHECK(devices == 52, "M6 devices: 52 devices (15 instruments, 32 audio effects including Drum Buss and Stereo Width, 5 MIDI effects)");
+        CHECK(devices == 63, "M6 devices: 63 devices (16 instruments, 42 audio effects, 5 MIDI effects)");
         CHECK(badDefaults == 0, "M6 devices: every device's defaults give finite, sane output");
         CHECK(silentInstruments == 0, "M6 devices: every instrument makes a sound");
         CHECK(badFuzz == 0, "M6 devices: random knob settings never blow up (finite, bounded)");

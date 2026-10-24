@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.47.0 LANGUAGES CXX)
+project(Sessions VERSION 0.48.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -32,6 +32,8 @@ set(SESSIONS_SOURCES
     src/core/ControlSurface.cpp
     src/core/ApcKey25.cpp
     src/core/DeviceSpecs.cpp
+    src/core/ProductionSpecs.cpp
+    src/core/SampleZones.cpp
     src/core/OsmiumPresets.cpp
     src/core/ArrangementOps.cpp
     src/core/Transport.cpp
@@ -46,6 +48,11 @@ set(SESSIONS_SOURCES
     src/audio/DrumSamples.cpp
     src/audio/DrumStream.cpp
     src/audio/Effects.cpp
+    src/audio/ProductionEffects.cpp
+    src/audio/PitchEffects.cpp
+    src/audio/SpatialEffects.cpp
+    src/audio/Looper.cpp
+    src/audio/Multisampler.cpp
     src/audio/Wavetables.cpp
     src/audio/Guitar.cpp
     src/audio/Convolver.cpp
@@ -85,6 +92,8 @@ set(SESSIONS_SOURCES
     src/ui/DeviceDrag.cpp
     src/ui/devices/DeviceBody.cpp
     src/ui/devices/EffectBodies.cpp
+    src/ui/devices/ProductionBodies.cpp
+    src/ui/devices/StudioBodies.cpp
     src/ui/devices/InstrumentBodies.cpp
     src/ui/devices/OsmiumBody.cpp
     src/ui/devices/DrumStudioBody.cpp
@@ -121,6 +130,14 @@ target_compile_definitions(sessions PRIVATE SESSIONS_VERSION="${PROJECT_VERSION}
 
 option(SESSIONS_BUILD_TESTS "Build the smoke test" ON)
 if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
+    add_executable(sessions_production_devices tests/production_devices.cpp)
+    target_link_libraries(sessions_production_devices PRIVATE sessions_core Qt6::Test)
+    add_test(NAME production_devices COMMAND sessions_production_devices)
+    set_tests_properties(production_devices PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    add_executable(sessions_studio_devices tests/studio_devices.cpp)
+    target_link_libraries(sessions_studio_devices PRIVATE sessions_core Qt6::Test)
+    add_test(NAME studio_devices COMMAND sessions_studio_devices)
+    set_tests_properties(studio_devices PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     add_executable(sessions_smoke tests/smoke.cpp)
     target_link_libraries(sessions_smoke PRIVATE sessions_core Qt6::Test)
     enable_testing()

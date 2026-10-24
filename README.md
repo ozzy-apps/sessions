@@ -11,6 +11,12 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ![Session View](docs/screenshots/01-session-clip.png)
 
+## Production devices · 0.48
+
+Parametric EQ adds eight configurable filters, band audition, stereo and mid/side processing, and input/output analysis. Spectrum, Multiband Dynamics, LFO, Envelope Follower and Shaper add frequency metering, three-band processing and reusable modulation. Shifter, Pitch Corrector, Hybrid Reverb, Looper and Multisampler add live pitch processing, long room IRs, overdubbing and melodic sample zones with basic SFZ import. [Device guide](docs/production-devices.md).
+
+Looper recordings show **Unsaved loop** until **Save Loop** writes a WAV and attaches it to the set. Pitch correction takes monophonic input. Existing devices and their parameter indices remain compatible.
+
 ## Osmium
 
 Load **Instruments → Osmium**, then click **Expand**. Monolith is still available with its original panel and sound engine behavior.

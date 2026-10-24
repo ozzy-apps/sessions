@@ -167,9 +167,19 @@ QJsonObject writeClip(const Clip& c, const QString& baseDir) {
 
 QJsonObject writeDevice(const Device& d, const QString& baseDir) {
     QJsonArray params;
-    for (const DeviceParam& p : d.params) params.append(QJsonObject{{"name", p.name}, {"value", p.value}});
+    for (int i=0;i<d.params.size();++i) {
+        const DeviceParam& p=d.params[i];
+        // Looper transport actions are momentary commands; a reopened set starts stopped.
+        const bool command=deviceType(d.name)==DeviceType::Looper&&looper::transient(i);
+        params.append(QJsonObject{{"name",p.name},{"value",command?0.0:p.value}});
+    }
     QJsonObject o{{"id", d.id}, {"name", d.name}, {"kind", kKinds[int(d.kind)]}, {"enabled", d.enabled}, {"params", params}};
     if (!d.samplePath.isEmpty()) o.insert("sample", writePath(d.samplePath, baseDir));
+    if (!d.sampleZones.isEmpty()) {
+        QJsonArray zones;
+        for (const auto& z:d.sampleZones) zones.append(QJsonObject{{"sample",writePath(z.samplePath,baseDir)},{"keyLow",z.keyLow},{"keyHigh",z.keyHigh},{"velocityLow",z.velocityLow},{"velocityHigh",z.velocityHigh},{"root",z.root},{"gain",z.gain},{"pan",z.pan},{"tune",z.tune},{"loopStart",z.loopStart},{"loopEnd",z.loopEnd},{"sequenceLength",z.sequenceLength},{"sequencePosition",z.sequencePosition},{"loop",z.loop},{"oneShot",z.oneShot}});
+        o.insert("sampleZones",zones);
+    }
     if (!d.modelPath.isEmpty()) o.insert("model", writePath(d.modelPath, baseDir));   // NAM: its capture
     if (d.sampleBpm > 0) o.insert("sampleBpm", d.sampleBpm);   // Sampler: the sample's own tempo
     if (!d.slices.isEmpty()) {   // Sampler: its manual slices, seconds
@@ -381,6 +391,12 @@ Device readDevice(const QJsonObject& o, const QString& baseDir) {
     }
     d.samplePath = readPath(o.value("sample").toObject(), baseDir);
     if (!d.samplePath.isEmpty()) d.sample = samples::load(d.samplePath);
+    for (const auto& item:o.value("sampleZones").toArray()) {
+        if(d.sampleZones.size()>=multisampler::kMaxZones)break;
+        const auto zo=item.toObject();SampleZone z;z.samplePath=readPath(zo.value("sample").toObject(),baseDir);if(!z.samplePath.isEmpty())z.sample=samples::load(z.samplePath);
+        z.keyLow=std::clamp(integer(zo,"keyLow",0),0,127);z.keyHigh=std::clamp(integer(zo,"keyHigh",127),z.keyLow,127);z.velocityLow=std::clamp(integer(zo,"velocityLow",1),1,127);z.velocityHigh=std::clamp(integer(zo,"velocityHigh",127),z.velocityLow,127);z.root=std::clamp(integer(zo,"root",60),0,127);
+        z.gain=std::clamp(num(zo,"gain",0),-60.,24.);z.pan=std::clamp(num(zo,"pan",0),-1.,1.);z.tune=std::clamp(num(zo,"tune",0),-24.,24.);z.loopStart=std::max(0.,num(zo,"loopStart",0));z.loopEnd=std::max(z.loopStart,num(zo,"loopEnd",0));z.sequenceLength=std::clamp(integer(zo,"sequenceLength",1),1,100);z.sequencePosition=std::clamp(integer(zo,"sequencePosition",1),1,z.sequenceLength);z.loop=flag(zo,"loop",false);z.oneShot=flag(zo,"oneShot",false);d.sampleZones.push_back(z);
+    }
     d.modelPath = readPath(o.value("model").toObject(), baseDir);
     if (!d.modelPath.isEmpty()) d.model = nam::load(d.modelPath);   // null while missing; the path stays
     d.sampleBpm = std::clamp(num(o, "sampleBpm", 0), 0.0, 999.0);
@@ -407,7 +423,7 @@ Device readDevice(const QJsonObject& o, const QString& baseDir) {
         m.param = std::max(0, integer(mo, "param", 0));
         m.lo = std::clamp(num(mo, "min", 0), 0.0, 1.0);
         m.hi = std::clamp(num(mo, "max", 1), 0.0, 1.0);
-        if (m.deviceId > 0) d.maps.push_back(m);
+        if (m.deviceId > 0 || (m.deviceId == 0 && modulator::supports(deviceType(d.name)) && m.param < 10)) d.maps.push_back(m);
     }
     for (const QJsonValue& v : o.value("mods").toArray()) {
         const QJsonObject mo = v.toObject();
@@ -422,7 +438,7 @@ Device readDevice(const QJsonObject& o, const QString& baseDir) {
         QVector<CurvePoint> pts;
         for (const QJsonValue& pv : v.toArray()) {
             const QJsonArray pa = pv.toArray();
-            if (pa.size() < 2 || pts.size() >= (deviceType(d.name) == DeviceType::Osmium ? osmium::kCurvePoints : monolith::kCurvePoints)) continue;
+            if (pa.size() < 2 || pts.size() >= (deviceType(d.name) == DeviceType::Osmium || deviceType(d.name) == DeviceType::Shaper ? osmium::kCurvePoints : monolith::kCurvePoints)) continue;
             pts.push_back({std::clamp(pa[0].toDouble(), 0.0, 1.0), std::clamp(pa[1].toDouble(), 0.0, 1.0),
                            pa.size() > 2 ? std::clamp(pa[2].toDouble(), -1.0, 1.0) : 0,
                            pa.size() > 3 ? std::clamp(pa[3].toInt(), 0, 2) : 0});

@@ -26,11 +26,11 @@ struct IrKernel {
 
 // The impulse response of `sample` at `sampleRate`: resampled, trimmed to kIrMaxPartitions
 // partitions (with a short fade), scaled so white noise keeps its level. Null for an empty sample.
-std::shared_ptr<const IrKernel> makeIrKernel(const SamplePtr& sample, float sampleRate);
+std::shared_ptr<const IrKernel> makeIrKernel(const SamplePtr& sample, float sampleRate, int maxPartitions = kIrMaxPartitions);
 
 class Convolver {
 public:
-    Convolver();
+    explicit Convolver(int maxPartitions = kIrMaxPartitions);
     void reset();
     // Convolves `in` with channel `channel` of `k` into `out` (may be the same buffer).
     void process(const IrKernel& k, int channel, const float* in, float* out, int n);
@@ -38,6 +38,7 @@ private:
     void block(const IrKernel& k, int channel);
     std::vector<std::complex<float>> m_fdl;   // the last kIrMaxPartitions input spectra
     int   m_head = 0;
+    int   m_capacity = kIrMaxPartitions;
     float m_prev[kIrBlock] = {}, m_in[kIrBlock] = {}, m_out[kIrBlock] = {};
     int   m_fill = 0;
     std::complex<float> m_work[kIrFft];

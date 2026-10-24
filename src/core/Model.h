@@ -233,6 +233,16 @@ struct DrumPad {
     SamplePtr sample;       // nullptr while the file is missing
 };
 
+struct SampleZone {
+    QString samplePath;
+    SamplePtr sample;
+    int keyLow=0, keyHigh=127, velocityLow=1, velocityHigh=127, root=60;
+    double gain=0, pan=0, tune=0, loopStart=0, loopEnd=0;
+    int sequenceLength=1, sequencePosition=1;
+    bool loop=false, oneShot=false;
+};
+inline bool operator==(const SampleZone& a,const SampleZone& b){return a.samplePath==b.samplePath&&a.keyLow==b.keyLow&&a.keyHigh==b.keyHigh&&a.velocityLow==b.velocityLow&&a.velocityHigh==b.velocityHigh&&a.root==b.root&&a.gain==b.gain&&a.pan==b.pan&&a.tune==b.tune&&a.loopStart==b.loopStart&&a.loopEnd==b.loopEnd&&a.sequenceLength==b.sequenceLength&&a.sequencePosition==b.sequencePosition&&a.loop==b.loop&&a.oneShot==b.oneShot;}
+
 // A Macros knob turning another device's parameter: macro at 0 sets it to `lo`, at 1 to `hi`.
 struct MacroMap {
     int    macro = 0;      // 0..7
@@ -299,6 +309,7 @@ struct Device {
     QString              modelPath;    // NAM: the .nam capture (the amp's / NAM's samplePath is their cabinet IR)
     std::shared_ptr<const nam::Model> model;   // nullptr while the file is missing or unreadable (plays dry)
     QVector<DrumPad>     pads;         // Drum Rack: 16 pads from C1 (36) up
+    QVector<SampleZone>  sampleZones;  // Multisampler: melodic key/velocity zones and round robins
     QVector<MacroMap>    maps;         // Macros and racks: what their macro knobs turn
     QVector<ModRoute>    mods;         // Monolith: its modulation routes (envelopes, LFOs, steppers, macros … onto its knobs)
     QVector<QVector<CurvePoint>> curves;   // Monolith: its drawable curves (monolith::kCurves lists, each sorted by x; an empty one is flat 0)
@@ -636,7 +647,7 @@ public:
     void endEdit();
     bool editing() const { return m_editDepth > 0; }
     EditState captureEditState() const;
-    void      restoreEditState(const EditState& s);
+    void      restoreEditState(const EditState& s, bool preserveLooperTransport = false);
 
 signals:
     void structureChanged();   // tracks / scenes / slots / devices / clips added or removed

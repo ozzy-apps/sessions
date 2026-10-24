@@ -1338,6 +1338,7 @@ private:
 } // namespace
 
 DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent) {
+    if (auto* b = createProductionBody(ctx, parent)) return b;
     switch (ctx.type) {
     case T::DrumBuss:   return new DrumBussBody(ctx, parent);
     case T::Macros:     return new MacrosBody(ctx, parent);
@@ -1358,5 +1359,7 @@ DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent) {
     default:            return nullptr;
     }
 }
+
+QHBoxLayout* createSidechainSection(DeviceBody* body, DeviceType type) { return sidechainSection(body,type); }
 
 } // namespace sessions::devui

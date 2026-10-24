@@ -45,13 +45,13 @@ const Fft& fft() {
 
 } // namespace
 
-std::shared_ptr<const IrKernel> makeIrKernel(const SamplePtr& sample, float sampleRate) {
+std::shared_ptr<const IrKernel> makeIrKernel(const SamplePtr& sample, float sampleRate, int maxPartitions) {
     if (!sample || sample->frames() < 2) return nullptr;
     auto k = std::make_shared<IrKernel>();
     k->source = sample;
     k->stereo = sample->channels > 1;
     const double ratio = sample->rate / sampleRate;
-    const int maxLen = kIrMaxPartitions * kIrBlock;
+    const int maxLen = std::clamp(maxPartitions, 1, 8192) * kIrBlock;
     const int len = std::min(maxLen, int(std::ceil(double(sample->frames()) / ratio)));
     k->partitions = (len + kIrBlock - 1) / kIrBlock;
     k->seconds = double(len) / sampleRate;
@@ -83,7 +83,7 @@ std::shared_ptr<const IrKernel> makeIrKernel(const SamplePtr& sample, float samp
     return k;
 }
 
-Convolver::Convolver() : m_fdl(size_t(kIrMaxPartitions) * kIrBins) { fft(); }
+Convolver::Convolver(int maxPartitions) : m_fdl(size_t(std::clamp(maxPartitions,1,8192)) * kIrBins), m_capacity(std::clamp(maxPartitions,1,8192)) { fft(); }
 
 void Convolver::reset() {
     std::fill(m_fdl.begin(), m_fdl.end(), std::complex<float>());
@@ -110,14 +110,14 @@ void Convolver::block(const IrKernel& k, int channel) {
     for (int i = 0; i < kIrBlock; ++i) { m_work[i] = m_prev[i]; m_work[i + kIrBlock] = m_in[i]; }
     std::copy(m_in, m_in + kIrBlock, m_prev);
     f.run(m_work, false);
-    m_head = (m_head + kIrMaxPartitions - 1) % kIrMaxPartitions;
+    m_head = (m_head + m_capacity - 1) % m_capacity;
     std::copy(m_work, m_work + kIrBins, m_fdl.begin() + m_head * kIrBins);
     std::complex<float> acc[kIrBins];
     std::fill(acc, acc + kIrBins, std::complex<float>());
     const std::vector<std::complex<float>>& H = k.spectra[channel];
-    const int parts = std::min(k.partitions, kIrMaxPartitions);
+    const int parts = std::min(k.partitions, m_capacity);
     for (int p = 0; p < parts; ++p) {
-        const std::complex<float>* x = &m_fdl[size_t((m_head + p) % kIrMaxPartitions) * kIrBins];
+        const std::complex<float>* x = &m_fdl[size_t((m_head + p) % m_capacity) * kIrBins];
         const std::complex<float>* h = &H[size_t(p) * kIrBins];
         for (int b = 0; b < kIrBins; ++b) acc[b] += x[b] * h[b];
     }
