@@ -1,41 +1,44 @@
 # Nektar Impact LX49+ / LX61+
 
-Sessions 0.38 includes a native input profile for the LX49+ and LX61+. It uses the keyboard's public GM mixer controls and standard MIDI Machine Control (MMC). Sessions detects matching MIDI input names automatically; an explicitly selected input also supports renamed ports.
+Sessions 0.49 supports the dedicated **Mixer** and **Inst** presets as well as **User Preset 2**. Enable the keyboard's MIDI inputs in **Preferences → MIDI**, leaving **Profile → Automatic** selected. Named LX49+/61+ ports are detected automatically; choose a specific controller input if its port has been renamed. User MIDI Maps take priority.
 
-## Setup
+## Dedicated Mixer / Instrument setup
 
-1. Connect the keyboard and open **Preferences → MIDI**. Enable its input ports.
-2. On the keyboard, select **User Preset 2 (GM Mixer 1–8)** and set **Global MIDI Channel to 16**. This keeps the ninth fader separate from the eight fixed-channel faders. The Mixer/Instrument buttons used by manufacturer DAW packages select different assignments; this Sessions profile uses the user preset.
-3. Leave **Profile → Automatic: Nektar Impact LX49+ / LX61+** selected. Input **Automatic** restricts the profile to named LX49+/61+ ports; choose a particular input if the operating system presents another name.
-4. Choose the track bank. **Pickup** prevents jumps: move a fader or pan knob through the current on-screen value before it takes control. Changing banks, undoing or editing a value on screen re-arms pickup. Disable Pickup for immediate absolute control.
+Set the keyboard's **USB Port Setup to 0**. Nektar's documented procedure for the LX49+/61+ is:
+
+1. Hold **Shift/Mute** and press **Patch > (Setup)**.
+2. Press **A2** (the 13th white key from the left).
+3. Press **C3 (−)** until the display shows **0.0.0**.
+4. Hold **Shift/Mute** and press **Patch > (Setup)** to exit.
+
+Press **Mixer** or **Inst** on the keyboard. These read-only presets send the control messages on MIDI channel 16; the global keybed channel does not need changing for these modes. Enable both MIDI input ports if they are listed separately.
 
 | Hardware | Sessions action |
 | --- | --- |
-| Faders 1–8 | Track-bank volume |
-| Knobs 1–8 | Track-bank pan |
-| Buttons 1–8 | Mute/unmute the corresponding track |
-| Fader 9, Global channel 16 | Master volume |
-| Keys, pads, wheels, sustain pedal | Normal instrument input; custom MIDI Maps remain available |
+| Mixer faders 1–8 | Track-bank volume |
+| Mixer knobs 1–8 | Track-bank pan |
+| Mixer buttons 1–8 | Toggle track mute |
+| Fader 9 | Master volume |
+| Button 9 | Arm/unarm the selected track |
+| Track − / + | Previous/next bank of eight tracks |
+| Inst knobs 1–8 | First eight parameters of the selected device; labelled Macro 1–8 on racks |
+| Cycle | Toggle loop |
+| Rewind / Forward | Move back/forward four beats |
+| Stop / Play | Stop/continue playback |
+| Record | Toggle Arrangement recording |
 
-Tracks in a bank include group tracks. Group faders therefore control their complete buses. Empty positions do nothing. Custom set-specific MIDI Maps take priority over the profile and survive bank/profile changes. The global profile does not add mappings to the set.
+Device knobs follow the selected device in Device View or its expanded editor. With no explicit device selection, they target the selected track's instrument, or its first effect. Tracks in a bank include groups. Empty positions do nothing. Pickup applies to mixer faders, pan and device knobs: move through the current value before taking control. Switching banks/devices or editing a value on screen re-arms pickup.
 
-## Transport
+## User Preset 2 and MMC
 
-Sessions accepts complete MMC messages from the selected controller. If necessary, program the keyboard's transport buttons to the **MMC** assignment type and the following Data 2 values. These are standard command numbers, not a manufacturer handshake.
+The previous GM preset remains supported. Select **User Preset 2 (GM Mixer 1–8)** and **Global MIDI Channel 16** to keep fader 9 separate. Faders 1–8 use CC7 on channels 1–8, knobs use CC10, and alternating mute buttons use CC12. Fader 9 uses CC7 on channel 16.
 
-| Button | MMC Data 2 (decimal) | Sessions action |
-| --- | --- | --- |
-| Stop | 1 | Stop without rewinding on repeated messages |
-| Play | 2 | Continue playback; repeated messages keep playing |
-| Forward | 4 | Move forward four beats |
-| Rewind | 5 | Move back four beats, bounded at zero |
-| Record | 6 | Enable Arrangement recording and play |
-| Record exit | 7 | Disable recording, keeping playback running |
-
-Loop/metronome/scene controls can use **MIDI Map** to learn an assignable CC button or pad. Default pads continue to play notes; the profile does not take them over for launching. The computer keyboard's number row **1–9, 0** launches scenes 1–10.
+MMC Stop (1), Play (2), Forward (4), Rewind (5), Record (6), Record Exit (7) and Pause (9) remain accepted. MMC Record enables recording and starts playback; the dedicated Record CC toggles the record button.
 
 ## Scope and verification
 
-This profile is implemented by Sessions. It does not install Nektar's DAW package, change controller firmware, negotiate a proprietary operating mode or send pad/display/LED feedback. Physical hardware has not yet been verified; regression tests inject named MIDI input, validate packet handling, mixer pickup, custom mapping priority and transport actions. Once the keyboard is connected, check each bank and transport button before a performance. Select **Profile → Off** to retain ordinary MIDI input and user maps alone.
+The native mode uses the fixed channel-16 assignments published in the Nektar/Ardour controller map. It does not load Bitwig's integration package or negotiate its proprietary modes. Instrument fader envelope layouts, Patch/Page navigation, Grab assignments and pad/display/LED feedback are not implemented. Keys, pads, wheels and sustain retain normal instrument/MIDI Map behavior. Select **Profile → Off** to disable the global profile.
 
-Public references: [Nektar LX49+/61+ overview](https://nektartech.com/impact-lx49-61-plus/), [Nektar support](https://support.nektartech.com/impact-support/), [MIDI universal messages](https://midi.org/midi-1-0-universal-system-exclusive-messages).
+Regression tests inject the dedicated and GM messages, exercise pickup, banks, device selection, buttons, transport and mapping precedence. Physical LX49+ verification of the new dedicated mode is still required.
+
+References: [Nektar's Ardour/Mixbus setup and control layout](https://support.nektartech.com/using-harrison-mixbus-or-ardour-with-impact/), [published LX MIDI assignments](https://github.com/Ardour/ardour/blob/master/share/midi_maps/Nektar_Impact_LX.map), [Nektar's Bitwig integration](https://support.nektartech.com/download/using_impact_lx_plus_with_bitwig/).

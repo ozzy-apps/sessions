@@ -11,6 +11,12 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ![Session View](docs/screenshots/01-session-clip.png)
 
+## Audio inputs and Nektar modes · 0.49
+
+Audio tracks can record hardware inputs, another track, a group or Master using the mixer's **Audio From** selector. Internal sources are captured after effects and fader, with separate streams for simultaneous takes. Master and feedback routes keep recording with monitoring disabled. [Recording input guide](docs/audio-recording-inputs.md).
+
+The Nektar Impact LX49+/61+ **Mixer** and **Inst** presets now control the mixer, selected devices and transport directly. Set USB Port Setup to 0 and enable the controller inputs in Preferences. [Nektar setup](docs/nektar-impact.md).
+
 ## Production devices · 0.48
 
 Parametric EQ adds eight configurable filters, band audition, stereo and mid/side processing, and input/output analysis. Spectrum, Multiband Dynamics, LFO, Envelope Follower and Shaper add frequency metering, three-band processing and reusable modulation. Shifter, Pitch Corrector, Hybrid Reverb, Looper and Multisampler add live pitch processing, long room IRs, overdubbing and melodic sample zones with basic SFZ import. [Device guide](docs/production-devices.md).
@@ -142,7 +148,7 @@ Plug in a MIDI keyboard and play: Sessions connects every MIDI input it finds (E
 
 **MIDI Map** (Ctrl+M or the MIDI button): click a fader, knob, button, clip slot or scene, then move a knob or hit a pad on your controller, and it's mapped. **Key Map** (Ctrl+K or KEY) does the same with computer keys, handy for launching clips. Delete removes a mapping, Esc leaves the mode, and mappings are saved with the set.
 
-**Nektar Impact LX49+ / LX61+** (0.38): automatic input profile for User Preset 2, with banked volume/pan/mute, Master on Global channel 16, optional pickup and MMC transport. Configure it in Preferences → MIDI; custom maps take priority. See the [setup guide](docs/nektar-impact.md) for hardware settings and current integration limits.
+**Nektar Impact LX49+ / LX61+** (0.49): dedicated Mixer/Inst modes with banked volume/pan/mute, Master, selected-device knobs, arm and transport. User Preset 2, optional pickup and MMC transport remain supported. Configure it in Preferences → MIDI; custom maps take priority. See the [setup guide](docs/nektar-impact.md) for hardware settings and current integration limits.
 
 **Akai APC Key 25** (2014 model and mk2, 0.45): automatic clip-launcher profile. Its pads launch the clips in a red box of 8 tracks × 5 scenes on the Session View, and light up in the clips' colours (green when playing, blinking when queued). The scene buttons launch scenes, Stop All Clips stops them, Play and Rec run the transport, and the track buttons do Clip Stop, Solo, Rec Arm, Mute or Select (Shift + a scene button picks). Shift + track buttons 1–4 move the box; 5–8 set the knobs to Volume, Pan, Send or Device (Osmium's Macro 1–8). The keys play as before; the pads no longer play notes. See the [APC Key 25 guide](docs/apc-key-25.md).
 
@@ -231,7 +237,7 @@ Hover over anything with the Info View open to see what it does. Screenshots of 
 
 **Your audio interface:** Edit → Preferences → Audio → **Audio system: PipeWire / JACK**. Pick a small **Buffer** (64 or 128 samples), then which of your interface's channels are **Main out L / R** and **Input 1 / 2** (for a guitar in the first input: Input 1 = its first capture channel). The line underneath shows how long it takes from input to output (about 10 ms at 128 samples). PulseAudio still works, with more delay.
 
-**Create → Insert Guitar Track** makes an audio track listening to Input 1 with monitoring on, a **Tuner** and a **Guitar Amp** on it: plug in and play. On any audio track, **Audio From** picks Input 1, 2 or both, and **Monitor In** lets you hear yourself through the track's devices.
+**Create → Insert Guitar Track** makes an audio track listening to Input 1 with monitoring on, a **Tuner** and a **Guitar Amp** on it: plug in and play. On any audio track, **Audio From** picks Input 1, 2, both, another track, a group or Master, and **Monitor In** lets you hear yourself through the track's devices.
 
 - **Tuner:** the note, cents sharp or flat (needle or strobe), and a trace of the last few seconds. Reference pitch, and Mute to silence the track while tuning.
 - **Guitar Amp:** five heads (Clean, Crunch, Lead, Metal, Bass), Gain, Bass, Mid, Treble, Presence, Volume, and a cabinet: five built-in ones (1x12, 2x12, two 4x12s, 8x10) with the mic on axis, off axis or far, or your own impulse response (**Load IR…**, or drop a WAV on the amp).
@@ -282,7 +288,7 @@ Sets refer to sample files where they are. **File → Collect All and Save** cop
 - **While it records** (0.22): a take on the timeline shows as the clip it's becoming, solid with a red frame: a launched Session clip with its waveform or notes, the audio input with its waveform as it comes in, keys with the notes so far. When the recording stops the tracks the Session took over stay dimmed until **Back to Arrangement**, which brings them back at once.
 - **Count-in:** right-click the metronome button (◉), or Preferences → Record, for 1, 2 or 4 bars of click before a recording that starts from a standstill. The position shows the bars left in red; nothing is recorded until it ends.
 - **Punch in / out:** the ⇥ and ⇤ switches either side of the loop switch. With them on, Arrangement recording starts at the loop start and stops at the loop end, wherever playback runs. Red marks on the loop brace show where.
-- **Audio:** pick your sound card or microphone in **Preferences → Audio → Input device**. Each audio track's mixer strip has **Audio From** (inputs 1/2, 1 or 2) and **Monitor**: *Auto* lets you hear the input while the track is armed, *In* always, *Off* never. While you hear the input you don't hear the track's clips: disarm, or set Monitor Off, to hear what you recorded. Arm the track and record into a slot (●) or onto the timeline (Arrangement Record) just as with MIDI; the meter shows the input level while it's armed. Recordings are 32-bit float WAVs in `Samples/Recorded` next to the set (in `~/Music/Sessions/Recorded` until the set is saved), lined up for the sound card's latency, and one undo takes a recording out.
+- **Audio:** pick your sound card or microphone in **Preferences → Audio → Input device**. Each audio track's mixer strip has **Audio From** (inputs 1/2, 1 or 2, another track, a group or Master) and **Monitor**: *Auto* lets you hear the input while the track is armed, *In* always, *Off* never. While you hear the input you don't hear the track's clips: disarm, or set Monitor Off, to hear what you recorded. Arm the track and record into a slot (●) or onto the timeline (Arrangement Record) just as with MIDI; the meter shows the input level while it's armed. Recordings are 32-bit float WAVs in `Samples/Recorded` next to the set (in `~/Music/Sessions/Recorded` until the set is saved), with hardware takes compensated for the sound card's latency and internal takes aligned directly to the source. One undo takes a recording out.
 - **Takes and comping** (new in 0.12, after FORM): turn the loop on around the part, arm the track, Arrangement Record, play, and play it again and again: every pass of the loop is kept as a **take** of one clip (the pass you stop in the middle of too). The newest take plays until you comp: select the clip, **Sample → Takes (N)**, and drag across a take's lane to use that stretch of it (click for one grid step, double-click for the whole take, Alt to leave the grid); the joins crossfade. Nothing is thrown away: the takes' files stay as recorded, and the comp only says which plays where.
 
 ## Tests and dev helpers

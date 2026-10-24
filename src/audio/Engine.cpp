@@ -176,6 +176,8 @@ struct TrackData {
     bool armed = false;
     int  monitor = int(Monitor::Auto);
     int  inputChannel = 0;
+    int  inputSource = 0, inputTrack = -1;
+    bool inputBlocked = false;
     std::vector<ClipRef>    slotClips;
     std::vector<Placement>  arrangement;   // sorted by start
     std::vector<DeviceSlot> devices;
@@ -192,7 +194,9 @@ struct RenderState {
     quint64 generation = 0;
     std::vector<TrackData> tracks, returns;
     TrackData master;         // the Master's chain: every track and return goes through it, before the master fader (0.21)
-    std::vector<int> order;   // the regular (non-group) tracks in rendering order: sidechain sources before what they key
+    struct Capture { int source, index; std::shared_ptr<RecordingStream> stream; };
+    std::vector<Capture> captures;
+    std::vector<int> order;   // tracks and groups in dependency order
     float  mainVolume = 0.75f, cueVolume = 0.6f;
     double tempo = 120;
     bool   anySolo = false;
@@ -287,6 +291,8 @@ constexpr double kNoLimit = 1e300;
 Engine::Engine(Project* project, QObject* parent) : QObject(parent), m_project(project) {
     resample::prepare();
     deviceSpecs();   // build the device table here, never first on the audio thread
+    m_recordStreams.insert(0, std::make_shared<RecordingStream>(1 << 21));
+    m_recordStreams.value(0)->enabled.store(true);
     m_inBlock.assign(size_t(kMaxInputFrames) * 2, 0.0f);
     m_keyStore.assign(size_t(3 * kMaxTracks * 2) * kMaxBlock, 0.0f);   // sidechain taps, never resized again
     auto clipsChanged = [this] { m_clipsDirty = true; scheduleRepublish(); };
@@ -496,6 +502,7 @@ void Engine::publish() {
         td.armed = t.armed;
         td.monitor = int(t.monitor);
         td.inputChannel = t.inputChannel;
+        td.inputSource = t.inputSource;
         QHash<int, int> deviceIndex;   // device id -> slot in td.devices
         for (const Device& d : t.devices) {
             DeviceSlot slot;
@@ -653,9 +660,8 @@ void Engine::publish() {
         s->returns.push_back(std::move(td));
     }
     fill(m_project->master, s->master);
-    // Sidechains: each keyed device finds its source track (a regular, non-group track, not its
-    // own); the regular tracks are then ordered so sources render first. A loop (which the model
-    // refuses) is cut: the later track reads the previous block's key.
+    // Resolve sidechains and audio inputs into one graph, including group buses.
+    // Monitoring edges that would feed back are disabled; their recording taps stay available.
     {
         const int nt = std::min(int(s->tracks.size()), kMaxTracks);
         QHash<int, int> indexOfId, sourceOf;   // track id -> index; device id -> its key's track id
@@ -677,13 +683,37 @@ void Engine::publish() {
         for (int i = 0; i < nt; ++i) resolve(s->tracks[size_t(i)], i);
         for (TrackData& r : s->returns) resolve(r, -1);
         resolve(s->master, -1);
+        const QSet<int> blocked = m_project->blockedAudioInputs();
+        for (int i = 0; i < nt; ++i) {
+            TrackData& td = s->tracks[size_t(i)];
+            if (td.group) for (int member : td.groupMembers) if (member < nt) deps[size_t(i)].push_back(member);
+            if (!td.audio || !td.inputSource) continue;
+            td.inputBlocked = blocked.contains(td.id);
+            td.inputTrack = indexOfId.value(td.inputSource, -1);
+            if (td.inputTrack >= 0) {
+                s->tracks[size_t(td.inputTrack)].keySource = true;
+                if (!td.inputBlocked && (td.monitor == int(Monitor::In) || (td.monitor == int(Monitor::Auto) && td.armed)))
+                    deps[size_t(i)].push_back(td.inputTrack);
+            }
+
+        }
+        QSet<int> wanted{0};
+        for (const TrackData& td : s->tracks) if (td.audio) wanted.insert(td.inputSource);
+        for (auto it = m_recordStreams.begin(); it != m_recordStreams.end(); )
+            if (!wanted.contains(it.key()) && !it.value()->enabled.load(std::memory_order_acquire)) it = m_recordStreams.erase(it);
+            else ++it;
+        for (auto it = m_recordStreams.cbegin(); it != m_recordStreams.cend(); ++it) {
+            const int index = indexOfId.value(it.key(), -1);
+            if (index >= 0) s->tracks[size_t(index)].keySource = true;
+            s->captures.push_back({it.key(), index, it.value()});
+        }
         std::vector<int> state(size_t(nt), 0);
         std::function<void(int)> visit = [&](int i) {
             if (state[size_t(i)]) return;
             state[size_t(i)] = 1;
             for (int j : deps[size_t(i)]) if (state[size_t(j)] != 1) visit(j);
             state[size_t(i)] = 2;
-            if (!s->tracks[size_t(i)].group) s->order.push_back(i);
+            s->order.push_back(i);
         };
         for (int i = 0; i < nt; ++i) visit(i);
     }
@@ -880,13 +910,37 @@ float Engine::takeInputPeak(int i) { return i >= 0 && i < kMaxTracks ? m_inputPe
 void Engine::startCapture() {
     m_capStarted.store(false, std::memory_order_release);
     float scratch[1024];
-    while (m_recRing.read(scratch, 1024) > 0) {}   // nothing left over from an earlier take
+    for (const auto& stream : m_recordStreams) {
+        while (stream->ring.read(scratch, 1024) > 0) {}
+        stream->firstFrame.store(-1, std::memory_order_release);
+    }
     send({Command::Capture, -1, -1, 0, 0, true});
 }
 
-void Engine::stopCapture() { send({Command::Capture, -1, -1, 0, 0, false}); }
+void Engine::stopCapture() {
+    send({Command::Capture, -1, -1, 0, 0, false});
+    for (auto it = m_recordStreams.begin(); it != m_recordStreams.end(); ++it)
+        if (it.key()) it.value()->enabled.store(false, std::memory_order_release);
+}
 
-int Engine::takeRecorded(float* dst, int maxFrames) { return m_recRing.read(dst, maxFrames * 2) / 2; }
+QList<int> Engine::recordingSources() const {
+    QList<int> sources;
+    for (auto it = m_recordStreams.cbegin(); it != m_recordStreams.cend(); ++it)
+        if (it.value()->enabled.load(std::memory_order_acquire)) sources.push_back(it.key());
+    return sources;
+}
+
+std::shared_ptr<RecordingStream> Engine::recordingStream(int source) {
+    if (!m_recordStreams.contains(source)) {
+        m_recordStreams.insert(source, std::make_shared<RecordingStream>());
+        m_recordStreams.value(source)->enabled.store(true, std::memory_order_release);
+        publish();
+    }
+    m_recordStreams.value(source)->enabled.store(true, std::memory_order_release);
+    return m_recordStreams.value(source);
+}
+
+int Engine::takeRecorded(float* dst, int maxFrames) { return m_recordStreams.value(0)->ring.read(dst, maxFrames * 2) / 2; }
 
 // Audio thread: one process() call's worth of input. The ring first builds a small cushion
 // (the capture and output threads run in step but not in phase); when it has grown past
@@ -958,11 +1012,6 @@ void Engine::process(float* out, int frames, const float* in) {
         }
         renderBlock(out + 2 * done, n, m_inBlock.data() + 2 * std::min(done, kMaxInputFrames - n));
         done += n;
-    }
-    if (m_capturing) {
-        const int want = std::min(frames, kMaxInputFrames) * 2;
-        const int wrote = m_recRing.write(m_inBlock.data(), want);
-        if (wrote < want) m_capOverflow.fetch_add(1, std::memory_order_relaxed);
     }
 
     const int nt = m_state ? std::min(int(m_state->tracks.size()), kMaxTracks) : 0;
@@ -1195,6 +1244,7 @@ void Engine::apply(const Command& c) {
     case Command::Capture:
         m_capturing = c.on;
         m_capPending = c.on;
+        if (c.on) m_capFrames = 0;
         break;
     case Command::Preview:
     case Command::NoteOn:
@@ -2027,13 +2077,49 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             raisePeak(m_trackPeak[size_t(index)], peak);
         };
 
-        // ---- tracks, in rendering order (sidechain sources before the tracks they key; group tracks
-        // wait for the second pass: their tracks fill their bus first)
+        // ---- tracks and groups, with every source rendered before its consumers
         for (int oi = 0; oi < int(S->order.size()); ++oi) {
             const int i = S->order[size_t(oi)];
             if (i < 0 || i >= nt) continue;
             const TrackData& td = S->tracks[size_t(i)];
-            if (td.group) continue;
+            if (td.group) {
+                if (td.bus < 0 || td.bus >= kMaxGroups) continue;
+                PlayState& ps = m_play[size_t(i)];
+                std::copy(m_busL[td.bus], m_busL[td.bus] + n, m_trackL);
+                std::copy(m_busR[td.bus], m_busR[td.bus] + n, m_trackR);
+                EventList* ev = &m_evA;
+                EventList* spare = &m_evB;
+                ev->clear();
+                m_ovVolume = m_ovPan = -1;
+                std::fill(m_ovSend, m_ovSend + kMaxReturns, -1.0f);
+                m_ovCount = 0;
+                runChain(td, ev, spare, m_trackL, m_trackR, ctx, false, false);
+                // Arrangement fades act on the complete group, including its effects.
+                // A Session takeover or monitored member is a live performance, with no
+                // Arrangement boundary: its group remains audible at every song beat.
+                bool fadeGroup = m_playing && !td.groupSpan.empty() && (td.groupFadeIn > 0 || td.groupFadeOut > 0);
+                for (int member : td.groupMembers) {
+                    if (member < 0 || member >= nt) continue;
+                    const TrackData& child = S->tracks[size_t(member)];
+                    const bool monitored = !child.inputBlocked && (child.inputSource || inputLive) && child.audio && (child.monitor == int(Monitor::In)
+                                          || (child.monitor == int(Monitor::Auto) && child.armed));
+                    if (m_play[size_t(member)].overridden || monitored) { fadeGroup = false; break; }
+                }
+                if (fadeGroup) {
+                    const double length = td.groupSpan.end - td.groupSpan.start;
+                    const double in = std::min(td.groupFadeIn, length), out = std::min(td.groupFadeOut, length);
+                    for (int sample = 0; sample < n; ++sample) {
+                        const double beat = b0 + sample * bps;
+                        double gain = 1;
+                        if (in > 0) gain *= fadeGain((beat - td.groupSpan.start) / in, td.groupFadeInCurve);
+                        if (out > 0) gain *= fadeGain((td.groupSpan.end - beat) / out, td.groupFadeOutCurve);
+                        m_trackL[sample] *= float(gain);
+                        m_trackR[sample] *= float(gain);
+                    }
+                }
+                mixTrack(td, ps, m_mainL, m_mainR, i);
+                continue;
+            }
             PlayState& ps = m_play[size_t(i)];
 
             // ---- events: pending note-offs, live / preview notes, then the clips under the playhead
@@ -2053,14 +2139,16 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             if (td.audio) {
                 // Monitoring replaces the track's clips: while you hear the input, you
                 // don't hear the pass you recorded before, or the clip you're recording over.
-                const bool monitorOn = td.monitor == int(Monitor::In) || (td.monitor == int(Monitor::Auto) && td.armed);
+                const bool monitorOn = !td.inputBlocked && (td.monitor == int(Monitor::In) || (td.monitor == int(Monitor::Auto) && td.armed));
                 if (!monitorOn) renderAudio(td.id, b0, bps, tempo, n, m_trackL, m_trackR);
-                if (inputLive && in) {
+                if (td.inputSource || (inputLive && in)) {
                     // the input, as this track hears it (1/2 stereo, or input 1 or 2 on both sides)
                     float inPeak = 0;
                     for (int s = 0; s < n; ++s) {
-                        const float l = td.inputChannel == 2 ? in[2 * s + 1] : in[2 * s];
-                        const float r = td.inputChannel == 1 ? in[2 * s] : in[2 * s + 1];
+                        const float l = td.inputSource ? (td.inputTrack >= 0 && !td.inputBlocked ? keyL(2, td.inputTrack)[s] : 0.f)
+                            : td.inputChannel == 2 ? in[2 * s + 1] : in[2 * s];
+                        const float r = td.inputSource ? (td.inputTrack >= 0 && !td.inputBlocked ? keyR(2, td.inputTrack)[s] : 0.f)
+                            : td.inputChannel == 1 ? in[2 * s] : in[2 * s + 1];
                         inPeak = std::max(inPeak, std::max(std::fabs(l), std::fabs(r)));
                         if (monitorOn) { m_trackL[s] += l; m_trackR[s] += r; }
                     }
@@ -2076,46 +2164,6 @@ void Engine::renderBlock(float* out, int n, const float* in) {
             }
             const bool toBus = td.bus >= 0 && td.bus < kMaxGroups;
             mixTrack(td, ps, toBus ? m_busL[td.bus] : m_mainL, toBus ? m_busR[td.bus] : m_mainR, i);
-        }
-
-        // ---- group tracks: their bus through their audio effects and mixer into Main
-        m_ovVolume = m_ovPan = -1;
-        std::fill(m_ovSend, m_ovSend + kMaxReturns, -1.0f);
-        m_ovCount = 0;
-        for (int i = 0; i < nt; ++i) {
-            const TrackData& td = S->tracks[size_t(i)];
-            if (!td.group || td.bus < 0 || td.bus >= kMaxGroups) continue;
-            PlayState& ps = m_play[size_t(i)];
-            std::copy(m_busL[td.bus], m_busL[td.bus] + n, m_trackL);
-            std::copy(m_busR[td.bus], m_busR[td.bus] + n, m_trackR);
-            EventList* ev = &m_evA;
-            EventList* spare = &m_evB;
-            ev->clear();
-            runChain(td, ev, spare, m_trackL, m_trackR, ctx, false, false);
-            // Arrangement fades act on the complete group, including its effects.
-            // A Session takeover or monitored member is a live performance, with no
-            // Arrangement boundary: its group remains audible at every song beat.
-            bool fadeGroup = m_playing && !td.groupSpan.empty() && (td.groupFadeIn > 0 || td.groupFadeOut > 0);
-            for (int member : td.groupMembers) {
-                if (member < 0 || member >= nt) continue;
-                const TrackData& child = S->tracks[size_t(member)];
-                const bool monitored = inputLive && child.audio && (child.monitor == int(Monitor::In)
-                                      || (child.monitor == int(Monitor::Auto) && child.armed));
-                if (m_play[size_t(member)].overridden || monitored) { fadeGroup = false; break; }
-            }
-            if (fadeGroup) {
-                const double length = td.groupSpan.end - td.groupSpan.start;
-                const double in = std::min(td.groupFadeIn, length), out = std::min(td.groupFadeOut, length);
-                for (int sample = 0; sample < n; ++sample) {
-                    const double beat = b0 + sample * bps;
-                    double gain = 1;
-                    if (in > 0) gain *= fadeGain((beat - td.groupSpan.start) / in, td.groupFadeInCurve);
-                    if (out > 0) gain *= fadeGain((td.groupSpan.end - beat) / out, td.groupFadeOutCurve);
-                    m_trackL[sample] *= float(gain);
-                    m_trackR[sample] *= float(gain);
-                }
-            }
-            mixTrack(td, ps, m_mainL, m_mainR, i);
         }
 
         // ---- returns: audio effects only, then their own fader and pan
@@ -2173,6 +2221,8 @@ void Engine::renderBlock(float* out, int n, const float* in) {
     for (int s = 0; s < n; ++s) {
         m_mainGain += (mg - m_mainGain) * smooth;
         float l = m_mainL[s] * m_mainGain, r = m_mainR[s] * m_mainGain;
+        m_masterRecord[2 * s] = softClip(l);
+        m_masterRecord[2 * s + 1] = softClip(r);
         if (s == clickAt) { m_clickEnv = 1; m_clickPhase = 0; m_clickFreq = accent ? 1760.0f : 1320.0f; }
         if (m_clickEnv > 1e-4f) {
             const float c = std::sin(kTwoPi * m_clickPhase) * m_clickEnv * clickGain;
@@ -2199,6 +2249,41 @@ void Engine::renderBlock(float* out, int n, const float* in) {
     if (S) {
         m_fbPreviewOn.store(preview && m_previewPos >= 0, std::memory_order_release);
         m_fbPreviewSerial.store(m_previewPlaying, std::memory_order_release);
+    }
+
+    // Input meters also work when a feedback route has monitoring disabled.
+    if (S) for (int i = 0; i < int(S->tracks.size()) && i < kMaxTracks; ++i) {
+        const TrackData& td = S->tracks[size_t(i)];
+        if (!td.audio || !td.inputSource) continue;
+        float peak = 0;
+        for (int sample = 0; sample < n; ++sample) {
+            const float l = td.inputSource == -1 ? m_masterRecord[2 * sample] : td.inputTrack >= 0 ? keyL(2, td.inputTrack)[sample] : 0.f;
+            const float r = td.inputSource == -1 ? m_masterRecord[2 * sample + 1] : td.inputTrack >= 0 ? keyR(2, td.inputTrack)[sample] : 0.f;
+            peak = std::max({peak, std::fabs(l), std::fabs(r)});
+        }
+        raisePeak(m_inputPeak[size_t(i)], peak);
+    }
+
+    // Record source taps after rendering the whole graph. Master excludes cue/preview.
+    if (m_capturing && S) {
+        float block[kMaxBlock * 2];
+        for (const auto& capture : S->captures) {
+            if (!capture.stream->enabled.load(std::memory_order_acquire)) continue;
+            const float* data = in;
+            if (capture.source == -1) data = m_masterRecord;
+            else if (capture.source > 0) {
+                for (int sample = 0; sample < n; ++sample) {
+                    block[2 * sample] = capture.index >= 0 ? keyL(2, capture.index)[sample] : 0.f;
+                    block[2 * sample + 1] = capture.index >= 0 ? keyR(2, capture.index)[sample] : 0.f;
+                }
+                data = block;
+            }
+            if (!data) { std::fill(block, block + n * 2, 0.f); data = block; }
+            if (capture.stream->firstFrame.load(std::memory_order_relaxed) < 0)
+                capture.stream->firstFrame.store(m_capFrames, std::memory_order_release);
+            if (capture.stream->ring.write(data, n * 2) < n * 2) m_capOverflow.fetch_add(1, std::memory_order_relaxed);
+        }
+        m_capFrames += n;
     }
 
     // ---- advance the clocks

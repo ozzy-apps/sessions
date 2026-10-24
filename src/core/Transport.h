@@ -26,7 +26,7 @@
 
 namespace sessions {
 
-namespace audio { class Engine; struct Command; }
+namespace audio { class Engine; struct Command; struct RecordingStream; }
 
 class Transport : public QObject {
     Q_OBJECT
@@ -193,6 +193,7 @@ private:
     struct AudioTake {
         int     trackId = 0;
         bool    session = false;       // into a Session slot (with m_rec), else onto the timeline
+        int     source = 0;            // frozen source identity for this take
         int     channel = 0;           // the track's input channel when it started
         QString path;
         std::shared_ptr<samples::WavWriter> writer;
@@ -214,9 +215,13 @@ private:
     bool           m_capturing = false;
     double         m_wrapBeats = 0;         // beats the loop has wrapped since the capture began
     QHash<int, ClipPtr> m_loopClips;        // per track id: the clip this Arrangement loop recording adds its passes to
-    qint64         m_capFrame = 0;          // capture stream frames read so far
-    std::vector<float> m_capHistory;        // the last ~2 s read, for takes that learn their start late
-    qint64         m_historyStart = 0;      // stream frame of m_capHistory[0]
+    struct CaptureHistory {
+        std::shared_ptr<audio::RecordingStream> stream;
+        qint64 frame = -1, start = 0;
+        std::vector<float> samples;
+    };
+    QHash<int, CaptureHistory> m_captureHistory;
+
 };
 
 } // namespace sessions

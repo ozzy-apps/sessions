@@ -246,6 +246,7 @@ QJsonObject writeTrack(const EditState::TrackState& t, bool isReturn, int width,
     if (t.type == TrackType::Audio) {
         o.insert("monitor", kMonitors[int(t.monitor)]);
         o.insert("input", t.inputChannel);
+        o.insert("inputSource", t.inputSource);
     }
     if (t.groupId) o.insert("group", t.groupId);
     if (t.type == TrackType::Group && (t.groupFadeIn > 0 || t.groupFadeOut > 0
@@ -484,6 +485,7 @@ EditState::TrackState readTrack(const QJsonObject& o, bool isReturn, const QStri
     if (t.type == TrackType::Audio) {
         t.monitor = Monitor(wordIndex(kMonitors, o.value("monitor"), int(Monitor::Auto)));
         t.inputChannel = std::clamp(integer(o, "input", 0), 0, 2);
+        t.inputSource = std::max(-1, integer(o, "inputSource", 0));
     }
     t.groupId = isReturn ? 0 : std::max(0, integer(o, "group", 0));
     if (t.type == TrackType::Group) {

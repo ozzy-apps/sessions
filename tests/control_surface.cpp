@@ -3,6 +3,9 @@
 #include "audio/Engine.h"
 #include "audio/MidiInput.h"
 #include "core/ControlSurface.h"
+#include "core/DeviceSpecs.h"
+#include <QDir>
+#include <QListWidget>
 #include "core/Mapping.h"
 #include "core/Model.h"
 #include "core/Theme.h"
@@ -133,6 +136,51 @@ int main(int argc, char** argv) {
         check(!surface.accepts("Custom Controller: Mixer") && !surface.machineControl("Custom Controller: Mixer", 2), "Off disables both mixer and transport control");
     }
 
+    {
+        settings("auto", {}, 0, false);
+        Project project; project.scenes = {"1"};
+        for (int i = 0; i < 16; ++i) project.addTrack(QString("Track %1").arg(i + 1), QColor("#8cb6cf"));
+        audio::Engine engine(&project); Transport transport(&project, &engine); Mapper mapper(&project, &transport);
+        ControlSurface surface(&project, &transport, &mapper);
+        auto cc = [&](int number, int value) { return surface.controlChange(nektar, 15, number, value); };
+        auto press = [&](int number) { cc(number, 127); cc(number, 0); };
+        bool mixer = true;
+        for (int i = 0; i < 8; ++i) {
+            cc(12 + i, 30 + i); cc(30 + i, 70 + i);
+            mixer &= near(project.tracks[i].volume, (30 + i) / 127.0) && near(project.tracks[i].pan, (70 + i) / 127.0 * 2 - 1);
+        }
+        check(mixer, "dedicated Mixer preset faders and pan knobs work on fixed channel 16");
+        cc(20, 51); check(near(project.mainVolume, 51 / 127.0), "dedicated Mixer Master fader");
+        cc(21, 127); cc(21, 127);
+        check(!project.tracks[0].active, "dedicated mute triggers once on repeated press packets");
+        cc(21, 0); cc(21, 127); cc(21, 0);
+        check(project.tracks[0].active, "dedicated mute toggles on the next press");
+        press(29); check(project.tracks[0].armed, "dedicated ninth button arms selected track");
+        press(110); cc(12, 43);
+        check(near(project.tracks[8].volume, 43 / 127.0), "Track+ advances Mixer bank by eight");
+        press(109); cc(12, 39);
+        check(near(project.tracks[0].volume, 39 / 127.0), "Track- returns Mixer bank");
+        project.tracks[0].devices.push_back(project.makeDevice("Monolith", DeviceKind::Instrument));
+        project.tracks[0].devices.push_back(project.makeDevice("Utility", DeviceKind::AudioEffect));
+        surface.setDeviceChoice([&] { return project.tracks[0].devices[1].id; });
+        cc(56, 77);
+        check(near(project.tracks[0].devices[1].params[0].value, 77 / 127.0), "Instrument knobs follow selected effect");
+        surface.setDeviceChoice({}); cc(56, 29);
+        check(near(project.tracks[0].devices[0].params[monolith::macro(0)].value, 29 / 127.0), "Instrument fallback chooses track instrument Macro 1");
+        press(106); check(transport.playing(), "dedicated Play");
+        press(105); check(!transport.playing(), "dedicated Stop");
+        press(102); check(transport.loopEnabled(), "dedicated Cycle");
+        press(107); check(transport.arrangementRecord(), "dedicated Record enables recording");
+        press(107); check(!transport.arrangementRecord(), "dedicated Record toggles recording off");
+        transport.setBeat(8); press(103); press(104);
+        check(near(transport.beat(), 8), "dedicated rewind and forward");
+        check(!surface.controlChange("Other Keyboard", 15, 12, 127), "dedicated controls preserve source isolation");
+        settings("auto", {}, 0, true); surface.reloadSettings();
+        project.tracks[0].volume = .5; cc(12, 10);
+        check(near(project.tracks[0].volume, .5), "dedicated faders respect pickup");
+        cc(12, 90); check(near(project.tracks[0].volume, 90 / 127.0), "dedicated fader pickup crosses target");
+    }
+
     settings("auto", {}, 0, false);
     MainWindow window;
     window.show();
@@ -152,6 +200,12 @@ int main(int argc, char** argv) {
     project->mappings.push_back({Mapping::MidiCC, 0, 7, "main:cue"});
     input->inject(0xb0, 7, 83, nektar);
     check(near(project->cueVolume, 83 / 127.0) && near(project->tracks[0].volume, 38 / 127.0), "a custom MIDI Map takes priority over the automatic surface profile");
+    project->mappings.clear();
+    input->inject(0xbf, 12, 67, nektar);
+    check(near(project->tracks[0].volume, 67 / 127.0), "dedicated Mixer messages reach MainWindow");
+    project->mappings.push_back({Mapping::MidiCC, 15, 12, "main:cue"});
+    input->inject(0xbf, 12, 93, nektar);
+    check(near(project->cueVolume, 93 / 127.0) && near(project->tracks[0].volume, 67 / 127.0), "custom mappings override dedicated Nektar controls");
     project->mappings.clear();
     QString observedSource;
     QObject::connect(input, &audio::MidiInput::controlChange, &window, [&](int, int, int) { observedSource = input->sourceName(); });
@@ -256,6 +310,14 @@ int main(int argc, char** argv) {
         check(restored.findChild<QComboBox*>("controllerInput")->currentData().toString() == "Test Mixer"
                   && restored.findChild<QComboBox*>("controllerBank")->currentData().toInt() == 8
                   && !restored.findChild<QCheckBox*>("controllerPickup")->isChecked(), "controller preferences restore even when the selected input is disconnected");
+    }
+    const QString capture = qEnvironmentVariable("SESSIONS_NEKTAR_CAPTURE");
+    if (!capture.isEmpty()) {
+        QDir().mkpath(capture);
+        auto* sidebar = preferences.findChild<QListWidget*>("prefsSidebar");
+        sidebar->setCurrentItem(sidebar->findItems("MIDI", Qt::MatchExactly).first());
+        preferences.show(); QApplication::processEvents();
+        preferences.grab().save(capture + "/nektar-preferences.png");
     }
     std::printf("control_surface: %d checks, %d failures\n", checks, failures);
     return failures ? 1 : 0;

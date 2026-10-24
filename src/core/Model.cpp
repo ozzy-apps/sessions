@@ -65,7 +65,7 @@ static bool operator==(const EditState::TrackState& a, const EditState::TrackSta
     return a.id == b.id && a.name == b.name && a.color == b.color && a.volume == b.volume && a.pan == b.pan
         && a.sends == b.sends && a.active == b.active && a.preFader == b.preFader && a.slotClips == b.slotClips
         && a.arrangement == b.arrangement && a.devices == b.devices && a.automation == b.automation && a.type == b.type
-        && a.monitor == b.monitor && a.inputChannel == b.inputChannel && a.groupId == b.groupId
+        && a.monitor == b.monitor && a.inputChannel == b.inputChannel && a.groupId == b.groupId && a.inputSource == b.inputSource
         && a.groupFadeIn == b.groupFadeIn && a.groupFadeOut == b.groupFadeOut
         && a.groupFadeInCurve == b.groupFadeInCurve && a.groupFadeOutCurve == b.groupFadeOutCurve;
 }
@@ -898,6 +898,39 @@ bool Project::acceptsDevice(int track, DeviceKind kind) const {
     return kind == DeviceKind::AudioEffect || (!isReturn(track) && t->type == TrackType::Midi);
 }
 
+// Audio monitoring participates in the same graph as group buses and sidechain keys.
+// Cut only the input edges that close a cycle; recording those sources still works.
+QSet<int> Project::blockedAudioInputs() const {
+    QHash<int, QVector<int>> deps;
+    for (const Track& t : tracks) {
+        if (t.groupId) deps[t.groupId].push_back(t.id);
+        for (const Device& d : t.devices) if (d.sidechainTrack) deps[t.id].push_back(d.sidechainTrack);
+    }
+    auto reaches = [&](int from, int target) {
+        QSet<int> seen;
+        QVector<int> todo{from};
+        while (!todo.isEmpty()) {
+            const int id = todo.takeLast();
+            if (id == target) return true;
+            if (seen.contains(id)) continue;
+            seen.insert(id);
+            for (int next : deps.value(id)) todo.push_back(next);
+        }
+        return false;
+    };
+    QSet<int> blocked;
+    for (const Track& t : tracks) {
+        if (t.type != TrackType::Audio || !t.inputSource) continue;
+        if (t.inputSource < 0 || indexOfTrack(t.inputSource) < 0 || reaches(t.inputSource, t.id)) {
+            blocked.insert(t.id);
+            continue;
+        }
+        if (t.monitor == Monitor::In || (t.monitor == Monitor::Auto && t.armed))
+            deps[t.id].push_back(t.inputSource);
+    }
+    return blocked;
+}
+
 // ---- sidechains ------------------------------------------------------------------
 
 bool Project::keyReaches(int fromId, int toId) const {
@@ -1253,6 +1286,7 @@ bool Project::convertTrack(int index, TrackType to, QString* why) {
     t->armed = false;
     t->monitor = Monitor::Auto;
     t->inputChannel = 0;
+    t->inputSource = 0;
     emit structureChanged();
     emit mixerChanged();
     return true;
@@ -1885,7 +1919,7 @@ EditState Project::captureEditState() const {
     };
     auto capture = [&](const Track& t) {
         EditState::TrackState ts{t.id, t.name, t.color, t.volume, t.pan, t.sends, t.active, t.preFader, {}, {}, t.devices, t.automation, t.type,
-                                 t.monitor, t.inputChannel, t.groupId};
+                                 t.monitor, t.inputChannel, t.groupId, t.inputSource};
         ts.groupFadeIn = t.groupFadeIn; ts.groupFadeOut = t.groupFadeOut;
         ts.groupFadeInCurve = t.groupFadeInCurve; ts.groupFadeOutCurve = t.groupFadeOutCurve;
         for (const ClipPtr& c : t.clipSlots) ts.slotClips.push_back(keep(c));
@@ -1924,7 +1958,7 @@ void Project::restoreEditState(const EditState& s, bool preserveLooperTransport)
             Track t = old.contains(ts.id) ? old.take(ts.id) : Track{};
             t.id = ts.id; t.type = ts.type; t.name = ts.name; t.color = ts.color;
             t.volume = ts.volume; t.pan = ts.pan; t.sends = ts.sends; t.active = ts.active; t.preFader = ts.preFader;
-            t.monitor = ts.monitor; t.inputChannel = ts.inputChannel; t.groupId = ts.groupId;
+            t.monitor = ts.monitor; t.inputChannel = ts.inputChannel; t.groupId = ts.groupId; t.inputSource = ts.inputSource;
             t.groupFadeIn = ts.groupFadeIn; t.groupFadeOut = ts.groupFadeOut;
             t.groupFadeInCurve = ts.groupFadeInCurve; t.groupFadeOutCurve = ts.groupFadeOutCurve;
             t.clipSlots.clear();

@@ -397,6 +397,7 @@ struct Track {
     bool      preFader = false; // return tracks: sends tap the signal before the track faders
     Monitor   monitor  = Monitor::Auto;   // audio tracks
     int       inputChannel = 0;           // audio tracks: 0 = inputs 1/2 (stereo), 1 = input 1, 2 = input 2 (mono)
+    int       inputSource = 0;           // audio input: 0 hardware, -1 Master, positive stable track/group id
     int       groupId  = 0;               // the group track this track plays into (0 = none, straight to Main)
     // Group Arrangement fades, after the group's effects. Beat lengths are relative
     // to groupArrangementSpan(); Session takeover and live input bypass these fades.
@@ -442,7 +443,7 @@ struct EditState {
         QVector<int> slotClips; QVector<Placed> arrangement;
         QVector<Device> devices; QVector<Envelope> automation;
         TrackType type = TrackType::Midi;
-        Monitor monitor = Monitor::Auto; int inputChannel = 0; int groupId = 0;
+        Monitor monitor = Monitor::Auto; int inputChannel = 0; int groupId = 0; int inputSource = 0;
         double groupFadeIn = 0, groupFadeOut = 0;
         double groupFadeInCurve = 0.5, groupFadeOutCurve = 0.5;
     };
@@ -570,6 +571,8 @@ public:
     bool   ungroupRack(int trackIndex, int rackId);      // a rack with at most one chain hands its devices back
     static bool chainAccepts(const Device& rack, const Device& d);   // racks and Macros don't go inside racks
     bool   acceptsDevice(int track, DeviceKind kind) const;   // returns and audio tracks: audio effects only
+
+    QSet<int> blockedAudioInputs() const; // inputs whose monitoring would create a render dependency cycle
 
     // ---- sidechains (Device::sidechainTrack)
     // Can device `deviceId` on track `trackIndex` take its key from track `sourceId` (0: its own

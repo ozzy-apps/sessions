@@ -306,6 +306,9 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     m_controllerInput = new QComboBox(controller);
     m_controllerInput->setObjectName("controllerInput");
     controllerForm->addRow("Input", m_controllerInput);
+    auto* nektarSetup = new QLabel("USB Port Setup 0 · Mixer / Inst", controller);
+    nektarSetup->setToolTip("LX49+/61+: hold Shift/Mute and press Patch > (Setup), press A2, then C3 (−) until 0.0.0. Exit Setup the same way. Enable both input ports.");
+    controllerForm->addRow("Nektar LX+", nektarSetup);
     auto* bankLine = new QWidget(controller);
     auto* bankLayout = new QHBoxLayout(bankLine);
     bankLayout->setContentsMargins(0, 0, 0, 0);
@@ -335,8 +338,8 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
         settings().setValue("midi/controllerPickup", on); emit midiControllerSettingsChanged();
     });
     rows->addWidget(row("Control surface", controller,
-        "LX49+/61+: select User Preset 2 (GM Mixer), Global MIDI channel 16. Faders 1–8: volume; knobs: pan; buttons: mute; fader 9: Master. "
-        "Transport accepts MMC. APC Key 25 (either model): the pads launch the clips in the red box on the Session View; "
+        "LX49+/61+: USB Port Setup 0. Mixer: volume, pan and mute; Inst: selected device parameters; Track −/+: banks of eight. "
+        "Transport buttons work directly. User Preset 2 and MMC remain supported. APC Key 25 (either model): the pads launch the clips in the red box on the Session View; "
         "Shift + track buttons 1–4 move it, 5–8 set the knobs to Volume, Pan, Send or Device. Custom MIDI Maps take priority.", midiTab));
     rows->addStretch(1);
     connect(m_ports, &QListWidget::itemChanged, this, [this](QListWidgetItem* it) {

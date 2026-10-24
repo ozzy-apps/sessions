@@ -264,6 +264,11 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
         if (m_mapper->mode() == Mapper::Mode::Off) m_surface->machineControl(source, command);
     });
     // The APC Key 25: its pads play the Session View's box, its lights follow (ApcKey25.h).
+    m_surface->setDeviceChoice([this] {
+        const QList<int> selected = m_deviceView->selection();
+        if (!selected.isEmpty()) return selected.first();
+        return m_deviceView->expandedEditor() ? m_deviceView->expandedEditor()->ctx().deviceId : 0;
+    });
     m_apc->setDeviceChoice([this] {
         const QList<int> selected = m_deviceView->selection();
         if (!selected.isEmpty()) return selected.first();

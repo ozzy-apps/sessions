@@ -18,6 +18,8 @@ void ControlSurface::reloadSettings() {
     m_bank = std::clamp(s.value("midi/controllerBank", 0).toInt(), 0, 56);
     m_pickup = s.value("midi/controllerPickup", true).toBool();
     m_controls.clear();
+    m_buttons.clear();
+    m_lastDevice = 0;
 }
 
 bool ControlSurface::isNektarImpact(const QString& source) {
@@ -44,6 +46,64 @@ bool ControlSurface::continuous(const QString& source, int channel, int cc, cons
 
 bool ControlSurface::controlChange(const QString& source, int channel, int cc, int value) {
     if (!accepts(source) || channel < 0 || channel > 15 || value < 0 || value > 127) return false;
+    // The dedicated read-only Mixer/Instrument presets use fixed channel 16.
+    // Assignments follow Nektar's Ardour/Mixbus map, without a firmware handshake.
+    if (channel == 15) {
+        if (cc == 20) return continuous(source, channel, cc, "main:volume", m_project->mainVolume, value / 127.0);
+        if ((cc >= 12 && cc <= 19) || (cc >= 30 && cc <= 37)) {
+            const int index = m_bank + cc - (cc < 30 ? 12 : 30);
+            if (index >= m_project->tracks.size()) return true;
+            const Track& track = m_project->tracks[index];
+            const bool pan = cc >= 30;
+            return continuous(source, channel, cc, QString("track:%1:").arg(track.id) + (pan ? "pan" : "volume"),
+                              pan ? (track.pan + 1) / 2 : track.volume, value / 127.0);
+        }
+        if (cc >= 56 && cc <= 63) {
+            const Track* track = m_project->trackAt(m_project->selectedTrack);
+            if (!track || track->devices.isEmpty()) return true;
+            const int chosen = m_deviceChoice ? m_deviceChoice() : 0;
+            const Device* device = nullptr;
+            for (const Device& d : track->devices) if (d.id == chosen) device = &d;
+            if (!device) for (const Device& d : track->devices)
+                if (d.kind == DeviceKind::Instrument) { device = &d; break; }
+            if (!device) device = &track->devices.first();
+            if (device->id != m_lastDevice) { m_controls.clear(); m_lastDevice = device->id; }
+            int param = cc - 56;
+            // Racks expose their labelled Macro knobs before their other parameters.
+            for (int p = 0; p < device->params.size(); ++p)
+                if (device->params[p].name.compare(QString("Macro %1").arg(cc - 55), Qt::CaseInsensitive) == 0) { param = p; break; }
+            if (param < device->params.size())
+                continuous(source, channel, cc, QString("device:%1:%2:%3").arg(track->id).arg(device->id).arg(param),
+                           device->params[param].value, value / 127.0);
+            return true;
+        }
+        if ((cc >= 21 && cc <= 29) || (cc >= 102 && cc <= 107) || cc == 109 || cc == 110) {
+            const QString key = source + QString(":%1").arg(cc);
+            const bool down = value >= 64, pressed = down && !m_buttons.value(key);
+            m_buttons[key] = down;
+            if (!pressed) return true;
+            if (cc == 109 || cc == 110) {
+                m_bank = std::clamp(m_bank + (cc == 109 ? -8 : 8), 0, 56);
+                QSettings("Sessions", "Sessions").setValue("midi/controllerBank", m_bank);
+                m_controls.clear();
+            } else if (cc >= 21 && cc <= 28) {
+                const int index = m_bank + cc - 21;
+                if (index < m_project->tracks.size()) {
+                    const Track& t = m_project->tracks[index];
+                    m_mapper->trigger(QString("track:%1:active").arg(t.id), true);
+                }
+            } else if (cc == 29) {
+                if (const Track* t = m_project->trackAt(m_project->selectedTrack))
+                    m_mapper->trigger(QString("track:%1:arm").arg(t->id), true);
+            } else if (cc == 102) m_mapper->trigger("transport:loop", true);
+            else if (cc == 103) machineControl(source, 5);
+            else if (cc == 104) machineControl(source, 4);
+            else if (cc == 105) machineControl(source, 1);
+            else if (cc == 106) machineControl(source, 2);
+            else if (cc == 107) m_transport->setArrangementRecord(!m_transport->arrangementRecord());
+            return true;
+        }
+    }
     if (channel == 15 && cc == 7) return continuous(source, channel, cc, "main:volume", m_project->mainVolume, value / 127.0);
     if (channel > 7 || (cc != 7 && cc != 10 && cc != 12)) return false;
     const int index = m_bank + channel;

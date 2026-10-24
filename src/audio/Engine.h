@@ -15,10 +15,10 @@
 // Audio input: a capture thread pushes stereo blocks into a lock-free ring; process()
 // takes one block per call, so input and output share the output thread's clock. Audio
 // tracks hear it through their Monitor setting. While a recording runs, process() also
-// copies each block it took into a second ring, which Transport drains into WAV files.
+// copies hardware or post-mix source taps into separate rings, which Transport drains into WAV files.
 //
-// Groups: tracks in a group play into the group's bus; group tracks run after every
-// other track, through their own audio effects and mixer, into Main.
+// Groups: members play into their group bus, which runs through its effects and mixer.
+// Audio-input and sidechain dependencies order every track/group; input cycles disable monitoring.
 //
 // Sidechains: a Compressor, Gate or Auto Filter can take its key from another track. publish()
 // resolves each key to a track index and orders the regular tracks so that every source renders
@@ -56,6 +56,15 @@ namespace audio {
 class Driver;
 struct RenderState;
 struct TrackData;
+
+// A source-specific capture stream. Allocated and drained on the UI thread; the
+// callback writes bounded blocks. firstFrame locates sources added during a take.
+struct RecordingStream {
+    explicit RecordingStream(int capacity = 1 << 18) : ring(capacity) {}
+    SpscFloatRing ring;
+    std::atomic<bool> enabled{false};
+    std::atomic<qint64> firstFrame{-1};
+};
 struct ClipData;
 
 constexpr int kMaxTracks  = 64;
@@ -190,6 +199,8 @@ public:
     void    stopCapture();
     bool    captureStarted() const { return m_capStarted.load(std::memory_order_acquire); }
     double  captureStartBeat() const { return m_capStartBeat.load(std::memory_order_acquire); }
+    QList<int> recordingSources() const;
+    std::shared_ptr<RecordingStream> recordingStream(int source); // 0 hardware, -1 Master, track/group id
     int     takeRecorded(float* interleavedStereo, int maxFrames);   // frames copied
     qint64  recordOverflows() const { return m_capOverflow.load(std::memory_order_relaxed); }
 
@@ -344,7 +355,9 @@ private:
     std::atomic<float> m_inFill{0};                // seconds waiting in the ring (latency)
     std::array<std::atomic<float>, kMaxTracks> m_inputPeak{};
     // recording
-    SpscFloatRing m_recRing{1 << 21};              // audio thread -> UI (~22 s of stereo at 48 kHz)
+    QHash<int, std::shared_ptr<RecordingStream>> m_recordStreams; // UI ownership, shared with snapshots
+    qint64 m_capFrames = 0; // callback: frames since capture began
+    float m_masterRecord[kMaxBlock * 2] = {};
     bool                m_capturing = false;      // audio thread
     bool                m_capPending = false;     // audio thread: capture just switched on
     std::atomic<bool>   m_capStarted{false};

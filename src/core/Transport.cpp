@@ -87,8 +87,9 @@ bool Transport::armedAudioTrack() const {
 void Transport::updateInputWanted() {
     bool wanted = false;
     for (const Track& t : m_project->tracks)
-        if (t.type == TrackType::Audio && (t.armed || t.monitor == Monitor::In)) wanted = true;
-    m_engine->setInputWanted(wanted || audioRecording());
+        if (t.type == TrackType::Audio && !t.inputSource && (t.armed || t.monitor == Monitor::In)) wanted = true;
+    for (const AudioTake& take : m_audioTakes) if (!take.source) wanted = true;
+    m_engine->setInputWanted(wanted);
 }
 
 QString Transport::recordFolder() const {
@@ -113,13 +114,15 @@ QString Transport::recordingPath(const QString& trackName) const {
 
 void Transport::ensureCapture() {
     if (m_capturing) return;
-    m_engine->setInputWanted(true);
+    updateInputWanted();
+    for (const Track& track : m_project->tracks)
+        if (track.type == TrackType::Audio && track.armed) m_engine->recordingStream(track.inputSource);
+    m_engine->publish();
     m_engine->startCapture();
     m_capturing = true;
-    m_capFrame = 0;
+    m_captureHistory.clear();
     m_wrapBeats = 0;
-    m_capHistory.clear();
-    m_historyStart = 0;
+
 }
 
 namespace {
@@ -206,27 +209,41 @@ void Transport::drainCapture() {
             a.written += end - begin;
         }
     };
-    for (AudioTake& a : m_audioTakes) {
-        settle(a);
-        // A take that learned its start late picks up what it missed from the recent history.
-        if (a.framed && a.startFrame + a.written < m_capFrame && !m_capHistory.empty())
-            feed(a, m_capHistory.data(), m_historyStart, std::max(a.startFrame, m_historyStart), m_capFrame);
+    for (AudioTake& take : m_audioTakes) settle(take);
+    // Drain every enabled stream during count-in and before punch-in as well, so
+    // no unused hardware ring or source waiting for a take can fill up.
+    for (int source : m_engine->recordingSources()) if (!m_captureHistory.contains(source)) {
+        CaptureHistory history;
+        history.stream = m_engine->recordingStream(source);
+        m_captureHistory.insert(source, std::move(history));
     }
     float buf[4096 * 2];
-    for (int got; (got = m_engine->takeRecorded(buf, 4096)) > 0;) {
-        const qint64 f0 = m_capFrame, f1 = m_capFrame + got;
-        for (AudioTake& a : m_audioTakes) feed(a, buf, f0, f0, f1);
-        m_capHistory.insert(m_capHistory.end(), buf, buf + got * 2);
-        const size_t keep = size_t(sr * 2) * 2;   // ~2 s
-        if (m_capHistory.size() > keep) {
-            const size_t drop = m_capHistory.size() - keep;
-            m_capHistory.erase(m_capHistory.begin(), m_capHistory.begin() + qint64(drop));
-            m_historyStart += qint64(drop / 2);
+    for (auto it = m_captureHistory.begin(); it != m_captureHistory.end(); ++it) {
+        CaptureHistory& history = it.value();
+        if (history.frame < 0) {
+            history.frame = history.stream->firstFrame.load(std::memory_order_acquire);
+            history.start = history.frame;
+            if (history.frame < 0) continue;
         }
-        m_capFrame = f1;
+        for (AudioTake& take : m_audioTakes)
+            if (take.source == it.key() && take.framed && take.startFrame + take.written < history.frame && !history.samples.empty())
+                feed(take, history.samples.data(), history.start, std::max(take.startFrame, history.start), history.frame);
+        for (int got; (got = history.stream->ring.read(buf, 4096 * 2) / 2) > 0;) {
+            const qint64 f0 = history.frame, f1 = f0 + got;
+            for (AudioTake& take : m_audioTakes) if (take.source == it.key()) feed(take, buf, f0, f0, f1);
+            history.samples.insert(history.samples.end(), buf, buf + got * 2);
+            const size_t keep = size_t(sr * 2) * 2;
+            if (history.samples.size() > keep) {
+                const size_t drop = history.samples.size() - keep;
+                history.samples.erase(history.samples.begin(), history.samples.begin() + qint64(drop));
+                history.start += qint64(drop / 2);
+            }
+            history.frame = f1;
+        }
     }
     for (int i = int(m_audioTakes.size()) - 1; i >= 0; --i)
-        if (m_audioTakes[i].stopKnown && m_capFrame >= m_audioTakes[i].stopFrame) finishAudioTake(i);
+        if (m_audioTakes[i].stopKnown && m_captureHistory[m_audioTakes[i].source].frame >= m_audioTakes[i].stopFrame)
+            finishAudioTake(i);
     // keep capturing while an Arrangement recording is about to take the input (a count-in, before a punch-in)
     const bool takeComing = m_arrRecord && m_playing && armedAudioTrack();
     if (m_audioTakes.isEmpty() && !takeComing) {
@@ -694,7 +711,9 @@ void Transport::recordSlot(int track, int scene) {
         AudioTake a;
         a.trackId = t.id;
         a.session = true;
-        a.channel = t.inputChannel;
+        a.source = t.inputSource;
+        a.channel = a.source ? 0 : t.inputChannel;
+        m_engine->recordingStream(a.source);
         a.path = recordingPath(t.name);
         a.writer = std::make_shared<samples::WavWriter>();
         QString error;
@@ -710,8 +729,8 @@ void Transport::recordSlot(int track, int scene) {
             m_project->tracks[track].clipSlots[scene] = a.clip;
             emit m_project->structureChanged();
         }
-        m_engine->setInputWanted(true);   // open, so its latency is known
-        a.comp = m_engine->latencySeconds() + m_engine->inputLatencySeconds();
+        if (!a.source) m_engine->setInputWanted(true);   // hardware latency only
+        a.comp = a.source ? 0 : m_engine->latencySeconds() + m_engine->inputLatencySeconds();
         m_audioTakes.push_back(a);
         m_countInNext = !m_playing;
         launch(track, scene, true);   // starts the transport (and its count-in) when stopped
@@ -813,7 +832,9 @@ void Transport::updateTakes() {
         if (k < m_takes.size() || !wants) continue;
         AudioTake a;
         a.trackId = t.id;
-        a.channel = t.inputChannel;
+        a.source = t.inputSource;
+        a.channel = a.source ? 0 : t.inputChannel;
+        m_engine->recordingStream(a.source);
         a.path = recordingPath(t.name);
         a.writer = std::make_shared<samples::WavWriter>();
         QString error;
@@ -822,7 +843,7 @@ void Transport::updateTakes() {
             continue;
         }
         ensureCapture();
-        a.comp = m_engine->latencySeconds() + m_engine->inputLatencySeconds();
+        a.comp = a.source ? 0 : m_engine->latencySeconds() + m_engine->inputLatencySeconds();
         // punch in where recording began (or at the punch-in), or here when the track was armed later
         const double from = std::max(m_recStart, punchStart());
         a.startBeat = m_beat - from < 1.0 ? from : m_beat;

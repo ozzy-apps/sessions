@@ -1,4 +1,6 @@
 #include "MixerStrip.h"
+#include <QAbstractItemView>
+#include <QSignalBlocker>
 #include "Icons.h"
 #include "InfoView.h"
 #include "core/Model.h"
@@ -117,13 +119,13 @@ MixerStrip::MixerStrip(Project* project, Transport* transport, int trackIndex, Q
         il->setContentsMargins(2, 0, 2, 0);
         il->setSpacing(3);
         m_input = new QComboBox(io);
-        m_input->addItem("In 1/2");
-        m_input->addItem("In 1");
-        m_input->addItem("In 2");
+
         m_input->setFocusPolicy(Qt::NoFocus);
+        m_input->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+        m_input->setMinimumWidth(0);
         m_input->setObjectName("audioFrom");
         InfoView::attach(m_input, "Audio From",
-            "Which of the sound card's inputs this track hears and records: 1/2 in stereo, or input 1 or 2 alone (in the middle).");
+            "Select a hardware input, track, group or Master to record. Internal sources use the output after effects and fader. Master and feedback routes record with monitoring disabled.");
         il->addWidget(m_input);
         auto* mon = new QHBoxLayout;
         mon->setSpacing(0);
@@ -149,7 +151,8 @@ MixerStrip::MixerStrip(Project* project, Transport* transport, int trackIndex, Q
         il->addLayout(mon);
         connect(m_input, &QComboBox::activated, this, [this](int i) {
             EditScope scope(m_project, "Audio From");
-            track()->inputChannel = i;
+            track()->inputSource = m_input->itemData(i).toInt();
+            if (i < 3) track()->inputChannel = i;
             emit m_project->mixerChanged();
         });
     }
@@ -306,8 +309,31 @@ void MixerStrip::syncFromModel() {
     m_act->setChecked(t->active);
     if (m_solo) m_solo->setChecked(t->solo);
     if (m_arm) m_arm->setChecked(t->armed);
-    if (m_input) m_input->setCurrentIndex(std::clamp(t->inputChannel, 0, 2));
-    for (int k = 0; k < 3; ++k) if (m_monitor[k]) m_monitor[k]->setChecked(int(t->monitor) == k);
+    if (m_input && !m_input->view()->isVisible()) {
+        const QSignalBlocker block(m_input);
+        m_input->clear();
+        m_input->addItem("In 1/2", 0);
+        m_input->addItem("In 1", 0);
+        m_input->addItem("In 2", 0);
+        m_input->addItem("Master", -1);
+        for (const Track& source : m_project->tracks)
+            if (source.id != t->id) m_input->addItem(source.isGroup() ? "Group: " + source.name : source.name, source.id);
+        int selected = t->inputSource ? m_input->findData(t->inputSource) : std::clamp(t->inputChannel, 0, 2);
+        if (selected < 0) {
+            m_input->addItem("Missing source", t->inputSource);
+            selected = m_input->count() - 1;
+        }
+        m_input->setCurrentIndex(selected);
+        m_input->setToolTip(m_project->blockedAudioInputs().contains(t->id)
+            ? "Monitoring disabled: this input would feed back. Recording remains available."
+            : "Audio From: " + m_input->currentText() + (t->inputSource ? " (after effects and fader)" : ""));
+    }
+    const bool blockedInput = t->type == TrackType::Audio && m_project->blockedAudioInputs().contains(t->id);
+    for (int k = 0; k < 3; ++k) if (m_monitor[k]) {
+        m_monitor[k]->setChecked(blockedInput ? k == int(Monitor::Off) : int(t->monitor) == k);
+        m_monitor[k]->setEnabled(!blockedInput || k == int(Monitor::Off));
+        m_monitor[k]->setToolTip(blockedInput ? "Monitoring disabled to prevent feedback. Recording remains available." : QString());
+    }
     followAutomation();
 }
 
