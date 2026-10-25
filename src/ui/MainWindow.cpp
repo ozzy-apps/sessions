@@ -626,11 +626,16 @@ QDialog* MainWindow::aboutDialog() {
         "complete tracks in the Arrangement timeline.</p>"
         "<p>Work seamlessly with MIDI and audio tracks, instruments, effects, and integrated Neural Amp Modeler "
         "support, all within a streamlined workflow built to keep the focus on making music.</p>"
-        "<p align='center' style='color:%3'>Built with Qt %2.</p>").arg(version, QT_VERSION_STR, theme::textFaint.name()), dlg);
+        "<p align='center'>Made with love by Ozzy ♥</p>"
+        "<p align='center'><a href='https://github.com/ozzy-apps/sessions' style='color:%4'>GitHub repository</a></p>"
+        "<p align='center'>Found a bug? Have a request? Need hardware supported?<br/>"
+        "<a href='mailto:sessions@ozzy.co.nl' style='color:%4'>sessions@ozzy.co.nl</a></p>"
+        "<p align='center' style='color:%3'>Built with Qt %2.</p>").arg(version, QT_VERSION_STR, theme::textFaint.name(), theme::accent.name()), dlg);
     words->setObjectName("aboutText");
     words->setWordWrap(true);
     words->setFixedWidth(400);
-    words->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    words->setTextInteractionFlags(Qt::TextBrowserInteraction);
+    words->setOpenExternalLinks(true);
     lay->addWidget(words);
     auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok, dlg);
     connect(buttons, &QDialogButtonBox::accepted, dlg, &QDialog::accept);

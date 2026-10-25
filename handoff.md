@@ -1,5 +1,14 @@
 # Sessions — handoff
 
+## About credit and contact links · 0.50.1 · 2026-10-25 · completed
+
+Sessions is a native C++17 / Qt 6 Widgets DAW with ALSA MIDI and immutable audio render snapshots. The user requests an About credit, repository link and support email. Baseline local main is `dccbdba` / 0.50.0; installed package is 0.50.0. Main and both sibling worktrees were clean, and origin was refreshed before this update. No push or installation is requested.
+
+1. Updated `MainWindow::aboutDialog()` with the exact credit **Made with love by Ozzy ♥**, a **GitHub repository** link to `https://github.com/ozzy-apps/sessions`, and **Found a bug? Have a request? Need hardware supported?** followed by a `mailto:sessions@ozzy.co.nl` link. Both links use the current theme accent and support mouse/keyboard activation through the desktop browser/email handler; the text remains selectable.
+2. **Verification:** build/package succeeded; the existing smoke suite (including About logo/text checks) passed in **27.52 s**. Logs: `/tmp/sessions-about-build.log`, `/tmp/sessions-about-smoke.log`. A temporary preview tool loaded app resources and inspected both dark/light popups at `/tmp/sessions-about-preview/about-{dark,light}.png` (472×406); the credit, questions, links and OK button fit. It verified both destinations and mouse/keyboard link access. No permanent tests were added for this text/link edit. `git diff --check` passes.
+3. **Installer:** `dist/sessions_0.50.1+20261025161005_amd64.deb`; SHA-256 `4588af1840b3ddfd8f86ee16be125e4854ea4f315c9c54cfd05f3c646c1440c1`. Metadata and extracted executable (`/tmp/sessions-0501-final-package`) report 0.50.1. Previous 0.50 installer preserved under `../version-recovery-20261025-about/`; installed package remains 0.50.0. Changes are on local main; no push or system installation performed.
+4. **Next AI:** requested About additions are complete. Normal links use the user's desktop browser/email handler. Keep the sampler and Osmium sibling worktrees untouched; pushing or installing requires an explicit current request. The prior native Nektar hardware verification remains separate outstanding manual work described below.
+
 ## Nektar pad/LED feedback · 0.50.0 · 2026-10-25 · completed
 
 The user asks to include Bitwig-style LX49+ pad/LED feedback. Stack remains native C++17 / Qt 6 Widgets with ALSA MIDI. Baseline local main `fe953c0` / 0.49.0 and installed package 0.49.0. Both worktrees were inspected and origin refreshed; the sampler worktree remains untouched. No push or installation is authorized for this update.
