@@ -10,7 +10,7 @@
 <p align="center">A music-making workspace for ideas, live performance and finished tracks.</p>
 
 <p align="center">
-  <a href="https://github.com/ozzy-apps/sessions/releases">Download Sessions</a> ·
+  <a href="https://github.com/ozzy-apps/sessions/releases/latest">Download Sessions</a> ·
   <a href="#sounds-to-start-with">Drum sample pack</a> ·
   <a href="docs/user-guide.md">User guide</a> ·
   <a href="https://github.com/ozzy-apps/sessions/issues">Feedback</a>
@@ -41,15 +41,16 @@ Start with a beat. Add a bassline. Try a different scene. Sessions lets you buil
 
 ## Get Sessions
 
-[**Downloads and release notes →**](https://github.com/ozzy-apps/sessions/releases)
+[**Downloads and release notes →**](https://github.com/ozzy-apps/sessions/releases/latest)
 
 | Platform | Package |
 | --- | --- |
-| Debian / Ubuntu, 64-bit | `.deb` installer |
-| Linux, 64-bit | AppImage or Flatpak bundle |
-| Windows 10 / 11, 64-bit | Portable ZIP—extract and run `Sessions.exe` |
+| Debian / Ubuntu 24.04+, 64-bit | [.deb installer](https://github.com/ozzy-apps/sessions/releases/latest/download/sessions-linux-amd64.deb) |
+| Linux, 64-bit (glibc 2.39+) | [AppImage](https://github.com/ozzy-apps/sessions/releases/latest/download/Sessions-linux-x86_64.AppImage) |
+| Linux with Flatpak, 64-bit | [Flatpak bundle](https://github.com/ozzy-apps/sessions/releases/latest/download/Sessions-linux-x86_64.flatpak) |
+| Windows 10 / 11, 64-bit | [Portable ZIP](https://github.com/ozzy-apps/sessions/releases/latest/download/Sessions-windows-x86_64.zip)—extract and run `Sessions.exe` |
 
-Packages appear on the Releases page when a release is published. Linux is the established platform; Windows is an early build awaiting physical audio and MIDI testing. Sessions currently uses its own devices; VST/AU plugin hosting is not included.
+Linux is the established platform; Windows is an early build awaiting physical audio and MIDI testing. Sessions currently uses its own devices; VST/AU plugin hosting is not included.
 
 On startup, Sessions checks for a newer release. Choose **Download**, **Postpone** for 24 hours, or **Skip this version**. Downloads open in your browser; save your work and close Sessions before installing. You can turn startup checks off in **Preferences → Startup**, or check manually through **Help → Check for Updates**.
 
@@ -59,7 +60,7 @@ Three recorded AVL drum kits are included, so you can start playing immediately.
 
 [**Download the Sessions Drum Collection →**](https://github.com/ozzy-apps/sessions/releases/download/drum-content-v1/sessions-drum-content-v1.zip)
 
-Add six more acoustic libraries: Big Rusty Drums, Swirly Drums, Frankensnare, DRSKit, Naked Drums and MuldjordKit. The optional pack contains 6,061 recordings with velocity layers, repeated-hit variations and recorded microphones where available. About 1.2 GB extracted; credits and CC0/CC BY 4.0 licenses are included. The download becomes available with the separate `drum-content-v1` release.
+Add six more acoustic libraries: Big Rusty Drums, Swirly Drums, Frankensnare, DRSKit, Naked Drums and MuldjordKit. The optional pack contains 6,061 recordings with velocity layers, repeated-hit variations and recorded microphones where available. About 1.2 GB extracted; credits and CC0/CC BY 4.0 licenses are included.
 
 Extract the ZIP, then open **Help → Sample Packs → Locate Drum Studio content** and select its `drum-content` folder. The same screen lists new packs as they are added. [Sample-pack guide](docs/sample-packs.md).
 

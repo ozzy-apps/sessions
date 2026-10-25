@@ -2,7 +2,7 @@
 
 The application includes the original three AVL drum kits. The optional **Sessions Drum Collection** adds six libraries and 6,061 recordings; it is distributed separately so application updates stay small.
 
-[Download the cross-platform ZIP](https://github.com/ozzy-apps/sessions/releases/download/drum-content-v1/sessions-drum-content-v1.zip). This URL becomes live when the `drum-content-v1` release is published. The existing Debian-only drum-content installer remains usable on Debian/Ubuntu.
+[Download the cross-platform ZIP](https://github.com/ozzy-apps/sessions/releases/download/drum-content-v1/sessions-drum-content-v1.zip). The existing Debian-only drum-content installer remains usable on Debian/Ubuntu.
 
 1. Download and extract the ZIP to a folder you intend to keep.
 2. Open **Help → Sample Packs → Locate Drum Studio content**.
