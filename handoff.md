@@ -1,5 +1,14 @@
 # Sessions — handoff
 
+## About link contrast · 0.50.2 · 2026-10-25 · completed
+
+Sessions is a native C++17 / Qt 6 Widgets DAW. The user found the new About links difficult to read against the light grey background. Baseline local main `ecdb1b5` and installed package are 0.50.1; main and both sibling worktrees were clean. No push or system installation requested.
+
+1. Switched About link ink from the decorative accent to the existing theme `readout` colour: dark text on Light/Mid surfaces, orange on Dark. Underlines and repository/mailto interaction remain in place. This follows the same contrast treatment already used by functional value text.
+2. **Verification:** build/package succeeded; existing smoke suite passed in **26.84 s**. Inspected Dark, Light and Mid popup captures in `/tmp/sessions-about-contrast-preview`: light/mid links use dark ink and remain underlined; Dark retains orange. Temporary preview verified repository/mailto destinations and mouse/keyboard link access. Logs: `/tmp/sessions-about-contrast-build.log`, `/tmp/sessions-about-contrast-smoke.log`. Whitespace checks pass. Origin was refreshed before building and remains `f4e70ff`; both sibling worktrees are untouched.
+3. **Installer:** `dist/sessions_0.50.2+20261025170706_amd64.deb`; SHA-256 `1fe9f49d39f7d1602298848343a8d76a5dbb9d72d58d7a1dc9a8f77af3e4e526`. Metadata and extracted executable (`/tmp/sessions-0502-final-package`) report 0.50.2. Previous installer is preserved under `../version-recovery-20261025-about-contrast/`; installed package remains 0.50.1. Changes are committed on local main; no push or installation performed.
+4. **Next AI:** requested contrast fix is complete. Keep the sampler and Osmium sibling worktrees intact. Pushing or installing still requires an explicit current request; prior Nektar hardware checks remain separate manual work.
+
 ## About credit and contact links · 0.50.1 · 2026-10-25 · completed
 
 Sessions is a native C++17 / Qt 6 Widgets DAW with ALSA MIDI and immutable audio render snapshots. The user requests an About credit, repository link and support email. Baseline local main is `dccbdba` / 0.50.0; installed package is 0.50.0. Main and both sibling worktrees were clean, and origin was refreshed before this update. No push or installation is requested.

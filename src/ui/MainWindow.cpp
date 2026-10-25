@@ -630,7 +630,7 @@ QDialog* MainWindow::aboutDialog() {
         "<p align='center'><a href='https://github.com/ozzy-apps/sessions' style='color:%4'>GitHub repository</a></p>"
         "<p align='center'>Found a bug? Have a request? Need hardware supported?<br/>"
         "<a href='mailto:sessions@ozzy.co.nl' style='color:%4'>sessions@ozzy.co.nl</a></p>"
-        "<p align='center' style='color:%3'>Built with Qt %2.</p>").arg(version, QT_VERSION_STR, theme::textFaint.name(), theme::accent.name()), dlg);
+        "<p align='center' style='color:%3'>Built with Qt %2.</p>").arg(version, QT_VERSION_STR, theme::textFaint.name(), theme::readout.name()), dlg);
     words->setObjectName("aboutText");
     words->setWordWrap(true);
     words->setFixedWidth(400);
