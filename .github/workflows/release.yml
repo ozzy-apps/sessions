@@ -68,4 +68,8 @@ jobs:
         run: |
           cd release-assets
           sha256sum *.deb *.AppImage *.flatpak *.zip > SHA256SUMS
-          gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Sessions ${GITHUB_REF_NAME#v}" --notes-file ../distribution/release-notes.md ./*
+          if gh release view "$GITHUB_REF_NAME" --json id >/dev/null 2>&1; then
+            echo "Release already exists; build artifacts remain available in this workflow run."
+          else
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "Sessions ${GITHUB_REF_NAME#v}" --notes-file ../distribution/release-notes.md ./*
+          fi
