@@ -306,9 +306,29 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     m_controllerInput = new QComboBox(controller);
     m_controllerInput->setObjectName("controllerInput");
     controllerForm->addRow("Input", m_controllerInput);
-    auto* nektarSetup = new QLabel("USB Port Setup 0 · Mixer / Inst", controller);
-    nektarSetup->setToolTip("LX49+/61+: hold Shift/Mute and press Patch > (Setup), press A2, then C3 (−) until 0.0.0. Exit Setup the same way. Enable both input ports.");
+    auto* nektarSetup = new QLabel("Mixer / Inst · automatic pad feedback", controller);
+    nektarSetup->setToolTip("Enable both MIDI1 and MIDI2. LED feedback configures native pad mode automatically. With feedback off, use USB Port Setup 0 for basic Mixer/Inst controls.");
     controllerForm->addRow("Nektar LX+", nektarSetup);
+    auto* nektarPads = new QWidget(controller);
+    auto* nektarLine = new QHBoxLayout(nektarPads);
+    nektarLine->setContentsMargins(0, 0, 0, 0);
+    auto* nektarFeedback = new QCheckBox("LED feedback", nektarPads);
+    nektarFeedback->setObjectName("nektarFeedback");
+    nektarFeedback->setChecked(settings().value("midi/nektarFeedback", true).toBool());
+    nektarFeedback->setToolTip("Enable both LX49+/61+ inputs. Sessions configures USB Port Setup 2 for native Clips/Scenes pads and restores 0 when disabled. Pad maps and user presets are preserved.");
+    auto* nektarMode = new QComboBox(nektarPads);
+    nektarMode->setObjectName("nektarPadMode");
+    nektarMode->addItems({"Notes", "Clips", "Scenes"});
+    nektarMode->setCurrentIndex(std::clamp(settings().value("midi/nektarPadMode", 0).toInt(), 0, 2));
+    nektarMode->setEnabled(nektarFeedback->isChecked());
+    nektarLine->addWidget(nektarFeedback); nektarLine->addWidget(nektarMode, 1);
+    controllerForm->addRow("Pads", nektarPads);
+    connect(nektarFeedback, &QCheckBox::toggled, this, [=](bool on) {
+        settings().setValue("midi/nektarFeedback", on); nektarMode->setEnabled(on); emit midiControllerSettingsChanged();
+    });
+    connect(nektarMode, &QComboBox::activated, this, [=](int mode) {
+        settings().setValue("midi/nektarPadMode", mode); emit midiControllerSettingsChanged();
+    });
     auto* bankLine = new QWidget(controller);
     auto* bankLayout = new QHBoxLayout(bankLine);
     bankLayout->setContentsMargins(0, 0, 0, 0);
@@ -322,7 +342,7 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     pickup->setToolTip("A fader or pan knob takes control when it reaches the current value. This prevents jumps.");
     bankLayout->addWidget(bank, 1); bankLayout->addWidget(pickup);
     controllerForm->addRow("Mixer", bankLine);
-    auto setControllerEnabled = [=] { bankLine->setEnabled(profile->currentData().toString() != "off"); m_controllerInput->setEnabled(profile->currentData().toString() != "off"); };
+    auto setControllerEnabled = [=] { const bool on = profile->currentData().toString() != "off"; bankLine->setEnabled(on); m_controllerInput->setEnabled(on); nektarPads->setEnabled(on); };
     setControllerEnabled();
     connect(profile, &QComboBox::activated, this, [=] {
         settings().setValue("midi/controller", profile->currentData());
@@ -338,7 +358,7 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
         settings().setValue("midi/controllerPickup", on); emit midiControllerSettingsChanged();
     });
     rows->addWidget(row("Control surface", controller,
-        "LX49+/61+: USB Port Setup 0. Mixer: volume, pan and mute; Inst: selected device parameters; Track −/+: banks of eight. "
+        "LX49+/61+: Mixer controls volume, pan and mute; Inst controls the selected device. Clips/Scenes select pads; hold either and press a pad for its bank. "
         "Transport buttons work directly. User Preset 2 and MMC remain supported. APC Key 25 (either model): the pads launch the clips in the red box on the Session View; "
         "Shift + track buttons 1–4 move it, 5–8 set the knobs to Volume, Pan, Send or Device. Custom MIDI Maps take priority.", midiTab));
     rows->addStretch(1);

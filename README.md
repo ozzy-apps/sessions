@@ -11,11 +11,15 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ![Session View](docs/screenshots/01-session-clip.png)
 
+## Nektar native pads · 0.50
+
+The Impact LX49+/61+ now has native **Clips / Scenes** pads and LED feedback: yellow loaded, green playing, red recording and off empty, with queued-state blinking and separate banks of eight. Enable both MIDI inputs and leave **LED feedback** on in Preferences. Sessions configures the native port mode automatically. [Setup and scope](docs/nektar-impact.md).
+
 ## Audio inputs and Nektar modes · 0.49
 
 Audio tracks can record hardware inputs, another track, a group or Master using the mixer's **Audio From** selector. Internal sources are captured after effects and fader, with separate streams for simultaneous takes. Master and feedback routes keep recording with monitoring disabled. [Recording input guide](docs/audio-recording-inputs.md).
 
-The Nektar Impact LX49+/61+ **Mixer** and **Inst** presets now control the mixer, selected devices and transport directly. Set USB Port Setup to 0 and enable the controller inputs in Preferences. [Nektar setup](docs/nektar-impact.md).
+The Nektar Impact LX49+/61+ **Mixer** and **Inst** presets control the mixer, selected devices and transport directly. Enable the controller inputs in Preferences. With LED feedback disabled, use USB Port Setup 0; native feedback configures the port mode automatically. [Nektar setup](docs/nektar-impact.md).
 
 ## Production devices · 0.48
 
@@ -148,7 +152,7 @@ Plug in a MIDI keyboard and play: Sessions connects every MIDI input it finds (E
 
 **MIDI Map** (Ctrl+M or the MIDI button): click a fader, knob, button, clip slot or scene, then move a knob or hit a pad on your controller, and it's mapped. **Key Map** (Ctrl+K or KEY) does the same with computer keys, handy for launching clips. Delete removes a mapping, Esc leaves the mode, and mappings are saved with the set.
 
-**Nektar Impact LX49+ / LX61+** (0.49): dedicated Mixer/Inst modes with banked volume/pan/mute, Master, selected-device knobs, arm and transport. User Preset 2, optional pickup and MMC transport remain supported. Configure it in Preferences → MIDI; custom maps take priority. See the [setup guide](docs/nektar-impact.md) for hardware settings and current integration limits.
+**Nektar Impact LX49+ / LX61+** (0.50): native Clips/Scenes pads with LED feedback, plus dedicated Mixer/Inst modes with banked volume/pan/mute, Master, selected-device knobs, arm and transport. User Preset 2, optional pickup and MMC transport remain supported. Configure it in Preferences → MIDI; custom maps take priority. See the [setup guide](docs/nektar-impact.md) for hardware settings and current integration limits.
 
 **Akai APC Key 25** (2014 model and mk2, 0.45): automatic clip-launcher profile. Its pads launch the clips in a red box of 8 tracks × 5 scenes on the Session View, and light up in the clips' colours (green when playing, blinking when queued). The scene buttons launch scenes, Stop All Clips stops them, Play and Rec run the transport, and the track buttons do Clip Stop, Solo, Rec Arm, Mute or Select (Shift + a scene button picks). Shift + track buttons 1–4 move the box; 5–8 set the knobs to Volume, Pan, Send or Device (Osmium's Macro 1–8). The keys play as before; the pads no longer play notes. See the [APC Key 25 guide](docs/apc-key-25.md).
 

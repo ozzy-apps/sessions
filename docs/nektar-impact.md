@@ -1,15 +1,21 @@
 # Nektar Impact LX49+ / LX61+
 
-Sessions 0.49 supports the dedicated **Mixer** and **Inst** presets as well as **User Preset 2**. Enable the keyboard's MIDI inputs in **Preferences → MIDI**, leaving **Profile → Automatic** selected. Named LX49+/61+ ports are detected automatically; choose a specific controller input if its port has been renamed. User MIDI Maps take priority.
+Sessions 0.50 supports native pad/LED feedback, the dedicated **Clips/Scenes** modes, and the **Mixer** and **Inst** presets as well as **User Preset 2**. Enable the keyboard's MIDI inputs in **Preferences → MIDI**, leaving **Profile → Automatic** selected. Named LX49+/61+ ports are detected automatically; choose a specific controller input if its port has been renamed. User MIDI Maps take priority.
 
-## Dedicated Mixer / Instrument setup
+## Native pad and LED setup
 
-Set the keyboard's **USB Port Setup to 0**. Nektar's documented procedure for the LX49+/61+ is:
+1. Enable both **Impact LX49+ MIDI1** and **MIDI2** inputs in **Preferences → MIDI**.
+2. Keep **Profile → Automatic** and **Pads → LED feedback** enabled.
+3. Press **Clips** to launch the selected track's clips, or **Scenes** to launch scenes across the set. The matching button lights up. Press the active mode again, press Preset, or choose **Notes** in Preferences to return to normal pad playing.
+4. Hold **Clips** or **Scenes** and press pad 1–8 to choose a bank. Each mode remembers its own bank, covering up to 64 existing scenes. Track −/+ follows the selected track in launcher modes. Shift + Track −/+ keeps the mixer-bank action.
 
-1. Hold **Shift/Mute** and press **Patch > (Setup)**.
-2. Press **A2** (the 13th white key from the left).
-3. Press **C3 (−)** until the display shows **0.0.0**.
-4. Hold **Shift/Mute** and press **Patch > (Setup)** to exit.
+Loaded slots are **yellow**, playing clips **green**, recording **red**, and empty slots **off**. Queued launches blink; playing scenes pulse with the beat. Bank selection uses **orange** for the current bank. An empty slot starts recording when its track is armed, and otherwise stops its track. Group pads control the group's member tracks. Shift-pad selects a clip without launching it. Keys and ordinary pad notes on MIDI1 continue to play instruments; custom MIDI Maps take priority.
+
+Sessions automatically selects USB Port Setup 2 for the paired native input/output and restores 0 when feedback is disabled or Sessions closes. It preserves stored pad maps and user presets. A renamed or single-port input continues to work with the basic input profile; native feedback requires the named pair. Only one DAW should control this integration at a time.
+
+## Basic Mixer / Instrument setup
+
+With LED feedback disabled, use **USB Port Setup 0**. To set it manually: hold **Shift/Mute** and press **Patch > (Setup)**, press **A2** (13th white key), use **C3 (−)** until **0.0.0**, then leave Setup the same way.
 
 Press **Mixer** or **Inst** on the keyboard. These read-only presets send the control messages on MIDI channel 16; the global keybed channel does not need changing for these modes. Enable both MIDI input ports if they are listed separately.
 
@@ -20,7 +26,7 @@ Press **Mixer** or **Inst** on the keyboard. These read-only presets send the co
 | Mixer buttons 1–8 | Toggle track mute |
 | Fader 9 | Master volume |
 | Button 9 | Arm/unarm the selected track |
-| Track − / + | Previous/next bank of eight tracks |
+| Track − / + | Selected track in launcher mode; mixer bank in Notes mode or with Shift |
 | Inst knobs 1–8 | First eight parameters of the selected device; labelled Macro 1–8 on racks |
 | Cycle | Toggle loop |
 | Rewind / Forward | Move back/forward four beats |
@@ -37,8 +43,8 @@ MMC Stop (1), Play (2), Forward (4), Rewind (5), Record (6), Record Exit (7) and
 
 ## Scope and verification
 
-The native mode uses the fixed channel-16 assignments published in the Nektar/Ardour controller map. It does not load Bitwig's integration package or negotiate its proprietary modes. Instrument fader envelope layouts, Patch/Page navigation, Grab assignments and pad/display/LED feedback are not implemented. Keys, pads, wheels and sustain retain normal instrument/MIDI Map behavior. Select **Profile → Off** to disable the global profile.
+The native feedback implementation uses the LX+ wire protocol checked against the controller extension bundled in Bitwig's official installer; Sessions builds its own messages and launcher state. It does not load Bitwig's integration code. Instrument fader envelope layouts, Patch/Page navigation, Grab assignments, automatic preset maps and display feedback are not included in this pad update. Select **Profile → Off** or disable **LED feedback** to restore basic operation.
 
-Regression tests inject the dedicated and GM messages, exercise pickup, banks, device selection, buttons, transport and mapping precedence. Physical LX49+ verification of the new dedicated mode is still required.
+Regression tests cover the dedicated and GM messages, pickup, banks, device selection, transport, source-scoped pad feedback, output retries and mapping precedence. Physical LX49+ verification of the new colours and buttons remains necessary. [Protocol and delivery details](nektar-feedback-protocol.md).
 
 References: [Nektar's Ardour/Mixbus setup and control layout](https://support.nektartech.com/using-harrison-mixbus-or-ardour-with-impact/), [published LX MIDI assignments](https://github.com/Ardour/ardour/blob/master/share/midi_maps/Nektar_Impact_LX.map), [Nektar's Bitwig integration](https://support.nektartech.com/download/using_impact_lx_plus_with_bitwig/).

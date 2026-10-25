@@ -18,6 +18,7 @@
 #include "core/Model.h"
 #include "core/Transport.h"
 #include "core/ControlSurface.h"
+#include "core/NektarPads.h"
 #include "core/Theme.h"
 #include "core/Scales.h"
 #include "core/DeviceSpecs.h"
@@ -123,6 +124,19 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     m_mapper = new Mapper(m_project, m_transport, this);
     m_midi = new audio::MidiInput(this);
     m_surface = new ControlSurface(m_project, m_transport, m_mapper, this);
+    m_surface->pads()->setSender([this, failed = false](const QString& port, const QByteArray& data) mutable {
+        const bool sent = m_midi->send(port, data);
+        if (!sent && !failed && m_info) m_info->show("Nektar: pad feedback unavailable", m_midi->sendError());
+        failed = !sent;
+        return sent;
+    });
+    connect(m_surface->pads(), &NektarPads::trackChosen, this, &MainWindow::selectTrack);
+    connect(m_surface->pads(), &NektarPads::clipChosen, this, [this](int t, int s) {
+        selectTrack(t); selectClip(m_project->tracks[t].clipSlots.value(s)); showClipView(true);
+    });
+    connect(m_surface->pads(), &NektarPads::message, this, [this](const QString& title, const QString& body) {
+        if (m_info) m_info->show(title, body);
+    });
     m_apc = new ApcKey25(m_project, m_transport, m_mapper, this);
     m_apc->setSender([this](const QString& port, const QByteArray& message) {
         const bool sent = m_midi->send(port, message);
@@ -404,6 +418,8 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 }
 
 MainWindow::~MainWindow() {
+    m_surface->pads()->shutdown();
+    m_surface->pads()->setSender({});
     m_apc->darken();        // the controller's lights go out with the window
     m_apc->setSender({});
     m_engine->shutdown();   // stop the audio thread before anything it reads goes away
@@ -1341,6 +1357,9 @@ void MainWindow::updateApc() {
     for (const audio::MidiInput::Port& p : m_midi->ports()) ports.push_back({p.id, p.name});
     m_apc->setEnabled(QSettings("Sessions", "Sessions").value("midi/controller", "auto").toString() != "off");
     m_apc->setPorts(ports);
+    QVector<NektarPads::Port> nektar;
+    for (const auto& port : m_midi->ports()) nektar.push_back({port.id, port.name, m_midi->enabled(port.name)});
+    m_surface->pads()->setPorts(nektar);
     updateApcBox();
 }
 
@@ -1351,6 +1370,10 @@ void MainWindow::updateApcBox() {
 
 void MainWindow::midiNoteOn(int channel, int pitch, int velocity) {
     if (m_mapper->note(channel, pitch, true, velocity)) return;
+    if (m_surface->pads()->takesNote(m_midi->sourceName(), channel, pitch)) {
+        if (m_mapper->mode() == Mapper::Mode::Off) m_surface->pads()->note(m_midi->sourceName(), channel, pitch, velocity, true);
+        return;
+    }
     if (m_apc->takesNote(m_midi->sourceName(), channel, pitch)) {   // the APC's pads and buttons never play notes
         if (m_mapper->mode() == Mapper::Mode::Off) m_apc->note(m_midi->sourceName(), channel, pitch, velocity, true);
         return;
@@ -1365,6 +1388,10 @@ void MainWindow::midiNoteOn(int channel, int pitch, int velocity) {
 
 void MainWindow::midiNoteOff(int channel, int pitch) {
     if (m_mapper->note(channel, pitch, false, 0)) return;
+    if (m_surface->pads()->takesNote(m_midi->sourceName(), channel, pitch)) {
+        if (m_mapper->mode() == Mapper::Mode::Off) m_surface->pads()->note(m_midi->sourceName(), channel, pitch, 0, false);
+        return;
+    }
     if (m_apc->takesNote(m_midi->sourceName(), channel, pitch)) {
         if (m_mapper->mode() == Mapper::Mode::Off) m_apc->note(m_midi->sourceName(), channel, pitch, 0, false);
         return;

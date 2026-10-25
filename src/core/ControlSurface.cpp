@@ -1,4 +1,5 @@
 #include "ControlSurface.h"
+#include "NektarPads.h"
 #include "Mapping.h"
 #include "Model.h"
 #include "Transport.h"
@@ -9,7 +10,7 @@
 
 namespace sessions {
 ControlSurface::ControlSurface(Project* project, Transport* transport, Mapper* mapper, QObject* parent)
-    : QObject(parent), m_project(project), m_transport(transport), m_mapper(mapper) { reloadSettings(); }
+    : QObject(parent), m_pads(new NektarPads(project, transport, this)), m_project(project), m_transport(transport), m_mapper(mapper) { reloadSettings(); }
 
 void ControlSurface::reloadSettings() {
     QSettings s("Sessions", "Sessions");
@@ -20,6 +21,7 @@ void ControlSurface::reloadSettings() {
     m_controls.clear();
     m_buttons.clear();
     m_lastDevice = 0;
+    m_pads->reloadSettings();
 }
 
 bool ControlSurface::isNektarImpact(const QString& source) {
@@ -45,6 +47,7 @@ bool ControlSurface::continuous(const QString& source, int channel, int cc, cons
 }
 
 bool ControlSurface::controlChange(const QString& source, int channel, int cc, int value) {
+    if (m_pads->controlChange(source, channel, cc, value)) return true;
     if (!accepts(source) || channel < 0 || channel > 15 || value < 0 || value > 127) return false;
     // The dedicated read-only Mixer/Instrument presets use fixed channel 16.
     // Assignments follow Nektar's Ardour/Mixbus map, without a firmware handshake.
@@ -79,7 +82,7 @@ bool ControlSurface::controlChange(const QString& source, int channel, int cc, i
         }
         if ((cc >= 21 && cc <= 29) || (cc >= 102 && cc <= 107) || cc == 109 || cc == 110) {
             const QString key = source + QString(":%1").arg(cc);
-            const bool down = value >= 64, pressed = down && !m_buttons.value(key);
+            const bool down = value > 0, pressed = down && !m_buttons.value(key);
             m_buttons[key] = down;
             if (!pressed) return true;
             if (cc == 109 || cc == 110) {
