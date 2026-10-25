@@ -124,11 +124,18 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
     QVBoxLayout* outer = rows;
     m_system = new QComboBox(audioTab);
     m_system->setObjectName("audioSystem");
+#ifdef Q_OS_WIN
+    m_system->addItem("Windows audio (WASAPI shared)", "pulse");
+#else
     m_system->addItem("PipeWire / JACK: low latency, your interface's channels", "jack");
     m_system->addItem("PulseAudio: the desktop's sound", "pulse");
+#endif
     m_system->setCurrentIndex(std::max(0, m_system->findData(savedAudio().system)));
     m_system->setToolTip("PipeWire / JACK hands Sessions your audio interface's inputs and outputs with a small buffer, "
                          "so you can play a guitar through the amp and hear it at once. PulseAudio goes through the desktop's mixer.");
+#ifdef Q_OS_WIN
+    m_system->setToolTip("Choose the output device and buffer below. Recording uses the selected input device.");
+#endif
     outer->addWidget(row("Audio system", m_system, {}, audioTab));
 
     // JACK: buffer and ports
@@ -456,6 +463,11 @@ PreferencesDialog::PreferencesDialog(audio::Engine* engine, audio::MidiInput* mi
         settings().setValue("recovery/backupCount", backups->currentData()); emit recoverySettingsChanged();
     });
     rows->addWidget(row("Project backups", backups, "Saved in Backups beside the set. File → Show Backups opens its folder.", startTab));
+    auto* updates = new QCheckBox("Check for updates at startup", startTab);
+    updates->setObjectName("startupUpdates");
+    updates->setChecked(settings().value("updates/enabled", true).toBool());
+    connect(updates, &QCheckBox::toggled, this, [](bool on) { settings().setValue("updates/enabled", on); });
+    rows->addWidget(row("Updates", updates, "Checks GitHub Releases. Downloads open in your browser; installation is manual.", startTab));
     rows->addStretch(1);
     addPage(startTab, "Startup");
 

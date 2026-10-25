@@ -52,7 +52,11 @@ const Variant& current() { return variant(currentKey()); }
 QIcon icon(const QString& key) { return QIcon(variant(key).resource); }
 
 QString desktopOverridePath() {
+#ifdef Q_OS_WIN
+    return {}; // Windows shortcuts are managed by the package, not desktop entries.
+#else
     return QStandardPaths::writableLocation(QStandardPaths::ApplicationsLocation) + "/sessions.desktop";
+#endif
 }
 
 QString iconFilePath(const QString& key) {
@@ -72,6 +76,9 @@ bool writeFile(const QString& path, const QByteArray& bytes, QString* error) {
 // The desktop entry override: the shipped entry (assets/sessions.desktop, in the resources) with the
 // icon pointing at the written SVG, marked as ours so only ours is ever removed.
 bool writeDesktopOverride(const QString& key, QString* error) {
+#ifdef Q_OS_WIN
+    Q_UNUSED(key); Q_UNUSED(error); return true;
+#endif
     const QString path = desktopOverridePath();
     if (key == defaultKey()) {
         QFile f(path);

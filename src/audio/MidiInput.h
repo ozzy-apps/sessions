@@ -18,6 +18,7 @@
 #include <QVector>
 #include <QHash>
 #include <QByteArray>
+#include <memory>
 
 struct _snd_seq;
 
@@ -29,7 +30,13 @@ public:
     explicit MidiInput(QObject* parent = nullptr);
     ~MidiInput() override;
 
-    bool    available() const { return m_seq != nullptr; }
+    bool    available() const {
+#ifdef Q_OS_WIN
+        return m_windows != nullptr;
+#else
+        return m_seq != nullptr;
+#endif
+    }
     QString status() const { return m_status; }   // why it isn't available, or the port's address
 
     struct Port { QString id, name; bool connected = false; };   // id "client:port"
@@ -61,6 +68,10 @@ signals:
     void sent(const QString& portName, const QByteArray& message);   // every message send() was given (tests)
 
 private:
+#ifdef Q_OS_WIN
+    struct Windows;
+    std::unique_ptr<Windows> m_windows;
+#endif
     void readEvents();
     void connectAll();
 

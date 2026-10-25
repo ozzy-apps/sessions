@@ -1,0 +1,27 @@
+{
+  "app-id": "nl.co.ozzy.Sessions",
+  "runtime": "org.kde.Platform",
+  "runtime-version": "6.10",
+  "sdk": "org.kde.Sdk",
+  "command": "sessions",
+  "build-options": {"strip": false, "no-debuginfo": true},
+  "rename-desktop-file": "sessions.desktop",
+  "rename-icon": "sessions",
+  "finish-args": [
+    "--share=ipc", "--socket=wayland", "--socket=fallback-x11",
+    "--socket=pulseaudio", "--share=network", "--device=all",
+    "--filesystem=home", "--filesystem=xdg-run/pipewire-0"
+  ],
+  "modules": [
+    {
+      "name": "sessions",
+      "buildsystem": "cmake-ninja",
+      "config-opts": ["-DCMAKE_BUILD_TYPE=Release", "-DSESSIONS_BUILD_DEB=OFF", "-DSESSIONS_BUILD_TESTS=OFF"],
+      "post-install": [
+        "strip /app/bin/sessions",
+        "sed -i 's|>sessions.desktop<|>nl.co.ozzy.Sessions.desktop<|' /app/share/metainfo/nl.co.ozzy.Sessions.metainfo.xml"
+      ],
+      "sources": [{"type": "dir", "path": "../..", "skip": [".git", "build", "dist", ".flatpak-builder", "content/drums/audio"]}]
+    }
+  ]
+}

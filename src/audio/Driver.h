@@ -52,6 +52,10 @@ public:
 std::unique_ptr<Driver> makePulseDriver();   // nullptr when built without PulseAudio
 std::unique_ptr<Driver> makeJackDriver();    // nullptr when no libjack (PipeWire's or JACK's) is installed
 std::unique_ptr<Driver> makeNullDriver();
+#ifdef Q_OS_WIN
+std::unique_ptr<Driver> makeQtAudioDriver();
+QVector<OutputDevice> listQtAudioDevices(bool input);
+#endif
 
 // JACK ports (PipeWire names them "<device>:<channel>"): the physical ones to record from
 // (capture) or to play to. Empty without a JACK server or library. `rate` gets the server's rate.
@@ -72,5 +76,8 @@ public:
     virtual QString name() const = 0;
 };
 std::unique_ptr<InputDriver> makePulseInput();   // nullptr when built without PulseAudio
+#ifdef Q_OS_WIN
+std::unique_ptr<InputDriver> makeQtAudioInput();
+#endif
 
 } // namespace sessions::audio

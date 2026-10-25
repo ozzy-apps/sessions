@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>nl.co.ozzy.Sessions</id>
+  <name>Sessions</name>
+  <summary>Turn clips into complete tracks</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <developer id="nl.co.ozzy"><name>Ozzy</name></developer>
+  <description><p>Compose with clips and scenes, record audio and MIDI, and finish your music in a complete arrangement. Sessions includes synthesizers, sampled drums, guitar processing and audio effects.</p></description>
+  <launchable type="desktop-id">sessions.desktop</launchable>
+  <url type="homepage">https://github.com/ozzy-apps/sessions</url>
+  <url type="bugtracker">https://github.com/ozzy-apps/sessions/issues</url>
+  <provides><binary>sessions</binary></provides>
+  <content_rating type="oars-1.1"/>
+  <supports><control>keyboard</control><control>pointing</control></supports>
+  <screenshots><screenshot type="default"><image>https://raw.githubusercontent.com/ozzy-apps/sessions/main/docs/screenshots/release/session.png</image><caption>Session grid and clip editor</caption></screenshot></screenshots>
+  <releases><release version="0.51.0" date="2026-10-25"><description><p>Release downloads, sample packs and optional startup update checks.</p></description></release></releases>
+</component>

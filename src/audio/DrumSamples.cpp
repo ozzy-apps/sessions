@@ -30,6 +30,7 @@ struct Library {
     int loaded = 0;
     Library() {
         QString root = QCoreApplication::applicationDirPath() + "/../share/sessions/drums";
+        if (!QFile::exists(root + "/library.json")) root = QCoreApplication::applicationDirPath() + "/share/sessions/drums";
         if (!QFile::exists(root + "/library.json")) root = SESSIONS_DRUM_SOURCE_DIR;
         QFile manifest(root + "/library.json");
         if (!manifest.open(QIODevice::ReadOnly)) { error = "Drum recordings are missing"; return; }
@@ -78,6 +79,8 @@ namespace {
 QString contentRoot(){
     const QString chosen=qEnvironmentVariable("SESSIONS_DRUM_CONTENT_ROOT");   // another copy of the libraries (and the tests' generated one)
     if(!chosen.isEmpty())return chosen;
+    const QString located=QSettings("Sessions", "Sessions").value("content/drumRoot").toString();
+    if(!located.isEmpty()&&QFile::exists(located+"/library.json"))return located;
     const auto installed=QCoreApplication::applicationDirPath()+"/../share/sessions/drum-content";
     return QFile::exists(installed+"/library.json")?installed:QString(SESSIONS_DRUM_CONTENT_DIR);
 }

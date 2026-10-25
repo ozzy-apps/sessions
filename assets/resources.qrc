@@ -1,6 +1,7 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
   <qresource prefix="/">
+    <file alias="content-packs.json">../distribution/content-packs.json</file>
     <file>icon/sessions.svg</file>
     <file>icon/sessions-64.png</file>
     <file>logo/sessions-logo.svg</file>

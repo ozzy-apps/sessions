@@ -197,6 +197,9 @@ void queryServer(Query&& query) {
 } // namespace
 
 QVector<OutputDevice> listInputDevices() {
+#ifdef Q_OS_WIN
+    return listQtAudioDevices(true);
+#endif
     QVector<OutputDevice> out;
 #ifdef SESSIONS_HAVE_PULSE
     queryServer([&out](pa_context* ctx) {
@@ -210,7 +213,9 @@ QVector<OutputDevice> listInputDevices() {
 }
 
 std::unique_ptr<InputDriver> makePulseInput() {
-#ifdef SESSIONS_HAVE_PULSE
+#ifdef Q_OS_WIN
+    return makeQtAudioInput();
+#elif defined(SESSIONS_HAVE_PULSE)
     return std::make_unique<PulseInput>();
 #else
     return nullptr;
@@ -218,6 +223,9 @@ std::unique_ptr<InputDriver> makePulseInput() {
 }
 
 QVector<OutputDevice> listOutputDevices() {
+#ifdef Q_OS_WIN
+    return listQtAudioDevices(false);
+#endif
     QVector<OutputDevice> out;
 #ifdef SESSIONS_HAVE_PULSE
     // A throwaway connection with its own main loop, given at most two seconds.
@@ -245,7 +253,9 @@ QVector<OutputDevice> listOutputDevices() {
 }
 
 std::unique_ptr<Driver> makePulseDriver() {
-#ifdef SESSIONS_HAVE_PULSE
+#ifdef Q_OS_WIN
+    return makeQtAudioDriver();
+#elif defined(SESSIONS_HAVE_PULSE)
     return std::make_unique<PulseDriver>();
 #else
     return nullptr;

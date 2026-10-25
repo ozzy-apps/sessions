@@ -15,7 +15,7 @@
 #include <cstdint>
 #include <cstring>
 #include <random>
-#include <dlfcn.h>
+#include <QLibrary>
 
 namespace sessions {
 
@@ -270,12 +270,17 @@ struct Sndfile {
 const Sndfile& sndfile() {
     static const Sndfile lib = [] {
         Sndfile s;
-        void* h = dlopen("libsndfile.so.1", RTLD_NOW | RTLD_LOCAL);
-        if (!h) return s;
-        s.open = reinterpret_cast<void* (*)(const char*, int, SfInfo*)>(dlsym(h, "sf_open"));
-        s.readf = reinterpret_cast<int64_t (*)(void*, float*, int64_t)>(dlsym(h, "sf_readf_float"));
-        s.close = reinterpret_cast<int (*)(void*)>(dlsym(h, "sf_close"));
-        s.strerror = reinterpret_cast<const char* (*)(void*)>(dlsym(h, "sf_strerror"));
+#ifdef Q_OS_WIN
+        static QLibrary library("libsndfile-1");
+#else
+        static QLibrary library("libsndfile.so.1");
+#endif
+        library.setLoadHints(QLibrary::PreventUnloadHint);
+        if (!library.load()) return s;
+        s.open = reinterpret_cast<void* (*)(const char*, int, SfInfo*)>(library.resolve("sf_open"));
+        s.readf = reinterpret_cast<int64_t (*)(void*, float*, int64_t)>(library.resolve("sf_readf_float"));
+        s.close = reinterpret_cast<int (*)(void*)>(library.resolve("sf_close"));
+        s.strerror = reinterpret_cast<const char* (*)(void*)>(library.resolve("sf_strerror"));
         return s;
     }();
     return lib;

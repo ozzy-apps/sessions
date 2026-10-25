@@ -38,7 +38,7 @@
 
 // The hot loops are compiled twice on x86-64 (AVX2 + FMA, and the baseline), picked at load time
 // by the CPU: a generic build still runs a standard capture at about a tenth of a core.
-#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && !defined(__SANITIZE_ADDRESS__)
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__)) && !defined(__SANITIZE_ADDRESS__) && !defined(_WIN32)
 #define NAM_HOT __attribute__((target_clones("avx2,fma", "default")))
 #else
 #define NAM_HOT

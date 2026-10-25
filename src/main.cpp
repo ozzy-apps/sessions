@@ -144,6 +144,8 @@ int main(int argc, char** argv) {
     if (cli.isSet(shotsOpt)) {
         const QString dir = cli.value(shotsOpt);
         QTimer::singleShot(300, &w, [&w, dir] { w.captureScreenshots(dir); QApplication::quit(); });
+    } else if (!qEnvironmentVariableIsSet("SESSIONS_NO_UPDATES")) {
+        QTimer::singleShot(2000, &w, [&w] { w.checkForUpdates(); });
     }
     return app.exec();
 }

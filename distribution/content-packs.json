@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "packs": [
+    {
+      "id": "sessions-drums",
+      "name": "Sessions Drum Collection",
+      "version": "1",
+      "description": "Six recorded acoustic drum libraries: Big Rusty Drums, Swirly Drums, Frankensnare, DRSKit, Naked Drums and MuldjordKit. 6,061 recordings, about 1.2 GB extracted. Separate from the built-in kits. CC0 and CC BY 4.0; credits and licenses included.",
+      "url": "https://github.com/ozzy-apps/sessions/releases/download/drum-content-v1/sessions-drum-content-v1.zip"
+    }
+  ]
+}

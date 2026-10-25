@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.50.2 LANGUAGES CXX)
+project(Sessions VERSION 0.51.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,7 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets Svg Network)
 find_package(Qt6 QUIET COMPONENTS Test)
 find_package(Threads REQUIRED)
 find_package(PkgConfig)
-if(PkgConfig_FOUND)
+if(PkgConfig_FOUND AND NOT WIN32)
     pkg_check_modules(PULSE IMPORTED_TARGET libpulse-simple libpulse)
     pkg_check_modules(ALSA IMPORTED_TARGET alsa)
 endif()
@@ -22,6 +22,7 @@ set(SESSIONS_SOURCES
     src/core/Model.cpp
     src/core/SetFile.cpp
     src/core/Recovery.cpp
+    src/core/Updates.cpp
     src/core/Presets.cpp
     src/core/Sample.cpp
     src/core/SampleEdit.cpp
@@ -70,6 +71,9 @@ set(SESSIONS_SOURCES
     src/widgets/Meter.cpp
     src/widgets/LevelFader.cpp
     src/ui/MainWindow.cpp
+    src/ui/MainWindowUpdates.cpp
+    src/ui/UpdateDialog.cpp
+    src/ui/SamplePacks.cpp
     src/ui/MainWindowRecovery.cpp
     src/ui/RecoveryDialog.cpp
     src/ui/ControlBar.cpp
@@ -108,24 +112,40 @@ set(SESSIONS_SOURCES
 
 add_library(sessions_core STATIC ${SESSIONS_SOURCES})
 target_include_directories(sessions_core PUBLIC src)
+target_link_libraries(sessions_core PUBLIC Qt6::Network)
+if(WIN32)
+    find_package(Qt6 REQUIRED COMPONENTS Multimedia)
+    list(REMOVE_ITEM SESSIONS_SOURCES src/audio/JackDriver.cpp src/audio/MidiInput.cpp)
+    set_property(TARGET sessions_core PROPERTY SOURCES "${SESSIONS_SOURCES}")
+    target_sources(sessions_core PRIVATE src/audio/QtAudioDriver.cpp src/audio/MidiInputWindows.cpp src/audio/MidiInput.h src/audio/JackDriverStub.cpp)
+    set_source_files_properties(assets/resources.qrc PROPERTIES AUTORCC_OPTIONS "--compress-algo;zlib")
+    target_link_libraries(sessions_core PUBLIC Qt6::Multimedia winmm)
+    target_compile_definitions(sessions_core PUBLIC NOMINMAX _USE_MATH_DEFINES)
+endif()
 target_compile_definitions(sessions_core PRIVATE SESSIONS_DRUM_SOURCE_DIR="${CMAKE_SOURCE_DIR}/assets/drums")
 target_link_libraries(sessions_core PUBLIC Qt6::Widgets Qt6::Svg Threads::Threads ${CMAKE_DL_LIBS})   # dl: libsndfile at run time
 if(PULSE_FOUND)
     target_compile_definitions(sessions_core PRIVATE SESSIONS_HAVE_PULSE)
     target_link_libraries(sessions_core PRIVATE PkgConfig::PULSE)
-else()
+elseif(NOT WIN32)
     message(WARNING "libpulse-simple not found (sudo apt install libpulse-dev): Sessions will build without sound output")
 endif()
 if(ALSA_FOUND)
     target_compile_definitions(sessions_core PUBLIC SESSIONS_HAVE_ALSA)   # the smoke test talks to the sequencer too
     target_link_libraries(sessions_core PUBLIC PkgConfig::ALSA)
-else()
+elseif(NOT WIN32)
     message(WARNING "ALSA not found (sudo apt install libasound2-dev): Sessions will build without MIDI input")
 endif()
 
 target_compile_definitions(sessions_core PRIVATE SESSIONS_DRUM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/content/drums")
 
 add_executable(sessions src/main.cpp)
+if(WIN32)
+    set_target_properties(sessions PROPERTIES WIN32_EXECUTABLE TRUE)
+    enable_language(RC)
+    configure_file(distribution/windows/sessions.rc.in "${CMAKE_CURRENT_BINARY_DIR}/sessions.rc" @ONLY)
+    target_sources(sessions PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/sessions.rc")
+endif()
 target_link_libraries(sessions PRIVATE sessions_core Qt6::Network)   # Network: the one-instance socket
 target_compile_definitions(sessions PRIVATE SESSIONS_VERSION="${PROJECT_VERSION}")
 
@@ -209,7 +229,7 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
         target_link_libraries(sessions_${analysis} PRIVATE sessions_core)
         add_test(NAME ${analysis} COMMAND sessions_${analysis})
     endforeach()
-    foreach(workflow IN ITEMS nektar_pads audio_routing arrangement_workflow clip_follow control_surface tempo_repair_ui warp_preferences clip_inspector apc_key25 drum_loading drum_stream)
+    foreach(workflow IN ITEMS updates nektar_pads audio_routing arrangement_workflow clip_follow control_surface tempo_repair_ui warp_preferences clip_inspector apc_key25 drum_loading drum_stream)
         add_executable(sessions_${workflow} tests/${workflow}.cpp)
         target_link_libraries(sessions_${workflow} PRIVATE sessions_core Qt6::Test)
         add_test(NAME ${workflow} COMMAND sessions_${workflow})
@@ -218,6 +238,12 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin COMPONENT Runtime)
+install(FILES distribution/nl.co.ozzy.Sessions.metainfo.xml DESTINATION share/metainfo COMPONENT Runtime)
+install(FILES distribution/THIRD-PARTY.md DESTINATION share/doc/sessions COMPONENT Runtime)
+install(DIRECTORY distribution/licenses/ DESTINATION share/doc/sessions/licenses COMPONENT Runtime)
+if(EXISTS "${CMAKE_SOURCE_DIR}/LICENSE")
+    install(FILES LICENSE DESTINATION share/doc/sessions COMPONENT Runtime)
+endif()
 install(DIRECTORY assets/drums/ DESTINATION share/sessions/drums COMPONENT Runtime)
 install(DIRECTORY content/drums/ DESTINATION share/sessions/drum-content COMPONENT DrumContent)
 install(FILES assets/sessions.desktop DESTINATION share/applications COMPONENT Runtime)
@@ -236,7 +262,7 @@ endforeach()
 
 # ---- .deb: rebuilt automatically whenever the app changes, written to dist/
 option(SESSIONS_BUILD_DEB "Package a .deb into dist/ on every build" ON)
-set(SESSIONS_DEB_MAINTAINER "Sessions <sessions@localhost>" CACHE STRING "Maintainer field of the .deb")
+set(SESSIONS_DEB_MAINTAINER "Ozzy <sessions@ozzy.co.nl>" CACHE STRING "Maintainer field of the .deb")
 find_program(DPKG_DEB dpkg-deb)
 if(SESSIONS_BUILD_DEB AND DPKG_DEB)
     file(GLOB_RECURSE drum_assets CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/drums/*")

@@ -16,7 +16,11 @@ namespace sessions::audio::drums {
 
 const SndApi& sndfile() {
     static const SndApi api = [] {
+#ifdef Q_OS_WIN
+        static QLibrary lib("libsndfile-1");
+#else
         static QLibrary lib("libsndfile.so.1");
+#endif
         SndApi a;
         a.open = reinterpret_cast<void* (*)(const char*, int, SndInfo*)>(lib.resolve("sf_open"));
         a.readf = reinterpret_cast<int64_t (*)(void*, float*, int64_t)>(lib.resolve("sf_readf_float"));

@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "SamplePacks.h"
 #include "RecoveryDialog.h"
 #include "core/Recovery.h"
 #include "widgets/DragValue.h"
@@ -604,6 +605,8 @@ void MainWindow::buildMenus() {
 
     QMenu* help = menuBar()->addMenu("&Help");
     command(help, "Keyboard Shortcuts", QKeySequence(Qt::CTRL | Qt::Key_Slash), [this] { showShortcuts(); });
+    command(help, "Check for Updates…", {}, [this] { checkForUpdates(true); });
+    command(help, "Sample Packs…", {}, [this] { auto* d = new SamplePacks(this); d->setAttribute(Qt::WA_DeleteOnClose); d->open(); });
     command(help, "About Sessions", {}, [this] { QDialog* d = aboutDialog(); d->exec(); d->deleteLater(); });
 }
 

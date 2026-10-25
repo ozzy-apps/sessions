@@ -40,6 +40,7 @@ class OverviewBar;
 class ControlSurface;
 class ApcKey25;
 class RecoveryManager;
+class Updates;
 struct ArrangementClip;
 
 class MainWindow : public QMainWindow {
@@ -52,6 +53,7 @@ public:
     void captureScreenshots(const QString& dir);
 
     QDialog* aboutDialog();   // Help > About: the logo in the theme's ink, the words, the versions (the caller shows it)
+    void checkForUpdates(bool manual = false);
     bool sessionViewShown() const;
     bool clipViewShown() const;
     Project*         project() const { return m_project; }
@@ -121,6 +123,7 @@ protected:
     bool eventFilter(QObject* obj, QEvent* ev) override;
 
 private:
+    Updates* m_updates = nullptr;
     // File menu
     void fileNew();
     void fileOpen();
