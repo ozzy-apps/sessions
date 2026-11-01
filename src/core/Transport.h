@@ -20,6 +20,8 @@
 
 #include "Model.h"
 #include "Sample.h"
+#include "MidiCapture.h"
+#include <QElapsedTimer>
 #include <QObject>
 #include <QTimer>
 #include <QHash>
@@ -76,6 +78,8 @@ public:
     // Performance controls from a keyboard, for a track's instruments: kind 0 = pitch bend (-1..1),
     // 1 = the mod wheel (0..1), 2 = channel pressure (0..1). Not recorded.
     void perform(int track, int kind, double value);
+    // Recall the selected track's last played phrase without arming Record. No input is overwritten.
+    ClipPtr captureMidi(int track, bool arrangement, int scene = -1, QString* error = nullptr);
 
     // ---- recording
     bool arrangementRecord() const { return m_arrRecord; }
@@ -165,6 +169,10 @@ private:
     Project*       m_project;
     audio::Engine* m_engine;
     QTimer         m_timer;
+    MidiCapture    m_midiCapture;
+    QElapsedTimer  m_midiCaptureClock;
+    double         m_captureSeconds = 0, m_captureBeat = 0, m_captureTempo = 120;
+    void updateMidiCaptureClock();
     quint64        m_sentSeq   = 0;
     bool           m_playing   = false;
     double         m_beat      = 0.0;

@@ -15,6 +15,10 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ![Session View](screenshots/01-session-clip.png)
 
+## Capture, bounce and stems · 0.52
+
+**Create → Capture MIDI** (Ctrl+Shift+C) recalls the selected track’s last played phrase. **Arrangement → Bounce Track to Audio…** prints a track/group or time range to a new audio track while preserving the original. **File → Export Audio…** now offers individual track/group/return files and aligned stem batches. [Workflow and routing details](recording-workflow.md) · [Ableton parity audit](ableton-parity.md).
+
 ## Nektar native pads · 0.50
 
 The Impact LX49+/61+ now has native **Clips / Scenes** pads and LED feedback: yellow loaded, green playing, red recording and off empty, with queued-state blinking and separate banks of eight. Enable both MIDI inputs and leave **LED feedback** on in Preferences. Sessions configures the native port mode automatically. [Setup and scope](nektar-impact.md).
@@ -271,7 +275,7 @@ Switching any device on or off now fades over a few milliseconds instead of clic
 - **Arrangement clips, in parts** (0.21): drag across a clip's body to select a part of it (its name bar moves the whole clip). Ctrl+C / Ctrl+X take the part, Ctrl+V puts it at the insert marker as a clip of its own that still holds the whole sample (drag its end and the rest of the audio is there); Delete clears it; drag the selected part to move it on its own, Ctrl+drag to drop a copy of it; Ctrl+drag a clip's name bar to duplicate the clip where you drop it.
 - **Slices and Warp off:** in *Beats*, the audio is cut at its transients (the hits Sessions finds) or on a 1/4 – 1/32 grid (**Slices**). Turn **Warp** off and the clip plays at the file's own speed whatever the tempo, as a recording should.
 - **Clip envelopes:** the **Envelopes** box picks a parameter (Mixer — volume, pan, sends — or any knob of the track's devices); **Show** swaps the editor for that parameter's line. Click to add breakpoints, drag them, double-click to remove one. While the clip plays its envelope sets the parameter, looping with it, in MIDI and audio clips alike.
-- **Export:** **File → Export Audio…** renders the Arrangement (or the loop region) to a 16 / 24-bit or 32-bit float WAV.
+- **Export:** **File → Export Audio…** renders the Arrangement, loop region or time selection to a 16 / 24-bit or 32-bit float WAV, with individual tracks or aligned stem batches available.
 
 **Everything in sync** (reworked in 0.36): the project's tempo drives warped playback while each clip keeps its own source beat grid. A 176 BPM loop imported into a 120 BPM project plays each source beat on a 120 BPM project beat, with its pitch preserved in Beats, Tones, Texture and Complex modes. Moving the project tempo changes speed without changing markers, loop length, envelopes or placements. Session launches and stops use the selected quantization; unrelated Arrangement loops preserve Session clip phase. **Warp** off plays a Session clip at its recorded speed even during project tempo changes. **Source BPM** shows the recording's tempo, **Sync** rebuilds its source grid, and unknown material stays unwarped until its tempo is entered.
 

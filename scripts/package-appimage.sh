@@ -14,10 +14,19 @@ cp "$LINUXDEPLOY_QT" "$tools_dir/linuxdeploy-plugin-qt-x86_64.AppImage"
 chmod +x "$tools_dir/"*.AppImage
 cmake --install "$build_dir" --prefix "$app_dir/usr" --component Runtime
 export QMAKE="${QMAKE:-$(command -v qmake6)}"
-export OUTPUT="$PWD/dist/Sessions-linux-x86_64.AppImage"
+export OUTPUT="$PWD/build/Sessions-linux-x86_64.AppImage"
+rm -f "$OUTPUT"
 export APPIMAGE_EXTRACT_AND_RUN=1
 export EXTRA_PLATFORM_PLUGINS="${EXTRA_PLATFORM_PLUGINS:-libqoffscreen.so}"
 # libsndfile is loaded dynamically, so it must be included explicitly.
 sndfile="$(ldconfig -p | awk '/libsndfile.so.1 .*x86-64/ {print $NF; exit}')"
 test -n "$sndfile"
 "$tools_dir/linuxdeploy-x86_64.AppImage" --appdir "$app_dir" --plugin qt --library "$sndfile" --output appimage
+# Some extract-and-run wrappers hide the output plugin's exit code. Never accept an
+# older package as a successful build, or replace it with a partial output.
+test -s "$OUTPUT"
+chmod +x "$OUTPUT"
+expected_version="$(awk '/^project\(Sessions VERSION / { print $3 }' CMakeLists.txt)"
+actual_version="$(APPIMAGE_EXTRACT_AND_RUN=1 QT_QPA_PLATFORM=offscreen "$OUTPUT" --version)"
+test "$actual_version" = "Sessions $expected_version"
+mv "$OUTPUT" "$PWD/dist/Sessions-linux-x86_64.AppImage"

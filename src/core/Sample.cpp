@@ -529,7 +529,7 @@ void WavWriter::write(const float* in, qint64 frames) {
     for (qint64 i = 0; i < frames * 2; ++i) {
         const float x = std::clamp(in[i], -1.0f, 1.0f);
         if (d->format == WavFormat::Float32) {
-            qToLittleEndian<float>(x, out + i * 4);
+            qToLittleEndian<float>(std::isfinite(in[i]) ? in[i] : 0.f, out + i * 4);
         } else if (d->format == WavFormat::Int16) {
             const float dither = d->uni(d->rng) + d->uni(d->rng);   // TPDF, one LSB peak to peak each
             const auto v = int16_t(std::clamp(std::lround(x * 32767.0f + dither), -32768L, 32767L));

@@ -26,7 +26,7 @@ Start with a beat. Add a bassline. Try a different scene. Sessions lets you buil
 
 **Find your sound.** Explore Osmium's morphing wavetables, build a kit in Drum Studio, layer samples or plug in a guitar. There are 63 built-in instruments and effects, from EQ and dynamics to pitch processing, modulation and reverb.
 
-**Record and finish.** Capture audio and MIDI, record another track or the master mix, edit takes, automate your devices and export your track to WAV. Recovery snapshots and project backups help keep the work safe.
+**Record and finish.** Capture audio and MIDI, recall a phrase you played before pressing Record, edit takes and automate your devices. Bounce tracks to audio or export aligned stems for the next stage of your mix. Recovery snapshots and project backups help keep the work safe.
 
 <table>
 <tr>
@@ -69,6 +69,8 @@ Extract the ZIP, then open **Help → Sample Packs → Locate Drum Studio conten
 Play and record from a MIDI keyboard, or use the computer keyboard. Map controls to your setup. Native Linux profiles support the **Nektar Impact LX49+/61+** and **Akai APC Key 25**, including clip launching and pad feedback. [Controller setup](docs/nektar-impact.md).
 
 Choose a dark, light or custom theme and a layout that suits your screen.
+
+[Capture, bounce and stems](docs/recording-workflow.md) · [Feature comparison](docs/ableton-parity.md)
 
 [Build from source](docs/building.md) · [Release packaging](docs/releasing.md) · [Third-party credits](distribution/THIRD-PARTY.md)
 

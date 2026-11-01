@@ -93,6 +93,8 @@ struct RenderOptions {
     double startBeat = 0, lengthBeats = 16, tailSeconds = 0;
     samples::WavFormat format = samples::WavFormat::Int24;
     bool   normalize = false;   // peak at -0.1 dBFS
+    int    sourceTrackId = 0;   // 0: Master; otherwise a stable track/group/return id, post mixer
+    bool   preRoll = false;    // run from 1.1.1 before writing a nonzero start, preserving effect history
 };
 
 class Engine : public QObject {
@@ -280,6 +282,8 @@ private:
     SamplePtr m_preview;            // UI side of previewSample()
     quint64   m_previewSerial = 0;
     bool      m_exporting = false;  // renderOffline: sidechain Listen switches are forced off
+    int       m_exportTrackId = 0;
+    float     m_exportL[kMaxBlock]{}, m_exportR[kMaxBlock]{};
 
     // UI-side caches for publish()
     QHash<int, std::shared_ptr<const ClipData>> m_clipCache;   // by clip id

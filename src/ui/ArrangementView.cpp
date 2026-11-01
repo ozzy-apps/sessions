@@ -1779,6 +1779,7 @@ void ArrangementView::contextMenuEvent(QContextMenuEvent* e) {
     const bool range = hasTimeSelection();
     menu.addAction("Split\tCtrl+E", this, [this] { splitAtSelection(); });
     menu.addAction("Consolidate\tCtrl+J", this, [this] { consolidateSelection(); })->setEnabled(range || m_sel);
+    menu.addAction("Bounce Track to Audio…", this, [this] { emit commandRequested("bounceTrack"); });
     menu.addAction("Loop Selection\tCtrl+L", this, [this] { loopSelection(); })->setEnabled(range || m_sel);
     menu.addSeparator();
     menu.addAction("Insert Time", this, [this] { insertTime(); });

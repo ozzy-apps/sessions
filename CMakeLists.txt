@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.51.0 LANGUAGES CXX)
+project(Sessions VERSION 0.52.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,9 +39,11 @@ set(SESSIONS_SOURCES
     src/core/OsmiumPresets.cpp
     src/core/ArrangementOps.cpp
     src/core/Transport.cpp
+    src/core/MidiCapture.cpp
     src/core/Theme.cpp
     src/core/Grooves.cpp
     src/audio/Engine.cpp
+    src/audio/TrackRender.cpp
     src/audio/Devices.cpp
     src/audio/Instruments.cpp
     src/audio/Monolith.cpp
@@ -71,6 +73,7 @@ set(SESSIONS_SOURCES
     src/widgets/Meter.cpp
     src/widgets/LevelFader.cpp
     src/ui/MainWindow.cpp
+    src/ui/MainWindowRecording.cpp
     src/ui/MainWindowUpdates.cpp
     src/ui/UpdateDialog.cpp
     src/ui/SamplePacks.cpp
@@ -229,7 +232,7 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
         target_link_libraries(sessions_${analysis} PRIVATE sessions_core)
         add_test(NAME ${analysis} COMMAND sessions_${analysis})
     endforeach()
-    foreach(workflow IN ITEMS updates nektar_pads audio_routing arrangement_workflow clip_follow control_surface tempo_repair_ui warp_preferences clip_inspector apc_key25 drum_loading drum_stream)
+    foreach(workflow IN ITEMS recording_workflow updates nektar_pads audio_routing arrangement_workflow clip_follow control_surface tempo_repair_ui warp_preferences clip_inspector apc_key25 drum_loading drum_stream)
         add_executable(sessions_${workflow} tests/${workflow}.cpp)
         target_link_libraries(sessions_${workflow} PRIVATE sessions_core Qt6::Test)
         add_test(NAME ${workflow} COMMAND sessions_${workflow})

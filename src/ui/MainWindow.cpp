@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "audio/TrackRender.h"
 #include "SamplePacks.h"
 #include "RecoveryDialog.h"
 #include "core/Recovery.h"
@@ -70,6 +71,7 @@
 #include <QUrl>
 #include <QMimeData>
 #include <QProgressDialog>
+#include <QRegularExpression>
 #include <QSpinBox>
 #include <QEventLoop>
 #include <QScopedValueRollback>
@@ -523,6 +525,7 @@ void MainWindow::buildMenus() {
         if (a == Area::Arrangement || (a == Area::Devices && m_mainStack->currentIndex() != 0)) m_arrangement->insertTime(); else m_session->grid()->insertScene();
     });
     command(create, "Capture and Insert Scene", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_I), [this] { m_session->grid()->captureScene(); });
+    command(create, "Capture MIDI", QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_C), [this] { captureMidi(); });
     command(create, "Add Locator", {}, [this] { showSession(false); m_arrangement->addLocator(); });
 
     QMenu* arrange = menuBar()->addMenu("&Arrangement");
@@ -532,6 +535,7 @@ void MainWindow::buildMenus() {
     });
     command(arrange, "Split", QKeySequence(Qt::CTRL | Qt::Key_E), [this] { m_arrangement->splitAtSelection(); });
     command(arrange, "Consolidate", QKeySequence(Qt::CTRL | Qt::Key_J), [this] { m_arrangement->consolidateSelection(); });
+    command(arrange, "Bounce Track to Audio…", {}, [this] { bounceSelectedTrack(); });
     arrange->addSeparator();
     command(arrange, "Insert Time", {}, [this] { m_arrangement->insertTime(); });
     command(arrange, "Delete Time", {}, [this] { m_arrangement->deleteTime(); });
@@ -906,7 +910,8 @@ void MainWindow::showShortcuts() {
         {"Space / Shift+Space", "Play from the start marker or stop / play on from where it stopped"},
         {"1 2 3 4 5 6 7 8 9 0", "Launch Session scenes 1–10 (number row; typing and custom Key Maps take priority)"},
         {"Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S", "New set / Open / Save / Save As"},
-        {"Ctrl+Shift+R", "Export Audio"},
+        {"Ctrl+Shift+R", "Export Audio / aligned stems"},
+        {"Ctrl+Shift+C", "Capture recently played MIDI"},
         {"Ctrl+Z / Ctrl+Shift+Z", "Undo / Redo"},
         {"Ctrl+X / Ctrl+C / Ctrl+V / Ctrl+D", "Cut / copy / paste / duplicate (a selected part of an Arrangement clip too)"},
         {"Ctrl+R / Delete", "Rename / delete the selection"},
@@ -1049,77 +1054,115 @@ double MainWindow::songLength() const {
 }
 
 bool MainWindow::exportAudio(const QString& path, const audio::RenderOptions& options, QString* error, const std::function<bool(double)>& progress) {
-    audio::Engine offline(m_project);   // its own DSP state: the engine you're listening to keeps playing
-    return offline.renderOffline(path, options, progress, error);
+    return audio::renderSnapshot(*m_project, path, options, error, progress);
+}
+
+QDialog* MainWindow::exportDialog() {
+    const double song = songLength();
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle("Export Audio");
+    dlg->setMinimumWidth(460);
+    dlg->setObjectName("exportAudioDialog");
+    auto* form = new QFormLayout(dlg);
+    auto* output = new QComboBox(dlg);
+    output->setObjectName("exportSource");
+    output->addItem("Master mix", 0);
+    output->addItem("Individual tracks + returns", -1000);
+    output->addItem("Tracks, groups + returns", -1001);
+    for (int i = 0; i < m_project->trackCount(); ++i) {
+        const auto* t = m_project->trackAt(i);
+        output->addItem((m_project->isReturn(i) ? "Return: " : t->isGroup() ? "Group: " : "Track: ") + t->name, t->id);
+    }
+    form->addRow("Output", output);
+    auto* range = new QComboBox(dlg);
+    range->setObjectName("exportRange");
+    range->addItem("Whole song", QVariantList{0.0, song});
+    range->addItem("Loop region", QVariantList{m_transport->loopStart(), m_transport->loopStart() + m_transport->loopLength()});
+    if (m_arrangement->hasTimeSelection()) {
+        range->addItem("Time selection", QVariantList{m_arrangement->selectionStart(), m_arrangement->selectionEnd()});
+        range->setCurrentIndex(2);
+    } else if (song <= 0) range->setCurrentIndex(1);
+    form->addRow("Range", range);
+    auto* tail = new DragValue(dlg);
+    tail->setObjectName("exportTail");
+    tail->setRange(0, 30); tail->setStep(1); tail->setDefault(2);
+    tail->setValue(QSettings().value("render/exportTail", 2).toDouble(), false);
+    tail->setDragSensitivity(300); tail->setAccentText(false);
+    tail->setFormatter([](double v) { return QString("%1 s").arg(int(v)); });
+    tail->setToolTip("Extra time for effect tails after the range ends. Later clips are excluded.");
+    form->addRow("Effect tail", tail);
+    auto* format = new QComboBox(dlg);
+    format->setObjectName("exportFormat");
+    format->addItems({"WAV 16-bit", "WAV 24-bit", "WAV 32-bit float"});
+    format->setCurrentIndex(std::clamp(QSettings().value("render/exportFormat", 1).toInt(), 0, 2));
+    form->addRow("Format", format);
+    auto* normalize = new QCheckBox("Normalize each file (peak at -0.1 dB)", dlg);
+    normalize->setObjectName("exportNormalize");
+    form->addRow(normalize);
+    auto* note = new QLabel(dlg);
+    note->setWordWrap(true); note->setMaximumWidth(430); note->setObjectName("exportRoutingInfo");
+    auto updateInfo = [output, note] {
+        note->setText(output->currentData().toInt() == 0
+            ? "Arrangement, 48 kHz stereo. Includes Master effects. Session launches and monitored inputs are excluded."
+            : "Aligned 48 kHz stereo files, after track effects, fader and pan. Parent group and Master effects are excluded from child stems; returns are separate. Solos are ignored; mute is respected.");
+    };
+    connect(output, &QComboBox::currentIndexChanged, dlg, updateInfo); updateInfo();
+    form->addRow(note);
+    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dlg);
+    buttons->button(QDialogButtonBox::Ok)->setText("Export…");
+    connect(buttons, &QDialogButtonBox::accepted, dlg, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, dlg, &QDialog::reject);
+    form->addRow(buttons);
+    return dlg;
 }
 
 void MainWindow::fileExportAudio() {
-    const double song = songLength();
-    QDialog dlg(this);
-    dlg.setWindowTitle("Export Audio");
-    auto* form = new QFormLayout(&dlg);
-    auto* range = new QComboBox(&dlg);
-    range->addItem(QString("Whole song (1.1.1 to bar %1)").arg(int(std::ceil(song / 4)) + 1));
-    range->addItem(QString("Loop region (bars %1 to %2)").arg(int(m_transport->loopStart() / 4) + 1)
-                       .arg(int((m_transport->loopStart() + m_transport->loopLength()) / 4) + 1));
-    if (song <= 0) range->setCurrentIndex(1);
-    form->addRow("Render", range);
-    auto* tail = new DragValue(&dlg);   // 0.28: a drag field, like every value in the app
-    tail->setRange(0, 30);
-    tail->setStep(1);
-    tail->setDefault(2);
-    tail->setValue(2, false);
-    tail->setDragSensitivity(300);
-    tail->setAccentText(false);
-    tail->setFormatter([](double v) { return QString("%1 s").arg(int(v)); });
-    tail->setToolTip("Extra time after the end, so reverb and delay tails ring out. Drag up or down, double-click to type.");
-    form->addRow("Tail", tail);
-    auto* format = new QComboBox(&dlg);
-    format->addItems({"WAV 16-bit", "WAV 24-bit", "WAV 32-bit float"});
-    format->setCurrentIndex(1);
-    form->addRow("Format", format);
-    auto* normalize = new QCheckBox("Normalize (peak at -0.1 dB)", &dlg);
-    form->addRow("", normalize);
-    auto* note = new QLabel("Renders the Arrangement at 48 kHz stereo. Session clips you launched aren't included.", &dlg);
-    note->setWordWrap(true);
-    note->setObjectName("dimLabel");
-    form->addRow(note);
-    auto* buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dlg);
-    buttons->button(QDialogButtonBox::Ok)->setText("Export…");
-    connect(buttons, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    form->addRow(buttons);
-    if (dlg.exec() != QDialog::Accepted) return;
-
+    if (m_transport->recordingInProgress()) { m_info->show("Export Audio", "Stop recording before exporting."); return; }
+    std::unique_ptr<QDialog> dlg(exportDialog());
+    if (dlg->exec() != QDialog::Accepted) return;
+    const auto range = dlg->findChild<QComboBox*>("exportRange")->currentData().toList();
+    const int source = dlg->findChild<QComboBox*>("exportSource")->currentData().toInt();
+    const bool stems = source == -1000 || source == -1001;
+    const int format = dlg->findChild<QComboBox*>("exportFormat")->currentIndex();
     audio::RenderOptions o;
-    if (range->currentIndex() == 0) {
-        if (song <= 0) { QMessageBox::information(this, "Export Audio", "The Arrangement is empty. Record or drag some clips onto it first."); return; }
-        o.startBeat = 0; o.lengthBeats = song;
-    } else {
-        o.startBeat = m_transport->loopStart(); o.lengthBeats = m_transport->loopLength();
-    }
-    o.tailSeconds = tail->value();
-    o.format = format->currentIndex() == 0 ? samples::WavFormat::Int16 : format->currentIndex() == 1 ? samples::WavFormat::Int24 : samples::WavFormat::Float32;
-    o.normalize = normalize->isChecked();
-
+    o.startBeat = range.value(0).toDouble();
+    o.lengthBeats = range.value(1).toDouble() - o.startBeat;
+    if (o.lengthBeats <= 0) { m_info->show("Export Audio", "The selected range is empty."); return; }
+    o.tailSeconds = dlg->findChild<DragValue*>("exportTail")->value();
+    o.format = format == 0 ? samples::WavFormat::Int16 : format == 1 ? samples::WavFormat::Int24 : samples::WavFormat::Float32;
+    o.normalize = dlg->findChild<QCheckBox*>("exportNormalize")->isChecked();
+    o.sourceTrackId = stems ? 0 : source;
+    o.preRoll = true;
     const QString dir = m_setPath.isEmpty() ? setDialogDir() : QFileInfo(m_setPath).absolutePath();
-    QString path = QFileDialog::getSaveFileName(this, "Export Audio", QDir(dir).filePath(m_setName + ".wav"), "WAV audio (*.wav)");
-    if (path.isEmpty()) return;
-    if (!path.endsWith(".wav", Qt::CaseInsensitive)) path += ".wav";
-
+    QString path;
+    if (stems) {
+        const QString parent = QFileDialog::getExistingDirectory(this, "Export Stems — Choose Parent Folder", dir);
+        if (parent.isEmpty()) return;
+        // A new folder is published only when the complete batch succeeds.
+        QString name = m_setName; name.replace(QRegularExpression(R"([\\/:*?"<>|])"), "_");
+        const QString base = name + " Stems";
+        path = QDir(parent).filePath(base);
+        for (int n = 2; QFileInfo::exists(path); ++n) path = QDir(parent).filePath(base + " " + QString::number(n));
+    } else {
+        path = QFileDialog::getSaveFileName(this, "Export Audio", QDir(dir).filePath(m_setName + ".wav"), "WAV audio (*.wav)");
+        if (path.isEmpty()) return;
+        if (!path.endsWith(".wav", Qt::CaseInsensitive)) path += ".wav";
+    }
     QProgressDialog progress("Rendering…", "Cancel", 0, 1000, this);
-    progress.setWindowTitle("Export Audio");
-    progress.setWindowModality(Qt::WindowModal);
-    progress.setMinimumDuration(300);
+    progress.setWindowTitle(stems ? "Export Stems" : "Export Audio");
+    progress.setWindowModality(Qt::WindowModal); progress.setMinimumDuration(300);
     QString error;
-    const bool ok = exportAudio(path, o, &error, [&progress](double f) {
-        progress.setValue(int(f * 1000));
-        QCoreApplication::processEvents();
-        return !progress.wasCanceled();
-    });
+    const auto report = [&progress](double f) {
+        progress.setValue(int(f * 1000)); QCoreApplication::processEvents(); return !progress.wasCanceled();
+    };
+    const bool ok = stems ? audio::exportStems(*m_project, path, o, source == -1001, &error, report)
+                          : exportAudio(path, o, &error, report);
     progress.reset();
-    if (ok) m_info->show("Exported " + QFileInfo(path).fileName(), QDir::toNativeSeparators(path));
-    else if (error != "Cancelled.") QMessageBox::warning(this, "Export Audio", "Couldn't export.\n\n" + error);
+    if (ok) {
+        QSettings().setValue("render/exportTail", o.tailSeconds);
+        QSettings().setValue("render/exportFormat", format);
+        m_info->show("Exported " + QFileInfo(path).fileName(), QDir::toNativeSeparators(path));
+    } else if (error != "Cancelled.") QMessageBox::warning(this, "Export Audio", "Couldn't export.\n\n" + error);
 }
 
 int MainWindow::collectSamples(QString* error) {
@@ -1597,6 +1640,7 @@ void MainWindow::runCommand(const QString& command) {
     else if (command == "copy") copySelection();
     else if (command == "paste") pasteSelection();
     else if (command == "saveClip") saveClipToLibrary();
+    else if (command == "bounceTrack") bounceSelectedTrack();
     else if (command == "showSample") {
         const ClipPtr clip = m_project->selectedClip;
         if (clip && clip->isAudio() && QFileInfo::exists(clip->samplePath)) QDesktopServices::openUrl(QUrl::fromLocalFile(QFileInfo(clip->samplePath).absolutePath()));

@@ -109,6 +109,10 @@ public:
     // File > Export Audio…: renders the Arrangement offline into a WAV.
     bool    exportAudio(const QString& path, const audio::RenderOptions& options, QString* error = nullptr,
                         const std::function<bool(double)>& progress = {});
+    void captureMidi();
+    void bounceSelectedTrack();
+    QDialog* bounceDialog(); // shared by the action and UI verification
+    QDialog* exportDialog();
     // File > Collect All and Save: copies the samples that live outside the set's folder into
     // <set folder>/Samples/Imported and points the set at the copies (one undo step).
     // Returns how many files were copied, or -1 (and why).

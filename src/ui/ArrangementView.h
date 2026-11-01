@@ -79,6 +79,8 @@ public:
     void setAutomationMode(bool on);
     bool automationMode() const { return m_autoMode; }
     bool hasTimeSelection() const { return m_timeSel.active && m_timeSel.end > m_timeSel.start; }
+    double selectionStart() const { return hasTimeSelection() ? m_timeSel.start : 0; }
+    double selectionEnd() const { return hasTimeSelection() ? m_timeSel.end : 0; }
     // A value field in a track header (lane = trackCount() for the Main lane's volume).
     struct Field { enum Kind { None, Volume, Pan, Send, MainVolume } kind = None; int lane = -1, send = -1; };
     QRect  fieldRect(const Field& f) const;   // empty when it doesn't fit the lane

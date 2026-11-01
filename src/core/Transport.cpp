@@ -71,6 +71,9 @@ double nativePlacementBeat(const ArrangementClip& placement, double sourceBeat, 
 Transport::Transport(Project* project, audio::Engine* engine, QObject* parent)
     : QObject(parent), m_project(project), m_engine(engine)
 {
+    m_midiCaptureClock.start();
+    m_captureTempo = project->tempo;
+    connect(project, &Project::tempoChanged, this, &Transport::updateMidiCaptureClock);
     m_timer.setInterval(16);
     connect(&m_timer, &QTimer::timeout, this, &Transport::onTimer);
     m_timer.start();
@@ -402,6 +405,7 @@ void Transport::send(const Command& c) {
 }
 
 void Transport::setBeat(double b) {
+    m_midiCapture.newSegment();
     finishTakes();
     m_beat = std::max(0.0, b);
     send({Command::Locate, -1, -1, m_beat});
@@ -458,8 +462,45 @@ void Transport::previewNote(int track, int pitch, double velocity) {
 
 void Transport::noteOn(int track, int pitch, double velocity) {
     if (track < 0 || track >= m_project->tracks.size()) return;
+    updateMidiCaptureClock();
+    if (m_project->tracks[track].type == TrackType::Midi)
+        m_midiCapture.noteOn(m_project->tracks[track].id, pitch, velocity, m_captureSeconds, m_captureBeat, m_beat, m_playing);
     send({Command::NoteOn, m_project->tracks[track].id, -1, double(pitch), velocity});
     m_held.insert(track << 8 | pitch, {track, m_beat, velocity});
+}
+
+void Transport::updateMidiCaptureClock() {
+    const double seconds = m_midiCaptureClock.nsecsElapsed() / 1e9;
+    m_captureBeat += std::max(0.0, seconds - m_captureSeconds) * m_captureTempo / 60.0;
+    m_captureSeconds = seconds;
+    m_captureTempo = m_project->tempo;
+}
+
+ClipPtr Transport::captureMidi(int track, bool arrangement, int scene, QString* error) {
+    auto fail = [&](const QString& why) -> ClipPtr { if (error) *error = why; return {}; };
+    if (recordingInProgress()) return fail("Stop recording before capturing MIDI.");
+    if (track < 0 || track >= m_project->tracks.size() || m_project->tracks[track].type != TrackType::Midi)
+        return fail("Select a MIDI track to capture.");
+    updateMidiCaptureClock();
+    const int id = m_project->tracks[track].id;
+    const auto phrase = m_midiCapture.phrase(id, m_captureSeconds, m_captureBeat);
+    if (phrase.notes.isEmpty()) return fail("No recent MIDI notes on this track.");
+    EditScope edit(m_project, "Capture MIDI");
+    auto clip = m_project->newClip("Captured MIDI", phrase.length);
+    clip->notes = phrase.notes;
+    if (arrangement) {
+        const double at = phrase.playedWhileRunning ? phrase.timelineStart : m_startMarker;
+        m_project->tracks[track].arrangement.push_back({at, clip->length, 0, clip});
+    } else {
+        scene = std::clamp(scene, 0, int(m_project->scenes.size()));
+        while (scene < m_project->scenes.size() && m_project->tracks[track].clipSlots.value(scene)) ++scene;
+        if (scene >= m_project->scenes.size()) m_project->insertScene(m_project->scenes.size());
+        m_project->tracks[track].clipSlots[scene] = clip;
+    }
+    m_midiCapture.consume(id);
+    emit m_project->structureChanged();
+    emit m_project->clipChanged();
+    return clip;
 }
 
 void Transport::perform(int track, int kind, double value) {
@@ -469,6 +510,8 @@ void Transport::perform(int track, int kind, double value) {
 
 void Transport::noteOff(int track, int pitch) {
     if (track < 0 || track >= m_project->tracks.size()) return;
+    updateMidiCaptureClock();
+    m_midiCapture.noteOff(m_project->tracks[track].id, pitch, m_captureSeconds, m_captureBeat);
     send({Command::NoteOff, m_project->tracks[track].id, -1, double(pitch), 0});
     if (!m_held.contains(track << 8 | pitch)) return;
     const HeldNote h = m_held.take(track << 8 | pitch);
@@ -523,6 +566,7 @@ void Transport::continuePlay() {
 }
 
 void Transport::startPlaying() {
+    m_midiCapture.newSegment();
     // a recording starting from a standstill gets the count-in
     const bool count = m_countInBars > 0 && (m_arrRecord || m_countInNext);
     m_countInNext = false;
@@ -540,6 +584,7 @@ void Transport::startPlaying() {
 }
 
 void Transport::stop() {
+    m_midiCapture.newSegment();
     m_countingIn = false;
     m_countLeft = 0;
     const auto held = m_held.keys();
@@ -672,6 +717,10 @@ void Transport::backToArrangement() {
 }
 
 void Transport::reset() {
+    m_midiCapture.clear();
+    m_captureBeat = m_captureSeconds = 0;
+    m_captureTempo = m_project->tempo;
+    m_midiCaptureClock.restart();
     m_rec = {};
     m_takes.clear();
     for (AudioTake& a : m_audioTakes) {   // recordings in progress belong to the old set: drop them

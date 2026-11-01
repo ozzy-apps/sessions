@@ -6,6 +6,9 @@
 #include "Driver.h"
 #include "core/Model.h"
 #include <QFile>
+#include <QDir>
+#include <QFileInfo>
+#include <QTemporaryFile>
 #include <QSet>
 #include <QTimer>
 #include <QtDebug>
@@ -780,44 +783,80 @@ bool Engine::renderToWav(const QString& path, double seconds) {
 }
 
 bool Engine::renderOffline(const QString& path, const RenderOptions& o, const std::function<bool(double)>& progress, QString* error) {
-    if (m_driver) { if (error) *error = "The engine is playing live."; return false; }
-    m_exporting = true;   // Listen switches stay out of the file
+    auto fail = [&](const QString& why) { if (error) *error = why; return false; };
+    if (m_driver) return fail("The engine is playing live.");
+    if (!std::isfinite(o.startBeat) || !std::isfinite(o.lengthBeats) || !std::isfinite(o.tailSeconds)
+        || o.startBeat < 0 || o.lengthBeats <= 0 || o.tailSeconds < 0 || o.tailSeconds > 30)
+        return fail("Invalid render range or tail.");
+    if (o.sourceTrackId && (m_project->indexOfTrack(o.sourceTrackId) < 0 || o.sourceTrackId == Project::kMasterId))
+        return fail("The render source no longer exists.");
+    const double framesPerBeat = 60.0 / std::max(1.0, m_project->tempo) * m_sr;
+    const double bodyFrames = std::ceil(o.lengthBeats * framesPerBeat);
+    const double preFrames = o.preRoll ? std::round(o.startBeat * framesPerBeat) : 0;
+    const double totalFrames = bodyFrames + std::ceil(o.tailSeconds * m_sr);
+    const int bytesPerFrame = o.format == samples::WavFormat::Int16 ? 4 : o.format == samples::WavFormat::Int24 ? 6 : 8;
+    if (!std::isfinite(totalFrames) || !std::isfinite(preFrames)
+        || totalFrames > (double(UINT32_MAX) - 36) / bytesPerFrame || preFrames > 24.0 * 3600 * m_sr)
+        return fail("The render exceeds the WAV size or pre-roll limit.");
+    m_exporting = true;
+    m_exportTrackId = o.sourceTrackId;
     publish();
     send({Command::Stop, -1, -1, 0, 0, true});
-    send({Command::Locate, -1, -1, std::max(0.0, o.startBeat)});
+    send({Command::Locate, -1, -1, o.preRoll ? 0 : o.startBeat});
     send({Command::Play});
-    const double seconds = std::max(0.0, o.lengthBeats) * 60.0 / std::max(1.0, m_project->tempo) + std::max(0.0, o.tailSeconds);
-    const qint64 total = qint64(std::ceil(seconds * m_sr));
+    const qint64 body = qint64(bodyFrames), total = qint64(totalFrames), pre = qint64(preFrames);
     constexpr int kChunk = 4096;
     std::vector<float> buf(size_t(kChunk) * 2);
-    std::vector<float> all;   // normalizing needs the whole render before writing
+    QTemporaryFile normalized(QFileInfo(path).absoluteDir().filePath(".sessions-normalize-XXXXXX"));
     samples::WavWriter writer;
     if (!o.normalize && !writer.open(path, int(m_sr), o.format, error)) return false;
-    if (o.normalize) all.reserve(size_t(total) * 2);
+    if (o.normalize && !normalized.open()) return fail(normalized.errorString());
+    const double renderWeight = o.normalize ? .9 : 1.;
+    auto cancel = [&] {
+        writer.close();
+        QFile::remove(path);
+        send({Command::Stop, -1, -1, 0, 0, true});
+        return fail("Cancelled.");
+    };
+    for (qint64 done = 0; done < pre;) {
+        const int n = int(std::min<qint64>(kChunk, pre - done));
+        process(buf.data(), n);
+        collectGarbage();
+        done += n;
+        if (progress && !progress(renderWeight * double(done) / double(pre + total))) return cancel();
+    }
     float peak = 0;
     for (qint64 done = 0; done < total;) {
-        const int n = int(std::min<qint64>(kChunk, total - done));
+        // Stop new clips and release held notes at the exact range end. Effects keep ringing;
+        // material after the selected range must never be rendered into the tail.
+        if (done == body) send({Command::Pause});
+        const qint64 boundary = done < body ? body : total;
+        const int n = int(std::min<qint64>(kChunk, boundary - done));
         process(buf.data(), n);
         collectGarbage();
         if (o.normalize) {
-            all.insert(all.end(), buf.begin(), buf.begin() + n * 2);
+            const qint64 bytes = qint64(n) * 2 * sizeof(float);
+            if (normalized.write(reinterpret_cast<const char*>(buf.data()), bytes) != bytes) return fail(normalized.errorString());
             for (int i = 0; i < n * 2; ++i) peak = std::max(peak, std::fabs(buf[size_t(i)]));
-        } else {
-            writer.write(buf.data(), n);
-        }
+        } else writer.write(buf.data(), n);
         done += n;
-        if (progress && !progress(double(done) / double(total))) {
-            if (!o.normalize) writer.close();
-            QFile::remove(path);
-            if (error) *error = "Cancelled.";
-            return false;
-        }
+        if (progress && !progress(renderWeight * double(pre + done) / double(pre + total))) return cancel();
     }
     send({Command::Stop, -1, -1, 0, 0, true});
     if (o.normalize) {
-        const float k = peak > 1e-6f ? 0.98855f / peak : 1.0f;   // -0.1 dBFS
-        for (float& v : all) v *= k;
-        return samples::writeWav(path, all.data(), qint64(all.size() / 2), int(m_sr), o.format, error);
+        const float k = peak > 1e-6f ? 0.98855f / peak : 1.0f;
+        if (!normalized.seek(0)) return fail(normalized.errorString());
+        if (!writer.open(path, int(m_sr), o.format, error)) return false;
+        for (qint64 done = 0; done < total;) {
+            const int n = int(std::min<qint64>(kChunk, total - done));
+            const qint64 bytes = qint64(n) * 2 * sizeof(float);
+            if (normalized.read(reinterpret_cast<char*>(buf.data()), bytes) != bytes) return fail(normalized.errorString());
+            for (int i = 0; i < n * 2; ++i) buf[size_t(i)] *= k;
+            writer.write(buf.data(), n);
+            done += n;
+            if (progress && !progress(.9 + .1 * double(done) / total)) return cancel();
+        }
+        return writer.close(error);
     }
     return writer.close(error);
 }
@@ -1728,6 +1767,8 @@ void Engine::renderBlock(float* out, int n, const float* in) {
     const float smooth = 1.0f - onePoleCoef(0.01f, m_sr);   // ~10 ms gain ramps
     const bool inputLive = m_inputLive.load(std::memory_order_relaxed);
 
+    std::fill_n(m_exportL, n, 0.f);
+    std::fill_n(m_exportR, n, 0.f);
     std::fill(m_mainL, m_mainL + n, 0.0f);
     std::fill(m_mainR, m_mainR + n, 0.0f);
     for (int k = 0; k < kMaxReturns; ++k) {
@@ -2064,6 +2105,7 @@ void Engine::renderBlock(float* out, int n, const float* in) {
                 const float l = m_trackL[s] * ps.gainL, r = m_trackR[s] * ps.gainR;
                 outL[s] += l;
                 outR[s] += r;
+                if (m_exporting && td.id == m_exportTrackId) { m_exportL[s] = l; m_exportR[s] = r; }
                 if (td.keySource) { keyL(2, index)[s] = l; keyR(2, index)[s] = r; }   // the Post Mix key
                 peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
                 const float t = float(s + 1) / float(n);
@@ -2184,6 +2226,7 @@ void Engine::renderBlock(float* out, int n, const float* in) {
                 const float l = m_retL[k][s] * ps.gainL, r = m_retR[k][s] * ps.gainR;
                 m_mainL[s] += l;
                 m_mainR[s] += r;
+                if (m_exporting && rd.id == m_exportTrackId) { m_exportL[s] = l; m_exportR[s] = r; }
                 peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
             }
             raisePeak(m_returnPeak[size_t(k)], peak);
@@ -2241,8 +2284,8 @@ void Engine::renderBlock(float* out, int n, const float* in) {
         }
         l = softClip(l);
         r = softClip(r);
-        out[2 * s] = l;
-        out[2 * s + 1] = r;
+        out[2 * s] = m_exporting && m_exportTrackId ? m_exportL[s] : l;
+        out[2 * s + 1] = m_exporting && m_exportTrackId ? m_exportR[s] : r;
         peak = std::max(peak, std::max(std::fabs(l), std::fabs(r)));
     }
     raisePeak(m_mainPeak, peak);
