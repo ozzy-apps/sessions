@@ -8,6 +8,7 @@ cmake -E rm -rf "$stage"
 mkdir -p "$stage" dist
 cmake --install "$build_dir" --prefix "$stage" --component Runtime
 mv "$stage/bin/sessions.exe" "$stage/Sessions.exe"
+mv "$stage/bin/sessions-stems-worker.exe" "$stage/sessions-stems-worker.exe"
 rmdir "$stage/bin"
 windeployqt6 --release --no-translations --compiler-runtime "$stage/Sessions.exe"
 # Copy libsndfile and its transitive codecs, which windeployqt cannot discover.

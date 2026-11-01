@@ -5,9 +5,10 @@ The public repository is `ozzy-apps/sessions`. Application updates use published
 ## Build and review
 
 1. Reconcile current main and parallel work; retain newer versions and all documentation. Choose a version in `CMakeLists.txt`, update AppStream metadata/release notes, and choose the project's software license before publication.
-2. Run the full build and regression suites, inspect actual screenshots and package metadata, and test audio/MIDI on supported hardware.
-3. Build the four formats. `.deb` is automatic. For AppImage, `scripts/fetch-appimage-tools.py` verifies reviewed SHA-256 values in `distribution/appimage-tools.json`, then `scripts/package-appimage.sh` uses `LINUXDEPLOY` and `LINUXDEPLOY_QT`. Review/update the lock when upstream continuous tools change. Flatpak uses `scripts/package-flatpak.sh` with KDE Platform/SDK 6.10 installed. Windows uses `scripts/package-windows.sh` in MSYS2 UCRT64.
-4. Retain shared-library license texts with portable distributions; [third-party notices](../distribution/THIRD-PARTY.md) supplement those licenses. Windows releases also need a real Windows audio/MIDI check. The initial ZIP is unsigned; Windows signing needs the owner's signing identity, and is separate from compiling a working executable.
+2. Fetch verified Stems Creator assets before configuring: `python3 scripts/fetch-stems-assets.py --platform linux` (Windows: `python ... --platform windows`). All formats must include `sessions-stems-worker`, all five models, the platform runtime and their notices. Confirm actual inference from an extracted package, not just model presence.
+3. Run the full build and regression suites, inspect actual screenshots and package metadata, and test audio/MIDI on supported hardware.
+4. Build the four formats. `.deb` is automatic. For AppImage, `scripts/fetch-appimage-tools.py` verifies reviewed SHA-256 values in `distribution/appimage-tools.json`, then `scripts/package-appimage.sh` uses `LINUXDEPLOY` and `LINUXDEPLOY_QT`. Review/update the lock when upstream continuous tools change. Flatpak uses `scripts/package-flatpak.sh` with KDE Platform/SDK 6.10 installed. Windows uses `scripts/package-windows.sh` in MSYS2 UCRT64.
+5. Retain shared-library license texts with portable distributions; [third-party notices](../distribution/THIRD-PARTY.md) supplement those licenses. Windows Stems Creator requires the Microsoft Visual C++ x64 Redistributable used by official ONNX Runtime. Retain this prerequisite in release notes. Windows releases also need a real Windows audio/MIDI check. The initial ZIP is unsigned; Windows signing needs the owner's signing identity, and is separate from compiling a working executable.
 
 ## GitHub Actions
 

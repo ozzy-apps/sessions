@@ -15,6 +15,10 @@ A clip-based music sequencer in C++17 / Qt 6, built around two views: a Session 
 
 ![Session View](screenshots/01-session-clip.png)
 
+## Stems Creator · 0.53
+
+Add **Audio Effects → Stems Creator**, load an audio file and press **Create Stems**. Local neural separation produces Vocals, Drums, Bass, Piano and Other as aligned Arrangement tracks in one group. Guitar stays in Other; separation can contain bleed. CPU threads, output folder, progress and cancellation are available in the device. [Stems Creator guide](stems-creator.md).
+
 ## Capture, bounce and stems · 0.52
 
 **Create → Capture MIDI** (Ctrl+Shift+C) recalls the selected track’s last played phrase. **Arrangement → Bounce Track to Audio…** prints a track/group or time range to a new audio track while preserving the original. **File → Export Audio…** now offers individual track/group/return files and aligned stem batches. [Workflow and routing details](recording-workflow.md) · [Ableton parity audit](ableton-parity.md).

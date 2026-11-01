@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "UpdateDialog.h"
+#include "InfoView.h"
 #include "core/Updates.h"
 #include <QCoreApplication>
 #include <QDesktopServices>
@@ -31,6 +32,7 @@ void MainWindow::checkForUpdates(bool manual) {
             dialog->open();
         });
     }
+    if (manual) m_info->show("Check for Updates", "Checking for updates…");
     m_updates->check(manual);
 }
 } // namespace sessions

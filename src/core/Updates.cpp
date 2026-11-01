@@ -103,7 +103,11 @@ void Updates::skip(const QString& version) {
     QSettings("Sessions", "Sessions").setValue("updates/skippedVersion", version);
 }
 void Updates::check(bool manual) {
-    if (m_busy || (!manual && !QSettings("Sessions", "Sessions").value("updates/enabled", true).toBool()))
+    if (m_busy) {
+        m_manual = m_manual || manual;
+        return;
+    }
+    if (!manual && !QSettings("Sessions", "Sessions").value("updates/enabled", true).toBool())
         return;
     if (stableVersion(m_current).isEmpty()) {
         if (manual)
@@ -111,6 +115,7 @@ void Updates::check(bool manual) {
         return;
     }
     m_busy = true;
+    m_manual = manual;
     QNetworkRequest request(QUrl("https://api.github.com/repos/ozzy-apps/sessions/releases/latest"));
     request.setRawHeader("Accept", "application/vnd.github+json");
     request.setRawHeader("User-Agent", ("Sessions/" + m_current).toUtf8());
@@ -121,7 +126,9 @@ void Updates::check(bool manual) {
         if (reply->bytesAvailable() > 1024 * 1024)
             reply->abort();
     });
-    connect(reply, &QNetworkReply::finished, this, [this, reply, manual] {
+    connect(reply, &QNetworkReply::finished, this, [this, reply] {
+        const bool manual = m_manual;
+        m_manual = false;
         m_busy = false;
         const int status = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
         const auto data = reply->readAll();

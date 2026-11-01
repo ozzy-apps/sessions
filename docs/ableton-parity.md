@@ -30,7 +30,7 @@ Ableton reference: [Bounce to Audio](https://www.ableton.com/en/live-manual/12/b
 
 ## Devices and editing beyond this build
 
-Sessions already has 63 primary devices, including racks, key/velocity zones, FM and wavetable synthesis, single/multisampling, recorded drums, parametric EQ, spectrum analysis, sidechains, multiband dynamics, modulation mapping, pitch correction/shifting, hybrid convolution reverb and a performance looper. These families are implemented, not absent simply because names differ.
+Sessions already has 64 primary devices, including racks, key/velocity zones, FM and wavetable synthesis, single/multisampling, recorded drums, parametric EQ, spectrum analysis, sidechains, multiband dynamics, modulation mapping, pitch correction/shifting, hybrid convolution reverb and a performance looper. These families are implemented, not absent simply because names differ.
 
 | Area | Remaining gaps worth considering |
 | --- | --- |
@@ -38,7 +38,7 @@ Sessions already has 63 primary devices, including racks, key/velocity zones, FM
 | Physical-model instruments | No dedicated bowed/string/body modelling comparable to Tension or Collision. Electric and Drum Studio overlap only part of the use cases. |
 | MIDI effects | Arpeggiator, Chord, Scale, Velocity and racks exist. Dedicated note-length, random pitch, MIDI pitch and CC-control devices are absent. |
 | Note tools | Basic transpose, reverse, inversion, legato, stretch, scale display and probability exist. No full transformation/generator panel with strum, chop, rhythm and chord generators. |
-| Ecosystem | No Max for Live runtime, Push equivalence, Ableton set import, Link/Link Audio or stem-separation service. Existing Nektar/APC integrations are narrower controller profiles. |
+| Ecosystem | No Max for Live runtime, Push equivalence, Ableton set import or Link/Link Audio. Existing Nektar/APC integrations are narrower controller profiles. |
 
 References: [Live Audio Effect Reference](https://www.ableton.com/en/live-manual/12/live-audio-effect-reference/), [Live Instrument Reference](https://www.ableton.com/en/live-manual/12/live-instrument-reference/), [MIDI Effect Reference](https://www.ableton.com/en/live-manual/12/live-midi-effect-reference/), [MIDI Tools](https://www.ableton.com/en/live-manual/12/midi-tools/), [Max for Live Devices](https://www.ableton.com/en/live-manual/12/max-for-live-devices/).
 
@@ -51,3 +51,7 @@ References: [Live Audio Effect Reference](https://www.ableton.com/en/live-manual
 5. Audio consolidation, selectable export sample rates and tempo/time-signature automation.
 
 0.52 instructions and exact limits: [Recording workflow](recording-workflow.md). Evidence is in the model, Transport, Arrangement operations, engine routing and the focused `recording_workflow` regression suite; hardware listening tests remain separate.
+
+## Local source separation · 0.53
+
+[Stems Creator](stems-creator.md) now separates a loaded file locally into vocals, drums, bass, piano and other, importing five aligned audio tracks under one group. This covers a practical separation workflow, with progress/cancel, one undo step and original preservation. It does not isolate arbitrary instruments; guitar shares Other, and bleed/artifacts remain model-dependent. This is separate from the aligned mixer-stem export added in 0.52.

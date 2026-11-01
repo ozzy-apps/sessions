@@ -682,7 +682,8 @@ DeviceBody* createBody(const DeviceContext& ctx, QWidget* parent) {
     DeviceBody* b = nullptr;
     const DeviceSpec* s = specOf(ctx.type);
     if (!s) return new GenericBody(ctx, parent);
-    if (isRackType(ctx.type)) b = createRackBody(ctx, parent);
+    if (ctx.type == DeviceType::StemsCreator) b = createStemsCreatorBody(ctx, parent);
+    else if (isRackType(ctx.type)) b = createRackBody(ctx, parent);
     else if (isGuitarType(ctx.type)) b = createGuitarBody(ctx, parent);
     else switch (s->kind) {
     case DeviceKind::Instrument:  b = createInstrumentBody(ctx, parent); break;

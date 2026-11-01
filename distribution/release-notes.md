@@ -1,13 +1,15 @@
-Sessions 0.52.0 adds three recording and Arrangement workflows:
+Sessions 0.53.0 adds **Stems Creator** and improves update checking.
 
-- **Capture MIDI** — recall the selected track's last played phrase without having enabled Record. Use **Create → Capture MIDI** or **Ctrl+Shift+C**. Capture uses a free Session slot or an Arrangement placement, with undo/redo.
-- **Bounce Track to Audio** — print an Arrangement track, group or selected range to a new audio track. The original remains editable; source activation and the new track share one undo step.
-- **Aligned stem export** — export individual tracks, groups and returns over the same range, with matching sample lengths and a timing manifest.
+- **Separate a mix locally:** load an audio file in **Audio Effects → Stems Creator**, then choose **Create Stems**. Sessions creates Vocals, Drums, Bass, Piano and Other as five aligned Arrangement tracks inside one group.
+- **Keep control:** choose CPU threads and an output folder, follow progress or cancel. The original stays intact, and the grouped import has one Undo step. Models and the native CPU runtime are bundled; no Python, account or audio upload is required.
+- **Check for Updates:** the Help menu has the explicit action. Manual checks now work when a startup check is already running and override skipped/postponed versions.
 
-Rendering keeps sidechains running, warms earlier effects before a selected range, and lets effects ring after the range without admitting later clips. Normalization streams through disk instead of holding the whole song in memory; 32-bit float WAV files retain headroom above 0 dBFS.
+Separation can contain bleed and artifacts. Guitar and remaining instruments share **Other**; this model does not isolate every instrument individually. Output is 44.1 kHz stereo float WAV. Files up to one hour are accepted, subject to available memory. [Stems Creator guide](https://github.com/ozzy-apps/sessions/blob/v0.53.0/docs/stems-creator.md).
 
-Bounce is currently Arrangement-only and post-mixer. Return effects are separate, and this update does not provide in-place bounce or a processor-suspending Freeze system. [Workflow guide](https://github.com/ozzy-apps/sessions/blob/v0.52.0/docs/recording-workflow.md) · [Feature comparison](https://github.com/ozzy-apps/sessions/blob/v0.52.0/docs/ableton-parity.md).
+Choose the `.deb`, AppImage, Flatpak bundle or Windows portable ZIP. `SHA256SUMS` covers all four downloads. Save your work and close Sessions before installing an update.
 
-Choose the `.deb`, AppImage, Flatpak bundle or Windows portable ZIP. `SHA256SUMS` lists all four downloads. Save your work and close Sessions before installing an update. The optional [Drum Collection](https://github.com/ozzy-apps/sessions/releases/tag/drum-content-v1) remains a separate download.
+**Windows:** Stems Creator requires the [Microsoft Visual C++ x64 Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist). Windows was checked under Wine; physical Windows audio/MIDI testing remains outstanding.
 
-Validation: all 36 Linux CTest suites passed, including 69 new recording checks. Those 69 checks also passed under Wine, and the AppImage, Flatpak and Windows builds each rendered a two-second stereo WAV. Windows remains an early build pending physical audio/MIDI testing; ASIO and plugin hosting are not included.
+**Validation:** all 37 native CTest suites passed. Real neural separation was verified in the Debian, AppImage, Flatpak and Windows environments, with grouped import, timing, undo/redo, persistence and cancellation checks. Live HTTPS update checks passed using native, AppImage, Flatpak and Windows Qt/TLS environments.
+
+The optional [Sessions Drum Collection](https://github.com/ozzy-apps/sessions/releases/tag/drum-content-v1) remains a separate download.

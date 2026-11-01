@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "model": "spleeter-5stems-onnx-v1",
+  "rate": 44100,
+  "fft": 4096,
+  "hop": 1024,
+  "modelFrames": 512,
+  "modelBins": 1024,
+  "models": [
+    {
+      "name": "drums",
+      "file": "spleeter-5stem-drums-logits-fp16.onnx",
+      "size": 19662464,
+      "sha256": "6f9343d65b5d56ba27d4dc0d5df026304c4437802b90d60e615063e56c7d87fe",
+      "url": "https://github.com/matthewbae/spleeter-onnx-models/releases/download/spleeter-5stems-onnx-v1/spleeter-5stem-drums-logits-fp16.onnx"
+    },
+    {
+      "name": "bass",
+      "file": "spleeter-5stem-bass-logits-fp16.onnx",
+      "size": 19662446,
+      "sha256": "a06adb692990dd3bb9aabf1cf3068b93036d1f6ae1aba68dc59a2d2230fdc650",
+      "url": "https://github.com/matthewbae/spleeter-onnx-models/releases/download/spleeter-5stems-onnx-v1/spleeter-5stem-bass-logits-fp16.onnx"
+    },
+    {
+      "name": "piano",
+      "file": "spleeter-5stem-piano-logits-fp16.onnx",
+      "size": 19662381,
+      "sha256": "0c11f8124dc5dfe60229dd8c42c003d195aeae7830c8c7b598a84b29770e2d38",
+      "url": "https://github.com/matthewbae/spleeter-onnx-models/releases/download/spleeter-5stems-onnx-v1/spleeter-5stem-piano-logits-fp16.onnx"
+    },
+    {
+      "name": "other",
+      "file": "spleeter-5stem-other-logits-fp16.onnx",
+      "size": 19662448,
+      "sha256": "9638fb7dbc8a3bdcf28d68dd1a4c0bf57d5af339d434f9ccd53d6f0c0744b039",
+      "url": "https://github.com/matthewbae/spleeter-onnx-models/releases/download/spleeter-5stems-onnx-v1/spleeter-5stem-other-logits-fp16.onnx"
+    },
+    {
+      "name": "vocals",
+      "file": "spleeter-5stem-vocals-logits-fp16.onnx",
+      "size": 19662097,
+      "sha256": "26b640cfd7f782dbc4a6de0e1f85590ce86529d7c1bff78e4c0fc4551d4d97bd",
+      "url": "https://github.com/matthewbae/spleeter-onnx-models/releases/download/spleeter-5stems-onnx-v1/spleeter-5stem-vocals-logits-fp16.onnx"
+    }
+  ],
+  "runtime": {
+    "linux": {
+      "file": "onnxruntime-linux-x64-1.31.1.tgz",
+      "size": 11413655,
+      "sha256": "c849e36a1ef3e22d4ff217b9d1ce4a3cf5b9467b975610913ae959ad5b16bdc9",
+      "library": "libonnxruntime.so.1.31.1",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.1/onnxruntime-linux-x64-1.31.1.tgz"
+    },
+    "windows": {
+      "file": "onnxruntime-win-x64-1.31.1.zip",
+      "size": 82929944,
+      "sha256": "5869e26bb25314375f2d5ef1877e3ea06b1543d6c710e6e4a1ec2f7177ab4b2c",
+      "library": "onnxruntime.dll",
+      "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.31.1/onnxruntime-win-x64-1.31.1.zip"
+    }
+  }
+}

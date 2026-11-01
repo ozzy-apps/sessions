@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(Sessions VERSION 0.52.0 LANGUAGES CXX)
+project(Sessions VERSION 0.53.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -40,6 +40,10 @@ set(SESSIONS_SOURCES
     src/core/ArrangementOps.cpp
     src/core/Transport.cpp
     src/core/MidiCapture.cpp
+    src/stems/StemsCreator.cpp
+    src/stems/StemImport.cpp
+    src/stems/ModelAssets.cpp
+    src/stems/StemsDsp.cpp
     src/core/Theme.cpp
     src/core/Grooves.cpp
     src/audio/Engine.cpp
@@ -102,6 +106,7 @@ set(SESSIONS_SOURCES
     src/ui/devices/EffectBodies.cpp
     src/ui/devices/ProductionBodies.cpp
     src/ui/devices/StudioBodies.cpp
+    src/ui/devices/StemsCreatorBody.cpp
     src/ui/devices/InstrumentBodies.cpp
     src/ui/devices/OsmiumBody.cpp
     src/ui/devices/DrumStudioBody.cpp
@@ -142,6 +147,30 @@ endif()
 
 target_compile_definitions(sessions_core PRIVATE SESSIONS_DRUM_CONTENT_DIR="${CMAKE_SOURCE_DIR}/content/drums")
 
+set(stems_assets_default "${CMAKE_SOURCE_DIR}/build/stems-assets")
+if(EXISTS "${CMAKE_SOURCE_DIR}/stems-assets/assets.json")
+    set(stems_assets_default "${CMAKE_SOURCE_DIR}/stems-assets")
+endif()
+set(SESSIONS_STEMS_ASSET_DIR "${stems_assets_default}" CACHE PATH "Verified separation models and CPU runtimes")
+target_compile_definitions(sessions_core PRIVATE SESSIONS_STEMS_ASSET_DIR="${SESSIONS_STEMS_ASSET_DIR}")
+add_executable(sessions-stems-worker src/stems/Worker.cpp src/stems/ModelAssets.cpp src/stems/StemsDsp.cpp src/stems/WaveIO.cpp src/stems/worker_resources.qrc)
+target_include_directories(sessions-stems-worker PRIVATE src/stems third_party/onnxruntime/include)
+target_link_libraries(sessions-stems-worker PRIVATE Qt6::Core ${CMAKE_DL_LIBS})
+target_compile_definitions(sessions-stems-worker PRIVATE SESSIONS_STEMS_ASSET_DIR="${SESSIONS_STEMS_ASSET_DIR}")
+install(TARGETS sessions-stems-worker RUNTIME DESTINATION bin COMPONENT Runtime)
+if(WIN32)
+    set_source_files_properties(src/stems/worker_resources.qrc PROPERTIES AUTORCC_OPTIONS "--compress-algo;zlib")
+    set(stems_platform windows)
+else()
+    set(stems_platform linux)
+endif()
+if(EXISTS "${SESSIONS_STEMS_ASSET_DIR}/assets.json")
+    install(FILES "${SESSIONS_STEMS_ASSET_DIR}/assets.json" DESTINATION share/sessions/stems COMPONENT Runtime)
+    install(DIRECTORY "${SESSIONS_STEMS_ASSET_DIR}/models" DESTINATION share/sessions/stems COMPONENT Runtime)
+    install(DIRECTORY "${SESSIONS_STEMS_ASSET_DIR}/runtime/${stems_platform}" DESTINATION share/sessions/stems/runtime COMPONENT Runtime)
+else()
+    message(WARNING "Stems assets missing: run python3 scripts/fetch-stems-assets.py before packaging")
+endif()
 add_executable(sessions src/main.cpp)
 if(WIN32)
     set_target_properties(sessions PROPERTIES WIN32_EXECUTABLE TRUE)
@@ -232,12 +261,13 @@ if(SESSIONS_BUILD_TESTS AND Qt6Test_FOUND)
         target_link_libraries(sessions_${analysis} PRIVATE sessions_core)
         add_test(NAME ${analysis} COMMAND sessions_${analysis})
     endforeach()
-    foreach(workflow IN ITEMS recording_workflow updates nektar_pads audio_routing arrangement_workflow clip_follow control_surface tempo_repair_ui warp_preferences clip_inspector apc_key25 drum_loading drum_stream)
+    foreach(workflow IN ITEMS stems_creator recording_workflow updates nektar_pads audio_routing arrangement_workflow clip_follow control_surface tempo_repair_ui warp_preferences clip_inspector apc_key25 drum_loading drum_stream)
         add_executable(sessions_${workflow} tests/${workflow}.cpp)
         target_link_libraries(sessions_${workflow} PRIVATE sessions_core Qt6::Test)
         add_test(NAME ${workflow} COMMAND sessions_${workflow})
         set_tests_properties(${workflow} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     endforeach()
+    target_sources(sessions_stems_creator PRIVATE src/stems/WaveIO.cpp)
 endif()
 
 install(TARGETS sessions RUNTIME DESTINATION bin COMPONENT Runtime)
@@ -269,6 +299,8 @@ set(SESSIONS_DEB_MAINTAINER "Ozzy <sessions@ozzy.co.nl>" CACHE STRING "Maintaine
 find_program(DPKG_DEB dpkg-deb)
 if(SESSIONS_BUILD_DEB AND DPKG_DEB)
     file(GLOB_RECURSE drum_assets CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/assets/drums/*")
+    file(GLOB_RECURSE distribution_notices CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/distribution/licenses/*")
+    file(GLOB_RECURSE stems_package_assets CONFIGURE_DEPENDS "${SESSIONS_STEMS_ASSET_DIR}/models/*" "${SESSIONS_STEMS_ASSET_DIR}/runtime/${stems_platform}/*")
     set(deb_stamp "${CMAKE_BINARY_DIR}/deb.stamp")
     add_custom_command(
         OUTPUT "${deb_stamp}"
@@ -279,7 +311,10 @@ if(SESSIONS_BUILD_DEB AND DPKG_DEB)
             -DMAINTAINER=${SESSIONS_DEB_MAINTAINER}
             -DSTAMP=${deb_stamp}
             -P ${CMAKE_SOURCE_DIR}/cmake/MakeDeb.cmake
-        DEPENDS sessions ${drum_assets}
+        DEPENDS sessions sessions-stems-worker ${drum_assets} ${distribution_notices} ${stems_package_assets}
+                ${CMAKE_SOURCE_DIR}/distribution/THIRD-PARTY.md
+                ${CMAKE_SOURCE_DIR}/distribution/nl.co.ozzy.Sessions.metainfo.xml
+                ${CMAKE_SOURCE_DIR}/distribution/stems-assets.json
                 ${CMAKE_SOURCE_DIR}/cmake/MakeDeb.cmake
                 ${CMAKE_SOURCE_DIR}/assets/sessions.desktop
                 ${CMAKE_SOURCE_DIR}/assets/sessions-mime.xml

@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "audio/TrackRender.h"
+#include "stems/StemsCreator.h"
 #include "SamplePacks.h"
 #include "RecoveryDialog.h"
 #include "core/Recovery.h"
@@ -417,6 +418,17 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
     connect(m_project, &Project::mixerChanged, this, &MainWindow::updateTitle);
     connect(m_session, &SessionView::columnsResized, this, &MainWindow::updateTitle);
     connect(m_mapper, &Mapper::changed, this, &MainWindow::updateTitle);   // mappings are saved with the set
+    auto* stems = StemsCreator::forProject(m_project, m_transport);
+    connect(stems, &StemsCreator::finished, this, [this](bool success, int groupId, const QString& error) {
+        if (!success) { if (error != "Cancelled.") m_info->show("Stems Creator", error); return; }
+        const int group = m_project->indexOfTrack(groupId);
+        if (group < 0) return;
+        selectTrack(group); showSession(false); m_arrangement->zoomToFit();
+        if (group + 1 < m_project->tracks.size() && !m_project->tracks[group + 1].arrangement.isEmpty())
+            selectClip(m_project->tracks[group + 1].arrangement.front().clip);
+        showClipView(true);
+        m_info->show("Stems Creator", "Created five grouped audio tracks. Ctrl+Z removes the import.");
+    });
     updateTitle();
 }
 
@@ -609,7 +621,7 @@ void MainWindow::buildMenus() {
 
     QMenu* help = menuBar()->addMenu("&Help");
     command(help, "Keyboard Shortcuts", QKeySequence(Qt::CTRL | Qt::Key_Slash), [this] { showShortcuts(); });
-    command(help, "Check for Updates…", {}, [this] { checkForUpdates(true); });
+    command(help, "Check for Updates", {}, [this] { checkForUpdates(true); })->setObjectName("checkForUpdatesAction");
     command(help, "Sample Packs…", {}, [this] { auto* d = new SamplePacks(this); d->setAttribute(Qt::WA_DeleteOnClose); d->open(); });
     command(help, "About Sessions", {}, [this] { QDialog* d = aboutDialog(); d->exec(); d->deleteLater(); });
 }

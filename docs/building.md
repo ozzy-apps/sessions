@@ -7,7 +7,8 @@ Sessions uses C++17, CMake and Qt 6 Widgets/Svg/Network. Windows additionally us
 On Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential cmake ninja-build qt6-base-dev qt6-svg-dev libpulse-dev libasound2-dev libsndfile1
+sudo apt install build-essential cmake ninja-build qt6-base-dev qt6-svg-dev libpulse-dev libasound2-dev libsndfile1 python3
+python3 scripts/fetch-stems-assets.py --platform linux
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel 4
 ./build/sessions
@@ -23,6 +24,7 @@ Every normal Linux build also creates a timestamped `.deb` in `dist`. Set `-DSES
 Use an MSYS2 **UCRT64** shell with GCC, CMake/Ninja, `qt6-base`, `qt6-svg`, `qt6-multimedia` and `libsndfile` from the same UCRT64 repository. The exact packages and commands are in [.github/workflows/build.yml](../.github/workflows/build.yml).
 
 ```sh
+python scripts/fetch-stems-assets.py --platform windows
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DSESSIONS_BUILD_TESTS=OFF -DSESSIONS_BUILD_DEB=OFF
 cmake --build build --parallel 4
 bash scripts/package-windows.sh
@@ -31,3 +33,5 @@ bash scripts/package-windows.sh
 The ZIP contains Sessions, shared Qt libraries, platform/TLS plugins and libsndfile/codecs. Windows uses Qt's shared audio backend and WinMM MIDI, with input selection in Preferences. Allow microphone access in Windows for recording. ASIO, WASAPI exclusive mode and Linux JACK port routing are not provided by this initial Windows backend. Nektar/APC integrations are established on Linux; Windows controller-port names and hardware behaviour need physical testing.
 
 For development, `SESSIONS_AUDIO=none` runs a silent clock, `SESSIONS_NO_UPDATES=1` suppresses the startup request, and `sessions --screenshots DIR` captures the actual UI. These do not change the normal user's preferences.
+
+Stems Creator includes a separate native worker, checksum-pinned Spleeter models and ONNX Runtime CPU. Fetch assets before configuring/package creation; CMake warns when they are absent. Python is a build-time download helper only. [Asset setup, Windows runtime prerequisite and device details](stems-creator.md).

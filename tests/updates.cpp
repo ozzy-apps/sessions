@@ -2,6 +2,8 @@
 #include "core/Theme.h"
 #include "ui/SamplePacks.h"
 #include "ui/UpdateDialog.h"
+#include "ui/MainWindow.h"
+#include <QAction>
 #include <QApplication>
 #include <QDir>
 #include <QFile>
@@ -86,6 +88,8 @@ int main(int argc, char** argv) {
     QTemporaryDir temporary;
     qputenv("XDG_CONFIG_HOME", temporary.path().toUtf8());
     qputenv("XDG_DATA_HOME", temporary.path().toUtf8());
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, temporary.path());
     QApplication app(argc, argv);
     app.setApplicationVersion("0.51.0");
     Q_INIT_RESOURCE(resources);
@@ -160,6 +164,24 @@ int main(int argc, char** argv) {
     network.body = QJsonDocument(release("v0.51.0")).toJson();
     updates.check(true);
     check(checked.wait(1000) && !checked.last()[1].toBool(), "up-to-date status");
+    network.body = QJsonDocument(release()).toJson();
+    available.clear(); checked.clear();
+    requests = network.requests;
+    updates.check(false);
+    updates.check(true);
+    check(available.wait(1000) && available.last()[1].toBool() && network.requests == requests + 1,
+          "manual click promotes an in-flight startup request and bypasses skip without a duplicate request");
+    network.status = 503;
+    checked.clear(); requests = network.requests;
+    updates.check(false); updates.check(true);
+    check(checked.wait(1000) && checked.last()[1].toBool() && network.requests == requests + 1,
+          "manual click during a startup request receives the network error instead of silence");
+    {
+        MainWindow window;
+        auto* action = window.findChild<QAction*>("checkForUpdatesAction");
+        check(action && action->text() == "Check for Updates" && action->isEnabled(),
+              "Help exposes the exact Check for Updates action");
+    }
     QFile catalog(":/content-packs.json");
     catalog.open(QIODevice::ReadOnly);
     check(SamplePacks::catalog(catalog.readAll()).size() == 1, "bundled catalog offline");

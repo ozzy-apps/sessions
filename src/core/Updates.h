@@ -40,6 +40,7 @@ class Updates : public QObject {
     QNetworkAccessManager m_network;
     QNetworkAccessManager* m_client;
     bool m_busy = false;
+    bool m_manual = false; // a manual request can promote an in-flight startup check
 };
 } // namespace sessions
 Q_DECLARE_METATYPE(sessions::ReleaseInfo)

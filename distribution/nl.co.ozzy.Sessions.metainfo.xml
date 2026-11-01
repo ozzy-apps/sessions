@@ -14,5 +14,5 @@
   <content_rating type="oars-1.1"/>
   <supports><control>keyboard</control><control>pointing</control></supports>
   <screenshots><screenshot type="default"><image>https://raw.githubusercontent.com/ozzy-apps/sessions/main/docs/screenshots/release/session.png</image><caption>Session grid and clip editor</caption></screenshot></screenshots>
-  <releases><release version="0.52.0" date="2026-11-01"><description><p>Retrospective MIDI capture, Arrangement track bounce and aligned stem exports.</p></description></release><release version="0.51.0" date="2026-10-25"><description><p>Release downloads, sample packs and optional startup update checks.</p></description></release></releases>
+  <releases><release version="0.53.0" date="2026-11-01"><description><p>Local five-stem neural separation into grouped Arrangement tracks, plus reliable manual update checks during startup.</p></description></release><release version="0.52.0" date="2026-11-01"><description><p>Retrospective MIDI capture, Arrangement track bounce and aligned stem exports.</p></description></release><release version="0.51.0" date="2026-10-25"><description><p>Release downloads, sample packs and optional startup update checks.</p></description></release></releases>
 </component>

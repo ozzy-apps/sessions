@@ -24,7 +24,11 @@ Start with a beat. Add a bassline. Try a different scene. Sessions lets you buil
 
 **Play with ideas.** Launch clips and scenes, sketch MIDI parts, shape audio loops and turn a live session into an arrangement.
 
-**Find your sound.** Explore Osmium's morphing wavetables, build a kit in Drum Studio, layer samples or plug in a guitar. There are 63 built-in instruments and effects, from EQ and dynamics to pitch processing, modulation and reverb.
+**Find your sound.** Explore Osmium's morphing wavetables, build a kit in Drum Studio, layer samples or plug in a guitar. There are 64 built-in instruments and effects, from EQ and dynamics to pitch processing, modulation and reverb.
+
+**Take a mix apart.** Load an audio file in Stems Creator and get vocals, drums, bass, piano and other sounds on five grouped tracks. Processing stays on your computer. [How it works](docs/stems-creator.md).
+
+![Stems Creator: local separation into grouped audio tracks](docs/screenshots/release/stems.png)
 
 **Record and finish.** Capture audio and MIDI, recall a phrase you played before pressing Record, edit takes and automate your devices. Bounce tracks to audio or export aligned stems for the next stage of your mix. Recovery snapshots and project backups help keep the work safe.
 

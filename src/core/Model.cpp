@@ -2016,6 +2016,7 @@ static QVector<Note> beatNotes() {
 }
 
 void Project::clearSet() {
+    emit aboutToReset();
     tracks.clear();
     returns.clear();
     master.devices.clear();

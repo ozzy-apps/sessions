@@ -9,6 +9,7 @@
 namespace sessions::devui {
 
 DeviceBody* createInstrumentBody(const DeviceContext& ctx, QWidget* parent);   // nullptr: none of its own
+DeviceBody* createStemsCreatorBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createEffectBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createProductionBody(const DeviceContext& ctx, QWidget* parent);
 DeviceBody* createStudioBody(const DeviceContext& ctx, QWidget* parent);

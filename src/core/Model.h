@@ -653,6 +653,7 @@ public:
     void      restoreEditState(const EditState& s, bool preserveLooperTransport = false);
 
 signals:
+    void aboutToReset(); // asynchronous imports must not survive New/Open
     void structureChanged();   // tracks / scenes / slots / devices / clips added or removed
     void clipChanged();        // notes, names, lengths, launch settings
     void mixerChanged();       // volume, pan, sends, mute, solo, arm

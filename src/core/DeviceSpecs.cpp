@@ -702,6 +702,9 @@ std::vector<DeviceSpec> build() {
     };
 
     appendProductionSpecs(s);
+    s.push_back({"Stems Creator", T::StemsCreator, K::AudioEffect,
+                 {whole("Threads", 1, 8, 1. / 7, U::None)},
+                 "Load audio and separate vocals, drums, bass, piano and other into grouped Arrangement tracks. Local offline processing; live audio passes unchanged."});
 
     // Presets: a device with other defaults (the browser's Sounds).
     std::vector<Preset> presets = {

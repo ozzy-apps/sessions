@@ -33,6 +33,7 @@ enum class DeviceType {
     StereoWidth,
     ParametricEQ, Spectrum, MultibandDynamics, Lfo, EnvelopeFollower, Shaper,
     Shifter, PitchCorrector, HybridReverb, Looper, Multisampler,
+    StemsCreator,
 };
 
 namespace parametric {
